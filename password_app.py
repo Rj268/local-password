@@ -27,6 +27,9 @@ import random_password_generator as generator
 METER_CAP_BITS = 256
 MAX_NAME_LENGTH = 80
 MIN_PASSPHRASE_LENGTH = 8
+PASSPHRASE_LOSS_WARNING = (
+    "If you lose this passphrase, your saved passwords cannot be recovered."
+)
 # scrypt memory is 128 * N * r bytes. 2**15 is 32 MB, slow enough to resist guessing.
 SCRYPT_N = 2**15
 SCRYPT_R = 8
@@ -839,6 +842,11 @@ class PasswordWindow:
         actions.pack_start(self.save_button, True, True, 0)
         result.pack_start(actions, False, False, 0)
 
+        recovery = gtk.Label(label=PASSPHRASE_LOSS_WARNING, xalign=0)
+        recovery.set_line_wrap(True)
+        recovery.get_style_context().add_class("danger")
+        result.pack_start(recovery, False, False, 0)
+
         self.status = gtk.Label(
             label="Generate a password. Name it, then save it.",
             xalign=0,
@@ -1079,7 +1087,8 @@ class PasswordWindow:
             self.saved_heading.set_text("Saved")
             self.saved_heading.show()
             self.manager_message.set_text(
-                "Saved passwords are locked. One passphrase opens all of them."
+                "Saved passwords are locked. One passphrase opens all of them. "
+                + PASSPHRASE_LOSS_WARNING
             )
             self.manager_message.show()
             return
@@ -1169,8 +1178,7 @@ class PasswordWindow:
         content.set_spacing(8)
         if confirm:
             message = (
-                "Choose a passphrase to lock saved passwords. "
-                "It is not stored. Without it, those passwords cannot be opened."
+                "Choose a passphrase to lock saved passwords. It is not stored."
             )
         else:
             message = "Enter the passphrase to unlock saved passwords."
@@ -1178,6 +1186,12 @@ class PasswordWindow:
         label.set_line_wrap(True)
         label.set_max_width_chars(42)
         content.pack_start(label, False, False, 0)
+        if confirm:
+            warning = gtk.Label(label=PASSPHRASE_LOSS_WARNING, xalign=0)
+            warning.set_line_wrap(True)
+            warning.set_max_width_chars(42)
+            warning.get_style_context().add_class("danger")
+            content.pack_start(warning, False, False, 0)
         entry = gtk.Entry()
         entry.set_visibility(False)
         entry.set_input_purpose(gtk.InputPurpose.PASSWORD)

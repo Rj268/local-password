@@ -258,6 +258,41 @@ class EnterpriseEntropyTests(unittest.TestCase):
         self.assertEqual(len(result.text.split()), 20)
 
 
+class PassphraseWarningTests(unittest.TestCase):
+    def test_warning_says_a_lost_passphrase_cannot_be_recovered(self) -> None:
+        self.assertIn("cannot be recovered", password_app.PASSPHRASE_LOSS_WARNING)
+        self.assertIn("lose this passphrase", password_app.PASSPHRASE_LOSS_WARNING)
+
+    @unittest.skipUnless(os.environ.get("DISPLAY"), "needs a graphical session")
+    def test_new_passphrase_dialog_shows_the_warning(self) -> None:
+        import gi
+
+        gi.require_version("Gtk", "3.0")
+        gi.require_version("Gdk", "3.0")
+        from gi.repository import Gdk, Gtk
+
+        password_app.install_styles(Gtk, Gdk)
+        window = password_app.PasswordWindow(Gtk, Gdk)
+        seen: list[str] = []
+
+        def capture_and_cancel(dialog):
+            def walk(widget) -> None:
+                if isinstance(widget, Gtk.Label):
+                    seen.append(widget.get_text())
+                for child in getattr(widget, "get_children", lambda: [])():
+                    walk(child)
+
+            walk(dialog.get_content_area())
+            return Gtk.ResponseType.CANCEL
+
+        with patch.object(Gtk.Dialog, "run", capture_and_cancel):
+            self.assertIsNone(window._prompt_passphrase(confirm=True))
+        self.assertIn(password_app.PASSPHRASE_LOSS_WARNING, seen)
+        window.window.destroy()
+        while Gtk.events_pending():
+            Gtk.main_iteration_do(False)
+
+
 class ClipboardTests(unittest.TestCase):
     def test_xclip_receives_the_password_on_stdin(self) -> None:
         with patch("password_app.shutil.which", return_value="/usr/bin/xclip"), patch(
