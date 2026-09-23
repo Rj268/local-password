@@ -161,6 +161,57 @@ class SavedPasswordTests(unittest.TestCase):
             self.assertEqual(password_app.load_saved_passwords(path), [])
 
 
+class VaultTests(unittest.TestCase):
+    def _items(self) -> list[password_app.SavedPassword]:
+        return [password_app.SavedPassword("Email", 'p@ss "word"\\')]
+
+    def test_vault_round_trip_hides_the_password(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "saved.vault"
+            material = password_app.new_vault_key("a-long-secret", n=2**14)
+            password_app.write_vault(material, self._items(), path)
+            blob = path.read_bytes()
+            self.assertNotIn(b"Email", blob)
+            self.assertNotIn(b"word", blob)
+            self.assertNotIn(b"a-long-secret", blob)
+            opened, items = password_app.open_vault("a-long-secret", path)
+            self.assertEqual(items, self._items())
+            self.assertEqual(opened.n, 2**14)
+            self.assertGreaterEqual(password_app.SCRYPT_N, 2**15)
+            mode = stat.S_IMODE(path.stat().st_mode)
+            self.assertEqual(mode & 0o077, 0)
+
+    def test_wrong_passphrase_does_not_unlock(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "saved.vault"
+            material = password_app.new_vault_key("a-long-secret", n=2**14)
+            password_app.write_vault(material, self._items(), path)
+            with self.assertRaises(ValueError) as caught:
+                password_app.open_vault("another-secret", path)
+            self.assertIn("did not unlock", str(caught.exception))
+            tweaked = bytearray(path.read_bytes())
+            tweaked[-1] ^= 0x01
+            path.write_bytes(bytes(tweaked))
+            with self.assertRaises(ValueError):
+                password_app.open_vault("a-long-secret", path)
+
+    def test_plaintext_file_can_be_erased(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            plain = Path(directory) / "saved.txt"
+            password_app.store_saved_passwords(self._items(), plain)
+            vault = Path(directory) / "saved.vault"
+            material = password_app.new_vault_key("a-long-secret", n=2**14)
+            password_app.write_vault(material, password_app.load_saved_passwords(plain), vault)
+            password_app.erase_saved_file(plain)
+            self.assertFalse(plain.exists())
+            _key, items = password_app.open_vault("a-long-secret", vault)
+            self.assertEqual(items, self._items())
+
+    def test_short_passphrase_is_refused(self) -> None:
+        with self.assertRaises(ValueError):
+            password_app.new_vault_key("short")
+
+
 class ClipboardTests(unittest.TestCase):
     def test_xclip_receives_the_password_on_stdin(self) -> None:
         with patch("password_app.shutil.which", return_value="/usr/bin/xclip"), patch(

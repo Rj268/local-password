@@ -17,10 +17,20 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+
 import random_password_generator as generator
 
 METER_CAP_BITS = 128
 MAX_NAME_LENGTH = 80
+MIN_PASSPHRASE_LENGTH = 8
+# scrypt memory is 128 * N * r bytes. 2**15 is 32 MB, slow enough to resist guessing.
+SCRYPT_N = 2**15
+SCRYPT_R = 8
+SCRYPT_P = 1
+VAULT_MAGIC = b"LPV1"
 
 STYLES = """
 window.app {
@@ -341,6 +351,153 @@ def store_saved_passwords(passwords: list[SavedPassword], path: Path | None = No
     return path
 
 
+@dataclass(frozen=True)
+class VaultKey:
+    key: bytes
+    salt: bytes
+    n: int
+    r: int
+    p: int
+
+
+def vault_path() -> Path:
+    """Encrypted file that holds saved passwords."""
+    return saved_passwords_path().with_name("saved.vault")
+
+
+def require_passphrase(passphrase: str) -> str:
+    if len(passphrase) < MIN_PASSPHRASE_LENGTH:
+        raise ValueError(
+            f"Use at least {MIN_PASSPHRASE_LENGTH} characters for the passphrase."
+        )
+    return passphrase
+
+
+def new_vault_key(passphrase: str, *, n: int = SCRYPT_N) -> VaultKey:
+    """Derive a key. The passphrase itself is not kept."""
+    require_passphrase(passphrase)
+    salt = os.urandom(16)
+    return VaultKey(_derive_key(passphrase, salt, n, SCRYPT_R, SCRYPT_P), salt, n, SCRYPT_R, SCRYPT_P)
+
+
+def _derive_key(passphrase: str, salt: bytes, n: int, r: int, p: int) -> bytes:
+    if r != SCRYPT_R or p != SCRYPT_P or n < 2**14 or n > 2**16 or n & (n - 1):
+        raise ValueError("The saved password file is damaged.")
+    kdf = Scrypt(salt=salt, length=32, n=n, r=r, p=p)
+    return kdf.derive(passphrase.encode("utf-8"))
+
+
+def _encode_saved(items: list[SavedPassword]) -> bytes:
+    payload = [
+        {"name": clean_name(item.name), "password": _password_line(item.password)}
+        for item in items
+    ]
+    return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+
+def _decode_saved(raw: bytes) -> list[SavedPassword]:
+    try:
+        parsed = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("The saved password file is damaged.") from exc
+    if not isinstance(parsed, list):
+        raise ValueError("The saved password file is damaged.")
+    saved: list[SavedPassword] = []
+    used: set[str] = set()
+    for entry in parsed:
+        if not isinstance(entry, dict) or not isinstance(entry.get("name"), str) or not isinstance(entry.get("password"), str):
+            raise ValueError("The saved password file is damaged.")
+        try:
+            item = SavedPassword(clean_name(entry["name"]), _password_line(entry["password"]))
+        except ValueError as exc:
+            raise ValueError("The saved password file is damaged.") from exc
+        if item.name in used:
+            continue
+        used.add(item.name)
+        saved.append(item)
+    return saved
+
+
+def write_vault(material: VaultKey, items: list[SavedPassword], path: Path | None = None) -> Path:
+    """Encrypt saved passwords. A later read needs the same passphrase."""
+    path = vault_path() if path is None else path
+    directory = path.parent
+    directory.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(directory, 0o700)
+    except OSError:
+        pass
+    if path.is_symlink():
+        raise ValueError("The saved password file is a symbolic link.")
+    header = (
+        VAULT_MAGIC
+        + material.n.to_bytes(4, "big")
+        + material.r.to_bytes(4, "big")
+        + material.p.to_bytes(4, "big")
+        + material.salt
+    )
+    nonce = os.urandom(12)
+    ciphertext = AESGCM(material.key).encrypt(nonce, _encode_saved(items), header)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+        os.write(descriptor, header + nonce + ciphertext)
+    finally:
+        os.close(descriptor)
+    return path
+
+
+def open_vault(passphrase: str, path: Path | None = None) -> tuple[VaultKey, list[SavedPassword]]:
+    """Unlock saved passwords. A wrong passphrase raises ValueError."""
+    if len(passphrase) < MIN_PASSPHRASE_LENGTH:
+        raise ValueError("That passphrase did not unlock the saved passwords.")
+    path = vault_path() if path is None else path
+    if path.is_symlink():
+        raise ValueError("The saved password file is a symbolic link.")
+    if not path.is_file():
+        raise ValueError("The saved password file is damaged.")
+    blob = path.read_bytes()
+    if len(blob) < 44 + 16 or not blob.startswith(VAULT_MAGIC):
+        raise ValueError("The saved password file is damaged.")
+    n = int.from_bytes(blob[4:8], "big")
+    r = int.from_bytes(blob[8:12], "big")
+    p = int.from_bytes(blob[12:16], "big")
+    salt = blob[16:32]
+    nonce = blob[32:44]
+    ciphertext = blob[44:]
+    header = blob[:32]
+    try:
+        key = _derive_key(passphrase, salt, n, r, p)
+        raw = AESGCM(key).decrypt(nonce, ciphertext, header)
+    except InvalidTag as exc:
+        raise ValueError("That passphrase did not unlock the saved passwords.") from exc
+    except ValueError as exc:
+        raise ValueError("The saved password file is damaged.") from exc
+    return VaultKey(key, salt, n, r, p), _decode_saved(raw)
+
+
+def erase_saved_file(path: Path) -> None:
+    """Overwrite a leftover plaintext file, then delete it."""
+    if not path.exists():
+        return
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("The saved password file is a symbolic link.")
+    size = path.stat().st_size
+    flags = os.O_WRONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags)
+    try:
+        os.write(descriptor, b"\0" * size)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    path.unlink()
+
+
 def copy_with_xclip(text: str) -> bool:
     """Copy text by piping it to xclip. The password is not a command argument."""
     if shutil.which("xclip") is None:
@@ -434,7 +591,7 @@ class PasswordWindow:
         title.get_style_context().add_class("title")
         lede = gtk.Label(
             label=(
-                "Generate it here, then copy it. Save it with a name so you know what it was for after you close the window."
+                "Generate it here, then copy it. Save it with a name. A passphrase locks saved passwords, and they stay hidden until you unlock them."
             ),
             xalign=0,
         )
@@ -637,6 +794,13 @@ class PasswordWindow:
         self.status.get_style_context().add_class("hint")
         result.pack_start(self.status, False, False, 0)
 
+        self.lock_button = gtk.Button(label="Unlock")
+        self.lock_button.get_style_context().add_class("primary")
+        self.lock_button.set_no_show_all(True)
+        self.lock_button.hide()
+        self.lock_button.connect("clicked", self.on_lock_toggle)
+        result.pack_start(self.lock_button, False, False, 0)
+
         self.saved_heading = gtk.Label(label="Saved", xalign=0)
         self.saved_heading.get_style_context().add_class("eyebrow")
         self.saved_heading.set_no_show_all(True)
@@ -655,7 +819,9 @@ class PasswordWindow:
         self.saved: list[SavedPassword] = []
         self.showing_saved = False
         self.save_ready = False
-        self._load_saved()
+        self.locked = False
+        self.vault_key: VaultKey | None = None
+        self._prepare_saved()
 
     def _labeled(self, caption: str, control):
         row = self.gtk.Box(orientation=self.gtk.Orientation.VERTICAL, spacing=4)
@@ -773,16 +939,25 @@ class PasswordWindow:
         else:
             self.status.set_text("Copy failed.")
 
-    def _load_saved(self) -> None:
+    def _prepare_saved(self) -> None:
+        """Leave saved passwords hidden until the passphrase unlocks them."""
+        self.vault_key = None
+        self.saved = []
+        self.showing_saved = False
+        self.locked = False
+        vault = vault_path()
+        plain = saved_passwords_path()
         try:
-            self.saved = load_saved_passwords()
+            if vault.is_symlink() or (plain.is_symlink() and not vault.exists()):
+                raise ValueError("The saved password file is a symbolic link.")
+            if vault.exists() or (plain.exists() and plain.is_file()):
+                self.locked = True
+                self.status.set_text("Saved passwords are locked.")
         except ValueError as exc:
-            self.saved = []
+            self.locked = True
             self.status.set_text(str(exc))
-            self._refresh_saved_rows()
-            return
         self._refresh_saved_rows()
-        self._show_saved_overview()
+        self._update_lock_button()
 
     def _refresh_saved_rows(self) -> None:
         for child in list(self.saved_box.get_children()):
@@ -842,6 +1017,148 @@ class PasswordWindow:
         self.bits.set_text("Kept after close")
         self.copy_button.set_sensitive(True)
         self.status.set_text("Saved on this computer.")
+        self._update_lock_button()
+
+    def _update_lock_button(self) -> None:
+        style = self.lock_button.get_style_context()
+        if self.vault_key is not None:
+            self.lock_button.set_label("Lock")
+            style.remove_class("primary")
+            style.add_class("secondary")
+            self.lock_button.show()
+            return
+        if self.locked:
+            self.lock_button.set_label("Unlock")
+            style.add_class("primary")
+            style.remove_class("secondary")
+            self.lock_button.show()
+            return
+        self.lock_button.hide()
+
+    def _prompt_passphrase(self, *, confirm: bool) -> str | None:
+        gtk = self.gtk
+        dialog = gtk.Dialog(title="Local Password", transient_for=self.window, modal=True)
+        dialog.add_button("Cancel", gtk.ResponseType.CANCEL)
+        dialog.add_button("Continue", gtk.ResponseType.OK)
+        dialog.set_default_response(gtk.ResponseType.OK)
+        content = dialog.get_content_area()
+        content.set_margin_top(16)
+        content.set_margin_bottom(16)
+        content.set_margin_start(16)
+        content.set_margin_end(16)
+        content.set_spacing(8)
+        if confirm:
+            message = (
+                "Choose a passphrase to lock saved passwords. "
+                "It is not stored. Without it, those passwords cannot be opened."
+            )
+        else:
+            message = "Enter the passphrase to unlock saved passwords."
+        label = gtk.Label(label=message, xalign=0)
+        label.set_line_wrap(True)
+        label.set_max_width_chars(42)
+        content.pack_start(label, False, False, 0)
+        entry = gtk.Entry()
+        entry.set_visibility(False)
+        entry.set_input_purpose(gtk.InputPurpose.PASSWORD)
+        entry.set_placeholder_text("Passphrase")
+        content.pack_start(entry, False, False, 0)
+        confirm_entry = None
+        if confirm:
+            confirm_entry = gtk.Entry()
+            confirm_entry.set_visibility(False)
+            confirm_entry.set_input_purpose(gtk.InputPurpose.PASSWORD)
+            confirm_entry.set_placeholder_text("Repeat the passphrase")
+            content.pack_start(confirm_entry, False, False, 0)
+        problem = gtk.Label(label="", xalign=0)
+        problem.set_line_wrap(True)
+        problem.get_style_context().add_class("danger")
+        content.pack_start(problem, False, False, 0)
+        dialog.show_all()
+        entry.grab_focus()
+        entry.connect("activate", lambda *_args: dialog.response(gtk.ResponseType.OK))
+        while True:
+            response = dialog.run()
+            if response != gtk.ResponseType.OK:
+                dialog.destroy()
+                return None
+            first = entry.get_text()
+            second = confirm_entry.get_text() if confirm_entry is not None else first
+            if len(first) < MIN_PASSPHRASE_LENGTH:
+                problem.set_text(
+                    f"Use at least {MIN_PASSPHRASE_LENGTH} characters for the passphrase."
+                )
+                continue
+            if first != second:
+                problem.set_text("Those passphrases do not match.")
+                continue
+            dialog.destroy()
+            return first
+
+    def _ensure_vault_key(self) -> bool:
+        if self.vault_key is not None:
+            return True
+        vault = vault_path()
+        plain = saved_passwords_path()
+        try:
+            if vault.exists():
+                phrase = self._prompt_passphrase(confirm=False)
+                if phrase is None:
+                    self.status.set_text("Not saved. Saved passwords stay locked.")
+                    return False
+                material, items = open_vault(phrase)
+                self.vault_key = material
+                self.saved = items
+                self.locked = False
+                return True
+            phrase = self._prompt_passphrase(confirm=True)
+            if phrase is None:
+                self.status.set_text("Not saved. A passphrase is what locks it.")
+                return False
+            items = load_saved_passwords(plain) if plain.exists() and plain.is_file() else []
+            material = new_vault_key(phrase)
+            write_vault(material, items)
+            if plain.exists():
+                erase_saved_file(plain)
+            self.vault_key = material
+            self.saved = items
+            self.locked = False
+            return True
+        except ValueError as exc:
+            self.status.set_text(str(exc))
+            return False
+        except OSError:
+            self.status.set_text("Could not lock the saved passwords.")
+            return False
+
+    def on_lock_toggle(self, _button) -> None:
+        if self.vault_key is not None:
+            self._lock_saved()
+            return
+        if not self._ensure_vault_key():
+            self._update_lock_button()
+            return
+        self._refresh_saved_rows()
+        self._show_saved_overview()
+        self._update_lock_button()
+
+    def _lock_saved(self) -> None:
+        self.vault_key = None
+        self.saved = []
+        self.locked = vault_path().exists() or saved_passwords_path().exists()
+        self._refresh_saved_rows()
+        if self.showing_saved:
+            self.current = ""
+            self.buffer.set_text("")
+            self.copy_button.set_sensitive(False)
+            self.strength.set_text("Result")
+            self.bits.set_text("Waiting to generate")
+            self.meter.set_fraction(0)
+            self.showing_saved = False
+            self.save_ready = False
+            self.save_button.set_sensitive(False)
+        self.status.set_text("Saved passwords are locked.")
+        self._update_lock_button()
 
     def on_copy_text(self, text: str) -> None:
         if not text:
@@ -864,8 +1181,15 @@ class PasswordWindow:
             return
         fresh = [line for line in self.current.splitlines() if line]
         try:
-            updated = remember_named(self.saved, self.name_entry.get_text(), fresh)
-            store_saved_passwords(updated)
+            label = clean_name(self.name_entry.get_text())
+        except ValueError as exc:
+            self.status.set_text(str(exc))
+            return
+        if not self._ensure_vault_key():
+            return
+        try:
+            updated = remember_named(self.saved, label, fresh)
+            write_vault(self.vault_key, updated)
         except ValueError as exc:
             self.status.set_text(str(exc))
             return
@@ -873,14 +1197,18 @@ class PasswordWindow:
             self.status.set_text("Could not save the password.")
             return
         self.saved = updated
+        self.locked = False
         self._refresh_saved_rows()
-        label = clean_name(self.name_entry.get_text())
+        self._update_lock_button()
         self.status.set_text(f"Saved as {label}.")
 
     def on_remove(self, name: str) -> None:
+        if self.vault_key is None:
+            self.status.set_text("Saved passwords are locked.")
+            return
         updated = [item for item in self.saved if item.name != name]
         try:
-            store_saved_passwords(updated)
+            write_vault(self.vault_key, updated)
         except ValueError as exc:
             self.status.set_text(str(exc))
             return
