@@ -8,6 +8,7 @@ The app does not listen on a network port.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import string
@@ -19,6 +20,7 @@ from pathlib import Path
 import random_password_generator as generator
 
 METER_CAP_BITS = 128
+MAX_NAME_LENGTH = 80
 
 STYLES = """
 window.app {
@@ -45,6 +47,10 @@ window.app {
 }
 .lede, .hint, .footer, .caption {
   color: #5f584e;
+}
+.saved-name {
+  font-weight: 700;
+  color: #1c1915;
 }
 .strength.strong { color: #0e6b52; font-weight: 700; }
 .strength.weak { color: #8a4b08; font-weight: 700; }
@@ -197,6 +203,12 @@ def generate(
     )
 
 
+@dataclass(frozen=True)
+class SavedPassword:
+    name: str
+    password: str
+
+
 def saved_passwords_path() -> Path:
     """Per-user file for passwords the person chose to keep."""
     data_home = os.environ.get("XDG_DATA_HOME")
@@ -204,8 +216,50 @@ def saved_passwords_path() -> Path:
     return root / "local-password" / "saved.txt"
 
 
-def load_saved_passwords(path: Path | None = None) -> list[str]:
-    """Read passwords the person saved. A missing file means none are saved."""
+def clean_name(name: str) -> str:
+    """Collapse a purpose label to one short line."""
+    if "\n" in name or "\r" in name:
+        raise ValueError("The name must be a single line.")
+    cleaned = " ".join(name.split())
+    if not cleaned:
+        raise ValueError("Name this password so you can recognize it later.")
+    if len(cleaned) > MAX_NAME_LENGTH:
+        raise ValueError(f"The name must be {MAX_NAME_LENGTH} characters or fewer.")
+    return cleaned
+
+
+def _password_line(password: str) -> str:
+    if not password or "\n" in password or "\r" in password:
+        raise ValueError("A saved password must be a single line.")
+    return password
+
+
+def _legacy_name(used: set[str]) -> str:
+    name = "Untitled"
+    number = 2
+    while name in used:
+        name = f"Untitled {number}"
+        number += 1
+    return name
+
+
+def _record_from_line(line: str, used: set[str]) -> SavedPassword:
+    try:
+        parsed = json.loads(line)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, dict) and isinstance(parsed.get("name"), str) and isinstance(parsed.get("password"), str):
+        item = SavedPassword(clean_name(parsed["name"]), _password_line(parsed["password"]))
+    else:
+        item = SavedPassword(_legacy_name(used), _password_line(line))
+    return item
+
+
+def load_saved_passwords(path: Path | None = None) -> list[SavedPassword]:
+    """Read named passwords. A missing file means none are saved.
+
+    Older files stored one password per line. Those load with the name Untitled.
+    """
     path = saved_passwords_path() if path is None else path
     if path.is_symlink():
         raise ValueError("The saved password file is a symbolic link.")
@@ -213,27 +267,59 @@ def load_saved_passwords(path: Path | None = None) -> list[str]:
         return []
     if not path.is_file():
         raise ValueError("The saved password file is not a regular file.")
-    text = path.read_text(encoding="utf-8")
-    return [line for line in text.splitlines() if line]
-
-
-def remember_passwords(existing: list[str], fresh: list[str]) -> list[str]:
-    """Put newly saved passwords first and keep a single copy of each."""
-    saved: list[str] = []
-    for password in list(fresh) + list(existing):
-        if not password or "\n" in password or "\r" in password:
-            raise ValueError("A saved password must be a single line.")
-        if password not in saved:
-            saved.append(password)
+    used: set[str] = set()
+    saved: list[SavedPassword] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line:
+            continue
+        item = _record_from_line(line, used)
+        if item.name in used:
+            continue
+        used.add(item.name)
+        saved.append(item)
     return saved
 
 
-def store_saved_passwords(passwords: list[str], path: Path | None = None) -> Path:
-    """Write saved passwords so only the current user can read the file."""
+def remember_named(
+    existing: list[SavedPassword],
+    name: str,
+    passwords: list[str],
+) -> list[SavedPassword]:
+    """Save these passwords under a name. The same name replaces the previous one."""
+    label = clean_name(name)
+    if not passwords:
+        raise ValueError("There is no password to save.")
+    if len(passwords) == 1:
+        fresh = [SavedPassword(label, _password_line(passwords[0]))]
+    else:
+        extra = len(str(len(passwords))) + 1
+        if len(label) + extra > MAX_NAME_LENGTH:
+            raise ValueError(f"The name must be {MAX_NAME_LENGTH - extra} characters or fewer for this many passwords.")
+        fresh = [
+            SavedPassword(f"{label} {index}", _password_line(password))
+            for index, password in enumerate(passwords, start=1)
+        ]
+    replaced = {item.name for item in fresh}
+    replaced.add(label)
+    kept = [item for item in existing if item.name not in replaced]
+    return fresh + kept
+
+
+def saved_display(items: list[SavedPassword]) -> str:
+    """Show each name above its password."""
+    return "\n\n".join(f"{item.name}\n{item.password}" for item in items)
+
+
+def store_saved_passwords(passwords: list[SavedPassword], path: Path | None = None) -> Path:
+    """Write named passwords so only the current user can read the file."""
     path = saved_passwords_path() if path is None else path
-    for password in passwords:
-        if not password or "\n" in password or "\r" in password:
-            raise ValueError("A saved password must be a single line.")
+    lines = [
+        json.dumps(
+            {"name": clean_name(item.name), "password": _password_line(item.password)},
+            ensure_ascii=False,
+        )
+        for item in passwords
+    ]
     directory = path.parent
     directory.mkdir(parents=True, exist_ok=True)
     try:
@@ -248,7 +334,7 @@ def store_saved_passwords(passwords: list[str], path: Path | None = None) -> Pat
     descriptor = os.open(path, flags, 0o600)
     try:
         os.fchmod(descriptor, 0o600)
-        payload = "".join(f"{password}\n" for password in passwords).encode("utf-8")
+        payload = "".join(f"{line}\n" for line in lines).encode("utf-8")
         os.write(descriptor, payload)
     finally:
         os.close(descriptor)
@@ -348,7 +434,7 @@ class PasswordWindow:
         title.get_style_context().add_class("title")
         lede = gtk.Label(
             label=(
-                "Generate it here, then copy it. Save keeps it on this computer after you close the window."
+                "Generate it here, then copy it. Save it with a name so you know what it was for after you close the window."
             ),
             xalign=0,
         )
@@ -515,6 +601,20 @@ class PasswordWindow:
         scroller.add(self.view)
         result.pack_start(scroller, True, True, 0)
 
+        name_box = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=4)
+        name_label = gtk.Label(label="Name", xalign=0)
+        self.name_entry = gtk.Entry()
+        self.name_entry.set_placeholder_text("Email, bank, router")
+        self.name_entry.set_max_length(MAX_NAME_LENGTH)
+        self.name_entry.connect("activate", self.on_save)
+        name_hint = gtk.Label(label="What this password is for.", xalign=0)
+        name_hint.set_line_wrap(True)
+        name_hint.get_style_context().add_class("hint")
+        name_box.pack_start(name_label, False, False, 0)
+        name_box.pack_start(self.name_entry, False, False, 0)
+        name_box.pack_start(name_hint, False, False, 0)
+        result.pack_start(name_box, False, False, 0)
+
         actions = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
         actions.set_homogeneous(True)
         self.copy_button = gtk.Button(label="Copy")
@@ -530,7 +630,7 @@ class PasswordWindow:
         result.pack_start(actions, False, False, 0)
 
         self.status = gtk.Label(
-            label="Generate a password. Save keeps it after you close.",
+            label="Generate a password. Name it, then save it.",
             xalign=0,
         )
         self.status.set_line_wrap(True)
@@ -552,7 +652,9 @@ class PasswordWindow:
         self.saved_scroll.hide()
         self.saved_scroll.add(self.saved_box)
         result.pack_start(self.saved_scroll, False, False, 0)
-        self.saved: list[str] = []
+        self.saved: list[SavedPassword] = []
+        self.showing_saved = False
+        self.save_ready = False
         self._load_saved()
 
     def _labeled(self, caption: str, control):
@@ -633,6 +735,8 @@ class PasswordWindow:
             self.set_note(str(exc))
             return
         self.current = result.text
+        self.showing_saved = False
+        self.save_ready = True
         self.buffer.set_text(result.text)
         self.strength.set_text(result.label)
         strength_style = self.strength.get_style_context()
@@ -649,7 +753,7 @@ class PasswordWindow:
         self.set_note(result.note)
         self.copy_button.set_sensitive(True)
         self.save_button.set_sensitive(True)
-        self.status.set_text("In this window only, until you save it.")
+        self.status.set_text("Name it, then save it. Otherwise it is gone when you close.")
 
     def on_copy(self, _button) -> None:
         if not self.current:
@@ -678,15 +782,7 @@ class PasswordWindow:
             self._refresh_saved_rows()
             return
         self._refresh_saved_rows()
-        if not self.saved:
-            return
-        self.current = "\n".join(self.saved)
-        self.buffer.set_text(self.current)
-        self.strength.set_text("Saved")
-        self.bits.set_text("Kept after close")
-        self.copy_button.set_sensitive(True)
-        self.save_button.set_sensitive(True)
-        self.status.set_text("Saved on this computer.")
+        self._show_saved_overview()
 
     def _refresh_saved_rows(self) -> None:
         for child in list(self.saved_box.get_children()):
@@ -697,31 +793,78 @@ class PasswordWindow:
             return
         self.saved_heading.show()
         self.saved_scroll.show()
-        for password in self.saved:
-            self.saved_box.pack_start(self._saved_row(password), False, False, 0)
+        for item in self.saved:
+            self.saved_box.pack_start(self._saved_row(item), False, False, 0)
         self.saved_box.show_all()
 
-    def _saved_row(self, password: str):
+    def _saved_row(self, item: SavedPassword):
         gtk = self.gtk
         row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
-        label = gtk.Label(label=password, xalign=0)
-        label.set_line_wrap(True)
-        label.set_selectable(True)
-        label.set_hexpand(True)
-        label.get_style_context().add_class("hint")
+        text = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=2)
+        name = gtk.Label(label=item.name, xalign=0)
+        name.set_halign(gtk.Align.START)
+        name.get_style_context().add_class("saved-name")
+        secret = gtk.Label(label=item.password, xalign=0)
+        secret.set_line_wrap(True)
+        secret.set_selectable(True)
+        secret.set_halign(gtk.Align.START)
+        secret.get_style_context().add_class("hint")
+        text.pack_start(name, False, False, 0)
+        text.pack_start(secret, False, False, 0)
+        text.set_hexpand(True)
+        copy = gtk.Button(label="Copy")
+        copy.get_style_context().add_class("primary")
+        copy.connect("clicked", lambda *_args, password=item.password: self.on_copy_text(password))
         remove = gtk.Button(label="Remove")
         remove.get_style_context().add_class("secondary")
-        remove.connect("clicked", lambda *_args, item=password: self.on_remove(item))
-        row.pack_start(label, True, True, 0)
+        remove.connect("clicked", lambda *_args, label=item.name: self.on_remove(label))
+        row.pack_start(text, True, True, 0)
+        row.pack_start(copy, False, False, 0)
         row.pack_start(remove, False, False, 0)
         return row
 
+    def _show_saved_overview(self) -> None:
+        self.showing_saved = True
+        self.save_ready = False
+        self.save_button.set_sensitive(False)
+        if not self.saved:
+            self.current = ""
+            self.buffer.set_text("")
+            self.copy_button.set_sensitive(False)
+            self.strength.set_text("Result")
+            self.bits.set_text("Waiting to generate")
+            self.meter.set_fraction(0)
+            self.status.set_text("Generate a password. Name it, then save it.")
+            return
+        self.current = "\n".join(item.password for item in self.saved)
+        self.buffer.set_text(saved_display(self.saved))
+        self.strength.set_text("Saved")
+        self.bits.set_text("Kept after close")
+        self.copy_button.set_sensitive(True)
+        self.status.set_text("Saved on this computer.")
+
+    def on_copy_text(self, text: str) -> None:
+        if not text:
+            return
+        copied = False
+        try:
+            clipboard = self.gtk.Clipboard.get(self.gdk.SELECTION_CLIPBOARD)
+            clipboard.set_text(text, len(text))
+            clipboard.store()
+            copied = True
+        except Exception:
+            copied = False
+        if copy_with_xclip(text):
+            copied = True
+        self.status.set_text("Copied." if copied else "Copy failed.")
+
     def on_save(self, _button) -> None:
-        if not self.current:
+        if not self.save_ready or not self.current or self.showing_saved:
+            self.status.set_text("Generate a password. Name it, then save it.")
             return
         fresh = [line for line in self.current.splitlines() if line]
         try:
-            updated = remember_passwords(self.saved, fresh)
+            updated = remember_named(self.saved, self.name_entry.get_text(), fresh)
             store_saved_passwords(updated)
         except ValueError as exc:
             self.status.set_text(str(exc))
@@ -731,10 +874,11 @@ class PasswordWindow:
             return
         self.saved = updated
         self._refresh_saved_rows()
-        self.status.set_text("Saved on this computer.")
+        label = clean_name(self.name_entry.get_text())
+        self.status.set_text(f"Saved as {label}.")
 
-    def on_remove(self, password: str) -> None:
-        updated = [item for item in self.saved if item != password]
+    def on_remove(self, name: str) -> None:
+        updated = [item for item in self.saved if item.name != name]
         try:
             store_saved_passwords(updated)
         except ValueError as exc:
@@ -745,20 +889,9 @@ class PasswordWindow:
             return
         self.saved = updated
         self._refresh_saved_rows()
-        lines = [line for line in self.current.splitlines() if line != password]
-        if lines:
-            self.current = "\n".join(lines)
-            self.buffer.set_text(self.current)
-            self.status.set_text("Removed from this computer.")
-            return
-        self.current = ""
-        self.buffer.set_text("")
-        self.copy_button.set_sensitive(False)
-        self.save_button.set_sensitive(False)
-        self.strength.set_text("Result")
-        self.bits.set_text("Waiting to generate")
-        self.meter.set_fraction(0)
-        self.status.set_text("Generate a password. Save keeps it after you close.")
+        if self.showing_saved:
+            self._show_saved_overview()
+        self.status.set_text("Removed from this computer.")
 
 
 if __name__ == "__main__":

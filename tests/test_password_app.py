@@ -91,22 +91,54 @@ class GenerateTests(unittest.TestCase):
 
 
 class SavedPasswordTests(unittest.TestCase):
-    def test_save_round_trip_is_private_to_the_user(self) -> None:
+    def test_save_round_trip_keeps_the_name_and_is_private(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "local-password" / "saved.txt"
-            password_app.store_saved_passwords(["first-secret", "second-secret"], path)
-            self.assertEqual(
-                password_app.load_saved_passwords(path),
-                ["first-secret", "second-secret"],
-            )
+            saved = [
+                password_app.SavedPassword("Email", "first-secret"),
+                password_app.SavedPassword("Bank", 'say "hi"\\'),
+            ]
+            password_app.store_saved_passwords(saved, path)
+            self.assertEqual(password_app.load_saved_passwords(path), saved)
             file_mode = stat.S_IMODE(path.stat().st_mode)
             directory_mode = stat.S_IMODE(path.parent.stat().st_mode)
             self.assertEqual(file_mode & 0o077, 0)
             self.assertEqual(directory_mode & 0o077, 0)
 
-    def test_new_passwords_are_kept_once_and_listed_first(self) -> None:
-        saved = password_app.remember_passwords(["older"], ["newer", "older"])
-        self.assertEqual(saved, ["newer", "older"])
+    def test_same_name_replaces_the_previous_password(self) -> None:
+        existing = [password_app.SavedPassword("Email", "old")]
+        saved = password_app.remember_named(existing, "  Email  ", ["new"])
+        self.assertEqual(saved, [password_app.SavedPassword("Email", "new")])
+
+    def test_several_passwords_share_a_numbered_name(self) -> None:
+        saved = password_app.remember_named([], "Router", ["one", "two"])
+        self.assertEqual(
+            saved,
+            [
+                password_app.SavedPassword("Router 1", "one"),
+                password_app.SavedPassword("Router 2", "two"),
+            ],
+        )
+
+    def test_a_blank_name_is_refused(self) -> None:
+        with self.assertRaises(ValueError):
+            password_app.remember_named([], "   ", ["secret"])
+
+    def test_older_unnamed_file_loads_as_untitled(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "saved.txt"
+            path.write_text("first-secret\nsecond-secret\n", encoding="utf-8")
+            self.assertEqual(
+                password_app.load_saved_passwords(path),
+                [
+                    password_app.SavedPassword("Untitled", "first-secret"),
+                    password_app.SavedPassword("Untitled 2", "second-secret"),
+                ],
+            )
+
+    def test_display_puts_the_name_above_the_password(self) -> None:
+        text = password_app.saved_display([password_app.SavedPassword("Email", "secret")])
+        self.assertEqual(text, "Email\nsecret")
 
     def test_symlink_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -115,7 +147,10 @@ class SavedPasswordTests(unittest.TestCase):
             link = Path(directory) / "saved.txt"
             link.symlink_to(target)
             with self.assertRaises(ValueError):
-                password_app.store_saved_passwords(["stolen"], link)
+                password_app.store_saved_passwords(
+                    [password_app.SavedPassword("Email", "stolen")],
+                    link,
+                )
             self.assertEqual(target.read_text(encoding="utf-8"), "keep\n")
             with self.assertRaises(ValueError):
                 password_app.load_saved_passwords(link)

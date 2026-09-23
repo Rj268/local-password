@@ -9,7 +9,7 @@ A strong password here has about 75 bits of entropy or more. That is the size of
 The Debian package installs the local window:
 
 ```bash
-sudo dpkg -i dist/local-password_1.1.0_all.deb
+sudo dpkg -i dist/local-password_1.2.0_all.deb
 local-password
 ```
 
@@ -28,7 +28,7 @@ sudo apt install python3-gi gir1.2-gtk-3.0 xclip
 python3 password_app.py
 ```
 
-The window has Characters and Words. Length, word count, and number of passwords are numeric. Digits, Letters, and Symbols show **On** or **Off**. Symbols include quotes, backticks, and backslashes. Generate fills the window. Copy places the password on the clipboard. Save writes it to a file only your user can read, under `~/.local/share/local-password/saved.txt`. A password you do not save is gone when the window closes. Remove drops a saved password from that file.
+The window has Characters and Words. Length, word count, and number of passwords are numeric. Digits, Letters, and Symbols show **On** or **Off**. Symbols include quotes, backticks, and backslashes. Generate fills the window. Copy places the password on the clipboard. Name it, then Save. The name is what you see the next time you open the window, above the password. The file is readable only by your user, at `~/.local/share/local-password/saved.txt`. A password you do not save is gone when the window closes. Remove drops a saved password from that file. Saving the same name again replaces that password.
 
 ## Command line
 
