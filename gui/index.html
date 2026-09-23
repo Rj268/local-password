@@ -43,10 +43,6 @@
             <input type="checkbox" id="all-special">
             <span>Include quotes, backticks, and backslashes</span>
           </label>
-          <label class="check">
-            <input type="checkbox" id="no-ambiguous">
-            <span>Leave out lookalikes <abbr title="zero, capital o, lowercase o, one, lowercase L, capital i">0 O o 1 l I</abbr></span>
-          </label>
         </div>
 
         <div id="word-fields" hidden>
@@ -63,11 +59,12 @@
 
         <div class="field">
           <div class="field-label">
-            <label for="count">How many</label>
+            <label for="count">Number of passwords</label>
             <output id="count-readout" for="count">1</output>
           </div>
-          <input id="count" type="range" min="1" max="10" value="1">
-          <input id="count-number" class="number" type="number" min="1" max="100" value="1" inputmode="numeric" aria-label="How many as a number">
+          <input id="count" type="range" min="1" max="10" value="1" aria-describedby="count-hint">
+          <input id="count-number" class="number" type="number" min="1" max="100" value="1" inputmode="numeric" aria-label="Number of passwords">
+          <p class="hint" id="count-hint">Generate this many passwords at once.</p>
         </div>
 
         <button type="submit" class="primary" id="generate">Generate</button>

@@ -12,7 +12,7 @@ In a browser:
 python3 password_gui.py
 ```
 
-Then open [http://127.0.0.1:8741](http://127.0.0.1:8741). The page uses the same generator as the command-line tool: character passwords, shell-safe symbols, lookalike filtering, and six-word passphrases. Copy and download stay in the browser. The server listens on this computer only.
+Then open [http://127.0.0.1:8741](http://127.0.0.1:8741). The page uses the same generator as the command-line tool: character passwords, shell-safe symbols, and six-word passphrases. Copy and download stay in the browser. The server listens on this computer only.
 
 Interactive:
 

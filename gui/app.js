@@ -92,7 +92,7 @@ function options() {
     letters: document.querySelector("#letters").checked,
     special: specialInput.checked,
     allSpecial: allSpecialInput.checked,
-    noAmbiguous: document.querySelector("#no-ambiguous").checked,
+    noAmbiguous: false,
   };
 }
 
