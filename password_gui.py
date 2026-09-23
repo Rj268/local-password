@@ -109,8 +109,6 @@ def generate_response(options: dict) -> dict:
         report = generator.describe_passwords(passwords, len(character_list))
         if not generator.can_be_strong(length, character_list):
             notes.append(generator.strong_line_message())
-        if all_special:
-            notes.append("Special characters include quotes, backticks, and backslashes.")
         if no_ambiguous:
             notes.append(f"Ambiguous characters left out: {generator.AMBIGUOUS_CHARACTERS}.")
 

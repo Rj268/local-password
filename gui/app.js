@@ -27,7 +27,6 @@ const countRange = document.querySelector("#count");
 const countNumber = document.querySelector("#count-number");
 const countReadout = document.querySelector("#count-readout");
 const specialInput = document.querySelector("#special");
-const allSpecialInput = document.querySelector("#all-special");
 
 let mode = "characters";
 let busy = false;
@@ -52,14 +51,6 @@ function bindPair(range, number, readout, rangeMax) {
 bindPair(lengthRange, lengthNumber, lengthReadout, Number(lengthRange.max));
 bindPair(wordsRange, wordsNumber, wordsReadout, Number(wordsRange.max));
 bindPair(countRange, countNumber, countReadout, Number(countRange.max));
-
-function syncShellOption() {
-  const enabled = specialInput.checked;
-  allSpecialInput.disabled = !enabled;
-  if (!enabled) allSpecialInput.checked = false;
-}
-
-specialInput.addEventListener("change", syncShellOption);
 
 function setMode(nextMode) {
   mode = nextMode;
@@ -91,7 +82,7 @@ function options() {
     digits: document.querySelector("#digits").checked,
     letters: document.querySelector("#letters").checked,
     special: specialInput.checked,
-    allSpecial: allSpecialInput.checked,
+    allSpecial: specialInput.checked,
     noAmbiguous: false,
   };
 }
