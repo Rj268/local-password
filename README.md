@@ -1,19 +1,19 @@
 # Local Password
 
-Generate a cryptographically secure password on this computer and copy it. The password stays in the window until you close it. Save keeps it under a name, locked with a passphrase you choose. The passphrase is not stored. Saved passwords stay hidden until you unlock them. The app does not open a network port.
+Generate a cryptographically secure password on this computer and copy it. The password stays in the window until you close it. Save keeps it under a name, locked with a passphrase you choose. Saved holds those named passwords on this computer. The passphrase is not stored. Saved passwords stay hidden until you unlock them. The app does not open a network port.
 
-A strong password here has about 75 bits of entropy or more. That is the size of the search space for the length and alphabet you chose. An 8-character mix is about 50 bits, so it is reported as weak. Sixteen characters, or six random words, clears the line. When the length is long enough, the generator places at least one character from each selected group, then fills the rest at random. Each distinct character is equally likely.
+A strong password here has about 75 bits of entropy or more. The strength bar fills toward 256 bits. That is the size of the search space for the length and alphabet you chose. An 8-character mix is about 50 bits, so it is reported as weak. Sixteen characters, or six random words, clears the strong line. Forty characters from digits, letters, and punctuation reach 256 bits, as do twenty words from the EFF list. **256 bits** sets that length or word count and generates. When the length is long enough, the generator places at least one character from each selected group, then fills the rest at random. Each distinct character is equally likely.
 
 ## Install
 
 The Debian package installs the local window:
 
 ```bash
-sudo dpkg -i dist/local-password_1.3.0_all.deb
+sudo dpkg -i dist/local-password_1.4.0_all.deb
 local-password
 ```
 
-It depends on `python3`, `python3-gi`, `gir1.2-gtk-3.0`, and `xclip`. After install, "Local Password" is also in the application menu.
+It depends on `python3`, `python3-gi`, `gir1.2-gtk-3.0`, `python3-cryptography`, and `xclip`. After install, "Local Password" is also in the application menu.
 
 Rebuild the package with:
 
@@ -24,11 +24,11 @@ sh packaging/build-deb.sh
 ## Run from a checkout
 
 ```bash
-sudo apt install python3-gi gir1.2-gtk-3.0 xclip
+sudo apt install python3-gi gir1.2-gtk-3.0 python3-cryptography xclip
 python3 password_app.py
 ```
 
-The window has Characters and Words. Length, word count, and number of passwords are numeric. Digits, Letters, and Symbols show **On** or **Off**. Symbols include quotes, backticks, and backslashes. Generate fills the window. Copy places the password on the clipboard. Name it, then Save. The first save asks for a passphrase of at least 8 characters. That passphrase locks every saved password. It is not written down. The next time you open the window, saved passwords stay hidden until you unlock them. The lock file is `~/.local/share/local-password/saved.vault`, readable only by your user. A password you do not save is gone when the window closes. Lock hides them again during this session. Remove drops one after you unlock. Saving the same name again replaces that password. If the passphrase is forgotten, the saved passwords cannot be opened.
+The window has Create and Saved. Create has Characters and Words. Length, word count, and number of passwords are numeric. Digits, Letters, and Symbols show **On** or **Off**. Symbols include quotes, backticks, and backslashes. **256 bits** sets the length or word count that reaches 256 bits, then generates. Generate fills the window. Copy places the password on the clipboard. Name it, then Save. The first save asks for a passphrase of at least 8 characters. That passphrase locks every saved password. It is not written down. Save opens Saved, where each name sits above its password. Find filters that list by name. The next time you open the window, Saved stays locked until you unlock it. The lock file is `~/.local/share/local-password/saved.vault`, readable only by your user. A password you do not save is gone when the window closes. Lock hides them again during this session. Remove drops one after you unlock. Saving the same name again replaces that password. If the passphrase is forgotten, the saved passwords cannot be opened.
 
 ## Command line
 

@@ -212,6 +212,52 @@ class VaultTests(unittest.TestCase):
             password_app.new_vault_key("short")
 
 
+class EnterpriseEntropyTests(unittest.TestCase):
+    def test_meter_fills_toward_256_bits(self) -> None:
+        self.assertEqual(password_app.METER_CAP_BITS, 256)
+
+    def test_full_alphabet_reaches_256_bits_at_40_characters(self) -> None:
+        pool = password_app.character_pool(digits=True, letters=True, symbols=True)
+        alphabet = len(password_app.generator.unique_characters(pool))
+        length = password_app.length_for_bits(pool)
+        self.assertEqual(length, 40)
+        reached = password_app.generator.password_entropy_bits(length, alphabet)
+        short = password_app.generator.password_entropy_bits(length - 1, alphabet)
+        self.assertGreaterEqual(reached, 256)
+        self.assertLess(short, 256)
+        result = password_app.generate(
+            mode="characters",
+            length=length,
+            words=6,
+            count=1,
+            digits=True,
+            letters=True,
+            symbols=True,
+        )
+        self.assertEqual(result.fraction, 1.0)
+        self.assertEqual(result.label, "Strong")
+        self.assertEqual(len(result.text), 40)
+
+    def test_twenty_words_reach_256_bits(self) -> None:
+        self.assertEqual(password_app.words_for_bits(), 20)
+        size = len(password_app.generator.load_wordlist())
+        short = password_app.generator.passphrase_entropy_bits(19, size)
+        reached = password_app.generator.passphrase_entropy_bits(20, size)
+        self.assertLess(short, 256)
+        self.assertGreaterEqual(reached, 256)
+        result = password_app.generate(
+            mode="passphrase",
+            length=16,
+            words=20,
+            count=1,
+            digits=True,
+            letters=True,
+            symbols=True,
+        )
+        self.assertEqual(result.fraction, 1.0)
+        self.assertEqual(len(result.text.split()), 20)
+
+
 class ClipboardTests(unittest.TestCase):
     def test_xclip_receives_the_password_on_stdin(self) -> None:
         with patch("password_app.shutil.which", return_value="/usr/bin/xclip"), patch(

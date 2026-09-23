@@ -9,6 +9,7 @@ The app does not listen on a network port.
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import string
@@ -23,7 +24,7 @@ from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
 import random_password_generator as generator
 
-METER_CAP_BITS = 128
+METER_CAP_BITS = 256
 MAX_NAME_LENGTH = 80
 MIN_PASSPHRASE_LENGTH = 8
 # scrypt memory is 128 * N * r bytes. 2**15 is 32 MB, slow enough to resist guessing.
@@ -315,6 +316,27 @@ def remember_named(
     return fresh + kept
 
 
+def units_for_bits(pool_size: int, bits: int = METER_CAP_BITS) -> int:
+    """How many independent choices it takes to reach this many bits."""
+    if pool_size < 2:
+        raise ValueError("Choose at least one character type.")
+    return math.ceil(bits / math.log2(pool_size))
+
+
+def length_for_bits(character_list: str, bits: int = METER_CAP_BITS) -> int:
+    needed = units_for_bits(len(generator.unique_characters(character_list)), bits)
+    if needed > generator.MAX_PASSWORD_LENGTH:
+        raise ValueError("These characters cannot reach 256 bits at the allowed length.")
+    return needed
+
+
+def words_for_bits(bits: int = METER_CAP_BITS) -> int:
+    needed = units_for_bits(len(generator.load_wordlist()), bits)
+    if needed > generator.MAX_WORD_COUNT:
+        raise ValueError("That many bits needs more words than the limit allows.")
+    return needed
+
+
 def saved_display(items: list[SavedPassword]) -> str:
     """Show each name above its password."""
     return "\n\n".join(f"{item.name}\n{item.password}" for item in items)
@@ -591,7 +613,7 @@ class PasswordWindow:
         title.get_style_context().add_class("title")
         lede = gtk.Label(
             label=(
-                "Generate it here, then copy it. Save it with a name. A passphrase locks saved passwords, and they stay hidden until you unlock them."
+                "Create a password here, or open Saved to use the ones you already kept. One passphrase locks all of them."
             ),
             xalign=0,
         )
@@ -601,9 +623,21 @@ class PasswordWindow:
         root.pack_start(title, False, False, 0)
         root.pack_start(lede, False, False, 0)
 
+        nav = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
+        nav.set_homogeneous(True)
+        self.create_tab = gtk.Button(label="Create")
+        self.saved_tab = gtk.Button(label="Saved")
+        for button in (self.create_tab, self.saved_tab):
+            button.get_style_context().add_class("mode")
+            nav.pack_start(button, True, True, 0)
+        self.create_tab.connect("clicked", lambda *_args: self.show_section("create"))
+        self.saved_tab.connect("clicked", lambda *_args: self.show_section("saved"))
+        root.pack_start(nav, False, False, 0)
+
         columns = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=16)
         columns.set_vexpand(True)
-        root.pack_start(columns, True, True, 0)
+        self.create_view = columns
+        root.pack_start(self.create_view, True, True, 0)
 
         controls_frame, controls = self._card()
         columns.pack_start(controls_frame, True, True, 0)
@@ -612,6 +646,14 @@ class PasswordWindow:
         result_frame, result = self._card()
         columns.pack_start(result_frame, True, True, 0)
         self._build_result(result)
+
+        saved_frame, saved_inner = self._card()
+        self.saved_view = saved_frame
+        self.saved_view.set_vexpand(True)
+        self.saved_view.set_no_show_all(True)
+        self.saved_view.hide()
+        root.pack_start(self.saved_view, True, True, 0)
+        self._build_manager(saved_inner)
 
         footer = gtk.Label(
             label=(
@@ -652,6 +694,17 @@ class PasswordWindow:
         self.mode_characters.connect("clicked", lambda *_: self.set_mode("characters"))
         self.mode_words.connect("clicked", lambda *_: self.set_mode("passphrase"))
         controls.pack_start(mode_row, False, False, 0)
+        self.enterprise_button = gtk.Button(label="256 bits")
+        self.enterprise_button.get_style_context().add_class("secondary")
+        self.enterprise_button.connect("clicked", self.on_use_256)
+        controls.pack_start(self.enterprise_button, False, False, 0)
+        enterprise_hint = gtk.Label(
+            label="Sets the length or word count that reaches 256 bits, then generates.",
+            xalign=0,
+        )
+        enterprise_hint.set_line_wrap(True)
+        enterprise_hint.get_style_context().add_class("hint")
+        controls.pack_start(enterprise_hint, False, False, 0)
 
         self.character_box = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=12)
         controls.pack_start(self.character_box, False, False, 0)
@@ -726,7 +779,7 @@ class PasswordWindow:
         self.meter.set_fraction(0)
         result.pack_start(self.meter, False, False, 0)
         caption = gtk.Label(
-            label="The bar fills toward 128 bits. Strong starts at 75.",
+            label="The bar fills toward 256 bits. Strong starts at 75.",
             xalign=0,
         )
         caption.set_line_wrap(True)
@@ -794,34 +847,45 @@ class PasswordWindow:
         self.status.get_style_context().add_class("hint")
         result.pack_start(self.status, False, False, 0)
 
+    def _build_manager(self, page) -> None:
+        gtk = self.gtk
+        self.saved_heading = gtk.Label(label="Saved", xalign=0)
+        self.saved_heading.get_style_context().add_class("eyebrow")
+        page.pack_start(self.saved_heading, False, False, 0)
+
+        self.find_entry = gtk.Entry()
+        self.find_entry.set_placeholder_text("Find by name")
+        self.find_entry.connect("changed", lambda *_args: self._refresh_saved_rows())
+        page.pack_start(self.find_entry, False, False, 0)
+
+        self.manager_message = gtk.Label(label="", xalign=0)
+        self.manager_message.set_line_wrap(True)
+        self.manager_message.get_style_context().add_class("hint")
+        page.pack_start(self.manager_message, False, False, 0)
+
+        self.saved_box = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=8)
+        self.saved_scroll = gtk.ScrolledWindow()
+        self.saved_scroll.set_policy(gtk.PolicyType.NEVER, gtk.PolicyType.AUTOMATIC)
+        self.saved_scroll.set_vexpand(True)
+        self.saved_scroll.set_min_content_height(240)
+        self.saved_scroll.add(self.saved_box)
+        page.pack_start(self.saved_scroll, True, True, 0)
+
         self.lock_button = gtk.Button(label="Unlock")
         self.lock_button.get_style_context().add_class("primary")
         self.lock_button.set_no_show_all(True)
         self.lock_button.hide()
         self.lock_button.connect("clicked", self.on_lock_toggle)
-        result.pack_start(self.lock_button, False, False, 0)
+        page.pack_start(self.lock_button, False, False, 0)
 
-        self.saved_heading = gtk.Label(label="Saved", xalign=0)
-        self.saved_heading.get_style_context().add_class("eyebrow")
-        self.saved_heading.set_no_show_all(True)
-        self.saved_heading.hide()
-        result.pack_start(self.saved_heading, False, False, 0)
-
-        self.saved_box = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=8)
-        self.saved_scroll = gtk.ScrolledWindow()
-        self.saved_scroll.set_policy(gtk.PolicyType.NEVER, gtk.PolicyType.AUTOMATIC)
-        self.saved_scroll.set_propagate_natural_height(True)
-        self.saved_scroll.set_max_content_height(160)
-        self.saved_scroll.set_no_show_all(True)
-        self.saved_scroll.hide()
-        self.saved_scroll.add(self.saved_box)
-        result.pack_start(self.saved_scroll, False, False, 0)
         self.saved: list[SavedPassword] = []
         self.showing_saved = False
         self.save_ready = False
         self.locked = False
         self.vault_key: VaultKey | None = None
+        self.section = "create"
         self._prepare_saved()
+        self.show_section("saved" if self.locked else "create")
 
     def _labeled(self, caption: str, control):
         row = self.gtk.Box(orientation=self.gtk.Orientation.VERTICAL, spacing=4)
@@ -878,6 +942,52 @@ class PasswordWindow:
         else:
             self.word_box.hide()
         self._style_mode_buttons()
+
+    def show_section(self, section: str) -> None:
+        """Show Create or Saved. The hidden page stays hidden after show_all."""
+        self.section = "saved" if section == "saved" else "create"
+        saved = self.section == "saved"
+        if saved:
+            self.create_view.set_no_show_all(True)
+            self.create_view.hide()
+            self.saved_view.set_no_show_all(False)
+            self.saved_view.show()
+            self._refresh_saved_rows()
+            self._update_lock_button()
+        else:
+            self.saved_view.set_no_show_all(True)
+            self.saved_view.hide()
+            self.create_view.set_no_show_all(False)
+            self.create_view.show()
+            self.apply_mode()
+        for button, selected in (
+            (self.create_tab, not saved),
+            (self.saved_tab, saved),
+        ):
+            style = button.get_style_context()
+            if selected:
+                style.add_class("on")
+                style.remove_class("off")
+            else:
+                style.add_class("off")
+                style.remove_class("on")
+
+    def on_use_256(self, _button) -> None:
+        """Set the length or word count that reaches 256 bits, then generate."""
+        try:
+            if self.mode == "passphrase":
+                self.words.set_value(words_for_bits())
+            else:
+                pool = character_pool(
+                    digits=self.digits.get_active(),
+                    letters=self.letters.get_active(),
+                    symbols=self.symbols.get_active(),
+                )
+                self.length.set_value(length_for_bits(pool))
+        except ValueError as exc:
+            self.set_note(str(exc))
+            return
+        self.on_generate(None)
 
     def set_note(self, text: str) -> None:
         self.note.set_text(text)
@@ -962,13 +1072,44 @@ class PasswordWindow:
     def _refresh_saved_rows(self) -> None:
         for child in list(self.saved_box.get_children()):
             self.saved_box.remove(child)
-        if not self.saved:
-            self.saved_heading.hide()
+        query = self.find_entry.get_text().strip().casefold()
+        if self.locked and self.vault_key is None:
+            self.find_entry.hide()
             self.saved_scroll.hide()
+            self.saved_heading.set_text("Saved")
+            self.saved_heading.show()
+            self.manager_message.set_text(
+                "Saved passwords are locked. One passphrase opens all of them."
+            )
+            self.manager_message.show()
             return
+        self.find_entry.show()
+        if not self.saved:
+            self.saved_scroll.hide()
+            self.saved_heading.set_text("Saved")
+            self.saved_heading.show()
+            self.manager_message.set_text(
+                "Nothing saved yet. Create a password, name it, and save it."
+            )
+            self.manager_message.show()
+            return
+        matches = [
+            item
+            for item in self.saved
+            if not query or query in item.name.casefold()
+        ]
+        count = len(self.saved)
+        self.saved_heading.set_text("1 saved" if count == 1 else f"{count} saved")
         self.saved_heading.show()
+        if not matches:
+            self.saved_scroll.hide()
+            self.manager_message.set_text("No saved password has that name.")
+            self.manager_message.show()
+            return
+        self.manager_message.set_text("")
+        self.manager_message.hide()
         self.saved_scroll.show()
-        for item in self.saved:
+        for item in matches:
             self.saved_box.pack_start(self._saved_row(item), False, False, 0)
         self.saved_box.show_all()
 
@@ -997,27 +1138,6 @@ class PasswordWindow:
         row.pack_start(copy, False, False, 0)
         row.pack_start(remove, False, False, 0)
         return row
-
-    def _show_saved_overview(self) -> None:
-        self.showing_saved = True
-        self.save_ready = False
-        self.save_button.set_sensitive(False)
-        if not self.saved:
-            self.current = ""
-            self.buffer.set_text("")
-            self.copy_button.set_sensitive(False)
-            self.strength.set_text("Result")
-            self.bits.set_text("Waiting to generate")
-            self.meter.set_fraction(0)
-            self.status.set_text("Generate a password. Name it, then save it.")
-            return
-        self.current = "\n".join(item.password for item in self.saved)
-        self.buffer.set_text(saved_display(self.saved))
-        self.strength.set_text("Saved")
-        self.bits.set_text("Kept after close")
-        self.copy_button.set_sensitive(True)
-        self.status.set_text("Saved on this computer.")
-        self._update_lock_button()
 
     def _update_lock_button(self) -> None:
         style = self.lock_button.get_style_context()
@@ -1138,9 +1258,7 @@ class PasswordWindow:
         if not self._ensure_vault_key():
             self._update_lock_button()
             return
-        self._refresh_saved_rows()
-        self._show_saved_overview()
-        self._update_lock_button()
+        self.show_section("saved")
 
     def _lock_saved(self) -> None:
         self.vault_key = None
@@ -1173,7 +1291,11 @@ class PasswordWindow:
             copied = False
         if copy_with_xclip(text):
             copied = True
-        self.status.set_text("Copied." if copied else "Copy failed.")
+        message = "Copied." if copied else "Copy failed."
+        self.status.set_text(message)
+        if self.section == "saved" and self.vault_key is not None:
+            self.manager_message.set_text(message)
+            self.manager_message.show()
 
     def on_save(self, _button) -> None:
         if not self.save_ready or not self.current or self.showing_saved:
@@ -1198,9 +1320,9 @@ class PasswordWindow:
             return
         self.saved = updated
         self.locked = False
-        self._refresh_saved_rows()
-        self._update_lock_button()
+        self.find_entry.set_text("")
         self.status.set_text(f"Saved as {label}.")
+        self.show_section("saved")
 
     def on_remove(self, name: str) -> None:
         if self.vault_key is None:
@@ -1216,9 +1338,8 @@ class PasswordWindow:
             self.status.set_text("Could not remove the saved password.")
             return
         self.saved = updated
+        self.showing_saved = False
         self._refresh_saved_rows()
-        if self.showing_saved:
-            self._show_saved_overview()
         self.status.set_text("Removed from this computer.")
 
 

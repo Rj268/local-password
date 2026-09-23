@@ -2,7 +2,7 @@
 # Build an architecture-independent Debian package for the local window.
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-VERSION=1.3.0
+VERSION=1.4.0
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 PKG="$STAGE/local-password"
@@ -35,6 +35,7 @@ Local Password generates a password in a local window.
 
 The Debian package installs that window. Copy places a password on the clipboard.
 Save keeps a named password, locked with a passphrase, after the window closes.
+Saved lists those passwords on this computer. 256 bits sets a length that reaches that scale.
 A password that was not saved is gone when the window closes.
 
 The EFF large wordlist is included unmodified.
@@ -55,6 +56,7 @@ Maintainer: Local Password <local-password@localhost>
 Description: Air-gapped password generator
  Generate a password in a local window and copy it.
  Save keeps a named password, locked with a passphrase, after the window closes.
+ Saved lists those passwords on this computer.
  The app does not open a network port.
 EOF
 
