@@ -5,15 +5,18 @@ Interactive prompts match a simple question-and-answer flow. Pass ``--length``
 to generate a character password, or ``--passphrase`` for random words.
 Character selection is uniform: each distinct character is equally likely, and
 a long enough password includes at least one character from every selected group.
+
+The password is printed and can be copied. It is never written to a file.
 """
 
 from __future__ import annotations
 
 import argparse
 import math
-import os
 import secrets
+import shutil
 import string
+import subprocess
 import sys
 from pathlib import Path
 
@@ -253,64 +256,46 @@ def strong_line_message() -> str:
     )
 
 
-def sanitize_filename(filename: str) -> str:
-    """Keep a file name inside the current directory."""
-    cleaned = "".join(char for char in filename.strip() if char.isalnum() or char in "._-")
-    cleaned = cleaned.strip(".")
-    if not cleaned:
-        raise ValueError("Filename is empty or contains no usable characters.")
-    return cleaned
-
-
-def password_file_path(filename: str) -> Path:
-    safe_name = sanitize_filename(filename)
-    if not safe_name.lower().endswith(".txt"):
-        safe_name += ".txt"
-    path = Path(safe_name)
-    if path.is_absolute() or ".." in path.parts:
-        raise ValueError("Filename must stay in the current directory.")
-    return path
-
-
-def save_password_to_file(password: str, filename: str, *, overwrite: bool = False) -> Path:
-    """Write the password to a text file readable only by the current user.
-
-    Existing files are left untouched unless ``overwrite`` is true. A single
-    password is stored without a trailing newline. Several passwords are stored
-    one per line.
-    """
-    path = password_file_path(filename)
-    if path.is_symlink():
-        raise ValueError(f"'{path.name}' is a symbolic link. Choose another filename.")
-    flags = os.O_WRONLY | os.O_CREAT
-    flags |= os.O_TRUNC if overwrite else os.O_EXCL
-    descriptor = os.open(path, flags, 0o600)
-    try:
-        os.fchmod(descriptor, 0o600)
-    except OSError:
-        os.close(descriptor)
-        raise
-    with os.fdopen(descriptor, "w", encoding="utf-8") as file:
-        file.write(password)
-    return path
-
-
-def copy_to_clipboard(password: str) -> bool:
+def _copy_with_pyperclip(password: str) -> bool:
     try:
         import pyperclip
     except ImportError:
-        print(
-            "Clipboard support needs the pyperclip package. Install it with: pip install pyperclip",
-            file=sys.stderr,
-        )
         return False
     try:
         pyperclip.copy(password)
     except pyperclip.PyperclipException as exc:
-        print(f"Error saving password to clipboard: {exc}", file=sys.stderr)
+        print(f"Error copying password to clipboard: {exc}", file=sys.stderr)
         return False
-    print("Password saved to clipboard.", file=sys.stderr)
     return True
+
+
+def _copy_with_xclip(password: str) -> bool:
+    """Hand the password to xclip on standard input so it stays in memory."""
+    if shutil.which("xclip") is None:
+        return False
+    try:
+        subprocess.run(
+            ["xclip", "-selection", "clipboard", "-in"],
+            input=password.encode("utf-8"),
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return False
+    return True
+
+
+def copy_to_clipboard(password: str) -> bool:
+    """Place the password on the clipboard. Nothing is written to disk."""
+    if _copy_with_pyperclip(password) or _copy_with_xclip(password):
+        print("Password copied.", file=sys.stderr)
+        return True
+    print(
+        "Clipboard support needs the pyperclip package or the xclip program.",
+        file=sys.stderr,
+    )
+    return False
 
 
 def _read_line(prompt: str) -> str:
@@ -400,40 +385,12 @@ def _warn_if_cannot_be_strong(length: int, character_list: str) -> None:
     print(strong_line_message())
 
 
-def save_password(password: str) -> None:
-    if not ask_yes_no("Do you want to save the password? (yes/no): "):
-        print("Password not saved")
+def offer_copy(password: str) -> None:
+    """Copy is the only way out. Declining leaves the password on screen only."""
+    if not ask_yes_no("Copy the password to the clipboard? (yes/no): "):
+        print("Password was not copied.")
         return
-
-    if ask_yes_no("Do you want to save to your clipboard? (yes/no): "):
-        copy_to_clipboard(password)
-        return
-
-    filename = _read_line("Enter the filename to save the password: ")
-    try:
-        path = password_file_path(filename)
-        if path.is_symlink():
-            print(f"Error: '{path.name}' is a symbolic link. Choose another filename.")
-            return
-        overwrite = False
-        if path.exists():
-            overwrite = ask_yes_no(f"Replace existing file '{path.name}'? (yes/no): ")
-            if not overwrite:
-                print("Password not saved")
-                return
-        path = save_password_to_file(password, filename, overwrite=overwrite)
-    except ValueError as exc:
-        print(f"Error: {exc}")
-    except FileExistsError:
-        print(f"Error: '{password_file_path(filename).name}' already exists.")
-    except FileNotFoundError:
-        print("Error: The specified directory does not exist.")
-    except PermissionError:
-        print("Error: Permission denied. You do not have permission to save the file.")
-    except OSError as exc:
-        print(f"Error saving password to file: {exc}")
-    else:
-        print(f"Password saved to '{path.name}' file")
+    copy_to_clipboard(password)
 
 
 def run_interactive_passphrase() -> None:
@@ -449,7 +406,7 @@ def run_interactive_passphrase() -> None:
         print(f"Error: {exc}")
         return
     print("Generated Passphrase:", passphrase)
-    save_password(passphrase)
+    offer_copy(passphrase)
     bits = passphrase_entropy_bits(word_count, len(wordlist))
     print(describe_passwords([passphrase], entropy_bits=bits))
 
@@ -457,6 +414,7 @@ def run_interactive_passphrase() -> None:
 def run_interactive() -> None:
     print("Welcome to the Password Generator")
     print("Follow the prompts to create a secure password.")
+    print("The password is shown here and can be copied. It is not written to a file.")
     print(
         f"A strong password has about {STRONG_ENTROPY_BITS} bits of entropy or more. "
         "Sixteen random characters, or six random words, reaches that."
@@ -491,14 +449,17 @@ def run_interactive() -> None:
     _warn_if_cannot_be_strong(length, character_list)
     password = generate_password(length, character_list)
     print("Generated Password:", password)
-    save_password(password)
+    offer_copy(password)
     print(describe_passwords([password], len(character_list)))
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Generate a cryptographically secure random password.",
-        epilog="With no options, the generator asks questions interactively.",
+        epilog=(
+            "With no options, the generator asks questions interactively. "
+            "The password is printed and can be copied. It is not written to a file."
+        ),
     )
     parser.add_argument(
         "-l",
@@ -552,19 +513,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "-c",
         "--copy",
         action="store_true",
-        help="Copy the password to the clipboard (requires pyperclip)",
-    )
-    parser.add_argument(
-        "-o",
-        "--output",
-        metavar="FILENAME",
-        help="Save the password to FILENAME in the current directory (.txt is added if needed)",
-    )
-    parser.add_argument(
-        "-f",
-        "--force",
-        action="store_true",
-        help="Replace the output file if it already exists",
+        help="Copy the password to the clipboard",
     )
     parser.add_argument(
         "-q",
@@ -647,27 +596,11 @@ def run_noninteractive(args: argparse.Namespace) -> None:
         raise SystemExit(2)
 
     explicit_types = args.digits or args.letters or args.special
-    output_path: Path | None = None
     try:
-        if args.output:
-            output_path = password_file_path(args.output)
         values, report = _generate_values(args)
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
-
-    if output_path is not None and output_path.is_symlink():
-        print(
-            f"Error: '{output_path.name}' is a symbolic link. Choose another filename.",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
-    if output_path is not None and output_path.exists() and not args.force:
-        print(
-            f"Error: '{output_path.name}' already exists. Pass --force to replace it.",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
 
     print(_passwords_as_text(values))
     sys.stdout.flush()
@@ -694,43 +627,8 @@ def run_noninteractive(args: argparse.Namespace) -> None:
             print(strong_line_message(), file=sys.stderr)
         print(report, file=sys.stderr)
 
-    exit_code = 0
     if args.copy and not copy_to_clipboard(_passwords_as_text(values)):
-        exit_code = 1
-    if args.output:
-        try:
-            path = save_password_to_file(
-                _passwords_as_text(values),
-                args.output,
-                overwrite=args.force,
-            )
-        except ValueError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            exit_code = 1
-        except FileExistsError:
-            name = output_path.name if output_path is not None else args.output
-            print(
-                f"Error: '{name}' already exists. Pass --force to replace it.",
-                file=sys.stderr,
-            )
-            exit_code = 1
-        except FileNotFoundError:
-            print("Error: The specified directory does not exist.", file=sys.stderr)
-            exit_code = 1
-        except PermissionError:
-            print(
-                "Error: Permission denied. You do not have permission to save the file.",
-                file=sys.stderr,
-            )
-            exit_code = 1
-        except OSError as exc:
-            print(f"Error saving password to file: {exc}", file=sys.stderr)
-            exit_code = 1
-        else:
-            if not args.quiet:
-                print(f"Password saved to '{path.name}' file", file=sys.stderr)
-    if exit_code:
-        raise SystemExit(exit_code)
+        raise SystemExit(1)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -747,8 +645,6 @@ def main(argv: list[str] | None = None) -> None:
             args.no_ambiguous,
             args.count is not None,
             args.copy,
-            args.output,
-            args.force,
             args.quiet,
         )
     )

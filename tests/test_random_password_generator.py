@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import stat
 import string
 import tempfile
 import unittest
@@ -70,29 +69,6 @@ class StrengthTests(unittest.TestCase):
         self.assertFalse(generator.can_be_strong(12, string.digits))
 
 
-class FilenameTests(unittest.TestCase):
-    def test_sanitizes_path_characters(self) -> None:
-        self.assertEqual(generator.sanitize_filename("../etc/passwd"), "etcpasswd")
-        self.assertEqual(generator.password_file_path("my-vault").name, "my-vault.txt")
-        self.assertEqual(generator.password_file_path("notes.txt").name, "notes.txt")
-
-    def test_rejects_empty_filename(self) -> None:
-        with self.assertRaises(ValueError):
-            generator.sanitize_filename("../...")
-
-    def test_file_contains_only_the_password_and_is_user_readable(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            previous = os.getcwd()
-            os.chdir(directory)
-            try:
-                path = generator.save_password_to_file("Abcdef1!", "vault")
-                self.assertEqual(path.read_text(encoding="utf-8"), "Abcdef1!")
-                mode = stat.S_IMODE(path.stat().st_mode)
-                self.assertEqual(mode & 0o077, 0)
-            finally:
-                os.chdir(previous)
-
-
 class CommandLineTests(unittest.TestCase):
     def test_noninteractive_password_is_strong(self) -> None:
         stdout = StringIO()
@@ -119,16 +95,22 @@ class CommandLineTests(unittest.TestCase):
                 generator.main(["--length", "0", "--digits"])
         self.assertEqual(caught.exception.code, 2)
 
-    def test_output_flag_writes_file(self) -> None:
+    def test_there_is_no_file_output_option(self) -> None:
+        stderr = StringIO()
+        with patch("sys.stderr", stderr):
+            with self.assertRaises(SystemExit) as caught:
+                generator.main(["--length", "12", "--output", "saved"])
+        self.assertEqual(caught.exception.code, 2)
+        self.assertIn("unrecognized arguments", stderr.getvalue())
+
+    def test_generation_writes_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             previous = os.getcwd()
             os.chdir(directory)
             try:
-                stdout = StringIO()
-                with patch("sys.stdout", stdout), patch("sys.stderr", StringIO()):
-                    generator.main(["--length", "12", "--output", "saved"])
-                password = stdout.getvalue().strip()
-                self.assertEqual(Path("saved.txt").read_text(encoding="utf-8"), password)
+                with patch("sys.stdout", StringIO()), patch("sys.stderr", StringIO()):
+                    generator.main(["--length", "16", "--quiet"])
+                self.assertEqual(list(Path(directory).iterdir()), [])
             finally:
                 os.chdir(previous)
 
@@ -146,7 +128,7 @@ class CommandLineTests(unittest.TestCase):
         text = stdout.getvalue()
         self.assertIn("Welcome to the Password Generator", text)
         self.assertIn("Generated Password:", text)
-        self.assertIn("Password not saved", text)
+        self.assertIn("Password was not copied.", text)
         self.assertIn("Strong Password", text)
 
     def test_interactive_exit_without_character_types(self) -> None:
@@ -192,31 +174,6 @@ class CommandLineTests(unittest.TestCase):
         self.assertTrue(set(password).isdisjoint(generator.AMBIGUOUS_CHARACTERS))
         self.assertTrue(generator.is_strong_password(password))
 
-    def test_existing_output_is_kept_until_force(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            previous = os.getcwd()
-            os.chdir(directory)
-            try:
-                path = Path("saved.txt")
-                path.write_text("keep", encoding="utf-8")
-                path.chmod(0o644)
-                stderr = StringIO()
-                with patch("sys.stderr", stderr):
-                    with self.assertRaises(SystemExit) as caught:
-                        generator.main(["--length", "12", "--output", "saved"])
-                self.assertEqual(caught.exception.code, 1)
-                self.assertEqual(path.read_text(encoding="utf-8"), "keep")
-                self.assertIn("--force", stderr.getvalue())
-
-                stdout = StringIO()
-                with patch("sys.stdout", stdout), patch("sys.stderr", StringIO()):
-                    generator.main(["--length", "12", "--output", "saved", "--force"])
-                self.assertEqual(path.read_text(encoding="utf-8"), stdout.getvalue().strip())
-                mode = stat.S_IMODE(path.stat().st_mode)
-                self.assertEqual(mode & 0o077, 0)
-            finally:
-                os.chdir(previous)
-
     def test_interactive_repeats_an_unclear_answer(self) -> None:
         answers = iter(["no", "12", "1", "2", "3", "4", "maybe", "no", "no"])
         stdout = StringIO()
@@ -224,7 +181,7 @@ class CommandLineTests(unittest.TestCase):
             generator.main([])
         text = stdout.getvalue()
         self.assertIn("Please answer yes or no.", text)
-        self.assertIn("Password not saved", text)
+        self.assertIn("Password was not copied.", text)
 
     def test_interactive_can_skip_ambiguous_characters(self) -> None:
         answers = iter(["no", "20", "1", "2", "3", "4", "yes", "no"])
@@ -290,40 +247,17 @@ class PoolAndEntropyTests(unittest.TestCase):
         phrase = text.split("Generated Passphrase:", 1)[1].splitlines()[0].strip()
         self.assertEqual(len(phrase.split()), 6)
         self.assertIn("Strong Password", text)
-        self.assertIn("Password not saved", text)
+        self.assertIn("Password was not copied.", text)
 
     def test_entropy_matches_pool_size(self) -> None:
         self.assertAlmostEqual(generator.password_entropy_bits(10, 2), 10.0)
         self.assertIn("about 10 bits", generator.describe_passwords(["a" * 10], 2))
 
-    def test_symlink_output_is_refused(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            previous = os.getcwd()
-            os.chdir(directory)
-            try:
-                target = Path("secret.txt")
-                target.write_text("keep", encoding="utf-8")
-                Path("link.txt").symlink_to(target)
-                with patch("sys.stderr", StringIO()):
-                    with self.assertRaises(SystemExit) as caught:
-                        generator.main(["--length", "12", "--output", "link", "--force"])
-                self.assertEqual(caught.exception.code, 1)
-                self.assertEqual(target.read_text(encoding="utf-8"), "keep")
-            finally:
-                os.chdir(previous)
-
-    def test_several_passwords_are_one_per_line_in_the_file(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            previous = os.getcwd()
-            os.chdir(directory)
-            try:
-                stdout = StringIO()
-                with patch("sys.stdout", stdout), patch("sys.stderr", StringIO()):
-                    generator.main(["--length", "8", "--count", "2", "--output", "batch", "--quiet"])
-                passwords = stdout.getvalue().splitlines()
-                self.assertEqual(Path("batch.txt").read_text(encoding="utf-8").splitlines(), passwords)
-            finally:
-                os.chdir(previous)
+    def test_copy_message_says_copied(self) -> None:
+        stderr = StringIO()
+        with patch("pyperclip.copy"), patch("sys.stdout", StringIO()), patch("sys.stderr", stderr):
+            generator.main(["--length", "12", "--copy"])
+        self.assertIn("Password copied.", stderr.getvalue())
 
 
 if __name__ == "__main__":
