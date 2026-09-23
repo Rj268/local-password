@@ -951,7 +951,7 @@ class PasswordWindow:
             self.create_view.set_no_show_all(True)
             self.create_view.hide()
             self.saved_view.set_no_show_all(False)
-            self.saved_view.show()
+            self.saved_view.show_all()
             self._refresh_saved_rows()
             self._update_lock_button()
         else:
@@ -1323,6 +1323,8 @@ class PasswordWindow:
         self.find_entry.set_text("")
         self.status.set_text(f"Saved as {label}.")
         self.show_section("saved")
+        self.manager_message.set_text(f"Saved as {label}.")
+        self.manager_message.show()
 
     def on_remove(self, name: str) -> None:
         if self.vault_key is None:
