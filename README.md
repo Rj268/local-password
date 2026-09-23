@@ -9,7 +9,7 @@ A strong password here is at least 8 characters and includes a lowercase letter,
 Interactive:
 
 ```bash
-python random_password_generator.py
+python3 random_password_generator.py
 ```
 
 The prompts ask for a length, then which of digits, letters, and special characters to include. You can copy the result to the clipboard or write it to a `.txt` file in the current directory.
@@ -17,15 +17,15 @@ The prompts ask for a length, then which of digits, letters, and special charact
 Non-interactive:
 
 ```bash
-python random_password_generator.py --length 16 --digits --letters --special
+python3 random_password_generator.py --length 16 --digits --letters --special
 ```
 
 If you pass `--length` and no character-type flags, the generator uses digits, letters, and special characters. The password is printed on its own line so you can pipe it. Strength notes go to standard error.
 
 ```bash
-python random_password_generator.py --length 20 --quiet
-python random_password_generator.py --length 20 --output vault
-python random_password_generator.py --length 20 --copy
+python3 random_password_generator.py --length 20 --quiet
+python3 random_password_generator.py --length 20 --output vault
+python3 random_password_generator.py --length 20 --copy
 ```
 
 `--output vault` writes `vault.txt` in the current directory. The file mode is readable and writable only by you, and the contents are the password in plaintext. Names are stripped of path characters, so the file stays in the current directory.
@@ -41,7 +41,7 @@ Generation itself needs only the Python standard library.
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -t .
+python3 -m unittest discover -s tests -t .
 ```
 
 ## Options

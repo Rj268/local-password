@@ -365,6 +365,7 @@ def run_noninteractive(args: argparse.Namespace) -> None:
         raise SystemExit(2) from exc
 
     print(password)
+    sys.stdout.flush()
     if not args.quiet:
         if not explicit_types:
             print(
