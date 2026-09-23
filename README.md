@@ -6,6 +6,14 @@ A strong password here has about 75 bits of entropy or more. That is the size of
 
 ## Run
 
+In a browser:
+
+```bash
+python3 password_gui.py
+```
+
+Then open [http://127.0.0.1:8741](http://127.0.0.1:8741). The page uses the same generator as the command-line tool: character passwords, shell-safe symbols, lookalike filtering, and six-word passphrases. Copy and download stay in the browser. The server listens on this computer only.
+
 Interactive:
 
 ```bash
