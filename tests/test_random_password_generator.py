@@ -56,22 +56,17 @@ class GeneratePasswordTests(unittest.TestCase):
 
 
 class StrengthTests(unittest.TestCase):
-    def test_strong_password(self) -> None:
-        self.assertTrue(generator.is_strong_password("Abcdef1!"))
-        self.assertEqual(generator.strength_label("Abcdef1!"), "Strong Password")
+    def test_short_mixed_password_is_below_the_strong_line(self) -> None:
+        self.assertFalse(generator.is_strong_password("Abcdef1!"))
+        self.assertEqual(generator.strength_label("Abcdef1!"), "Weak Password")
+        self.assertEqual(len("Abcdefghijk1!"), 13)
+        self.assertTrue(generator.is_strong_password("Abcdefghijk1!"))
+        self.assertEqual(generator.strength_label("Abcdefghijk1!"), "Strong Password")
 
-    def test_weak_password_explains_what_is_missing(self) -> None:
-        self.assertFalse(generator.is_strong_password("abcdefgh"))
-        label = generator.strength_label("abcdefgh")
-        self.assertIn("Weak Password", label)
-        self.assertIn("an uppercase letter", label)
-        self.assertIn("a digit", label)
-        self.assertIn("a special character", label)
-
-    def test_can_be_strong_requires_length_and_all_groups(self) -> None:
+    def test_can_be_strong_follows_entropy(self) -> None:
         pool = string.ascii_letters + string.digits + string.punctuation
-        self.assertTrue(generator.can_be_strong(8, pool))
-        self.assertFalse(generator.can_be_strong(7, pool))
+        self.assertFalse(generator.can_be_strong(8, pool))
+        self.assertTrue(generator.can_be_strong(13, pool))
         self.assertFalse(generator.can_be_strong(12, string.digits))
 
 
@@ -144,7 +139,7 @@ class CommandLineTests(unittest.TestCase):
         self.assertEqual(len(copy.call_args.args[0]), 12)
 
     def test_interactive_flow_can_decline_saving(self) -> None:
-        answers = iter(["16", "1", "2", "3", "4", "no", "no"])
+        answers = iter(["no", "16", "1", "2", "3", "4", "no", "no"])
         stdout = StringIO()
         with patch("builtins.input", side_effect=lambda _prompt: next(answers)), patch("sys.stdout", stdout):
             generator.main([])
@@ -155,7 +150,7 @@ class CommandLineTests(unittest.TestCase):
         self.assertIn("Strong Password", text)
 
     def test_interactive_exit_without_character_types(self) -> None:
-        answers = iter(["12", "4"])
+        answers = iter(["no", "12", "4"])
         stdout = StringIO()
         with patch("builtins.input", side_effect=lambda _prompt: next(answers)), patch("sys.stdout", stdout):
             generator.main([])
@@ -223,7 +218,7 @@ class CommandLineTests(unittest.TestCase):
                 os.chdir(previous)
 
     def test_interactive_repeats_an_unclear_answer(self) -> None:
-        answers = iter(["12", "1", "2", "3", "4", "maybe", "no", "no"])
+        answers = iter(["no", "12", "1", "2", "3", "4", "maybe", "no", "no"])
         stdout = StringIO()
         with patch("builtins.input", side_effect=lambda _prompt: next(answers)), patch("sys.stdout", stdout):
             generator.main([])
@@ -232,7 +227,7 @@ class CommandLineTests(unittest.TestCase):
         self.assertIn("Password not saved", text)
 
     def test_interactive_can_skip_ambiguous_characters(self) -> None:
-        answers = iter(["20", "1", "2", "3", "4", "yes", "no"])
+        answers = iter(["no", "20", "1", "2", "3", "4", "yes", "no"])
         stdout = StringIO()
         with patch("builtins.input", side_effect=lambda _prompt: next(answers)), patch("sys.stdout", stdout):
             generator.main([])
@@ -247,6 +242,55 @@ class PoolAndEntropyTests(unittest.TestCase):
         self.assertEqual(generator.without_ambiguous("a0O1l"), "a")
         with self.assertRaises(ValueError):
             generator.prepare_character_list("0Ool1I|", exclude_ambiguous=True)
+
+    def test_default_symbols_leave_out_shell_metacharacters(self) -> None:
+        self.assertEqual(generator.special_characters(), "%+,-./:=@^_")
+        full = generator.special_characters(all_special=True)
+        self.assertIn("'", full)
+        self.assertIn("\\", full)
+        self.assertIn("`", full)
+        stdout = StringIO()
+        with patch("sys.stdout", stdout), patch("sys.stderr", StringIO()):
+            generator.main(["--length", "48", "--quiet"])
+        password = stdout.getvalue().strip()
+        self.assertTrue(set(password).isdisjoint(generator.SHELL_SENSITIVE_CHARACTERS))
+
+    def test_passphrase_uses_six_words_from_the_eff_list(self) -> None:
+        wordlist = generator.load_wordlist()
+        self.assertEqual(len(wordlist), 7776)
+        self.assertEqual(len(set(wordlist)), 7776)
+        stdout = StringIO()
+        stderr = StringIO()
+        with patch("sys.stdout", stdout), patch("sys.stderr", stderr):
+            generator.main(["--passphrase"])
+        words = stdout.getvalue().strip().split()
+        self.assertEqual(len(words), 6)
+        self.assertTrue(set(words) <= set(wordlist))
+        self.assertIn("Strong Password", stderr.getvalue())
+        self.assertIn("bits", stderr.getvalue())
+
+    def test_five_word_passphrase_is_under_the_strong_line(self) -> None:
+        stderr = StringIO()
+        with patch("sys.stdout", StringIO()), patch("sys.stderr", stderr):
+            generator.main(["--words", "5"])
+        self.assertIn("Weak Password", stderr.getvalue())
+
+    def test_passphrase_rejects_a_character_length(self) -> None:
+        with patch("sys.stderr", StringIO()):
+            with self.assertRaises(SystemExit) as caught:
+                generator.main(["--passphrase", "--length", "16"])
+        self.assertEqual(caught.exception.code, 2)
+
+    def test_interactive_passphrase(self) -> None:
+        answers = iter(["yes", "6", "no"])
+        stdout = StringIO()
+        with patch("builtins.input", side_effect=lambda _prompt: next(answers)), patch("sys.stdout", stdout):
+            generator.main([])
+        text = stdout.getvalue()
+        phrase = text.split("Generated Passphrase:", 1)[1].splitlines()[0].strip()
+        self.assertEqual(len(phrase.split()), 6)
+        self.assertIn("Strong Password", text)
+        self.assertIn("Password not saved", text)
 
     def test_entropy_matches_pool_size(self) -> None:
         self.assertAlmostEqual(generator.password_entropy_bits(10, 2), 10.0)

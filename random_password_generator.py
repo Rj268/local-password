@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Generate cryptographically secure random passwords.
+"""Generate cryptographically secure random passwords and passphrases.
 
 Interactive prompts match a simple question-and-answer flow. Pass ``--length``
-to generate a password without prompts. Character selection is uniform: each
-distinct character is equally likely, and a long enough password includes at
-least one character from every selected group.
+to generate a character password, or ``--passphrase`` for random words.
+Character selection is uniform: each distinct character is equally likely, and
+a long enough password includes at least one character from every selected group.
 """
 
 from __future__ import annotations
@@ -20,9 +20,17 @@ from pathlib import Path
 MIN_PASSWORD_LENGTH = 1
 MAX_PASSWORD_LENGTH = 1024
 MAX_PASSWORD_COUNT = 100
-STRONG_PASSWORD_LENGTH = 8
+MIN_WORD_COUNT = 1
+MAX_WORD_COUNT = 20
+DEFAULT_WORD_COUNT = 6
+# An 8-character mix is about 50 bits. Six words from the EFF list are about 78.
+STRONG_ENTROPY_BITS = 75
 # Characters that are easy to misread in many fonts: 0/O, 1/l/I, and a bar.
 AMBIGUOUS_CHARACTERS = "0Ool1I|"
+# Metacharacters that change meaning when pasted into a shell unquoted.
+SHELL_SENSITIVE_CHARACTERS = "!\"#$&'()*;<>?\\`|[]~{}"
+WORDLIST_PATH = Path(__file__).with_name("eff_large_wordlist.txt")
+_WORDLIST: tuple[str, ...] | None = None
 
 
 def without_ambiguous(character_list: str) -> str:
@@ -52,6 +60,58 @@ def password_entropy_bits(length: int, pool_size: int) -> float:
     if length <= 0 or pool_size <= 1:
         return 0.0
     return length * math.log2(pool_size)
+
+
+def special_characters(*, all_special: bool = False) -> str:
+    """Return punctuation. The default set is safe to paste into a shell unquoted."""
+    if all_special:
+        return string.punctuation
+    skip = set(SHELL_SENSITIVE_CHARACTERS)
+    return "".join(char for char in string.punctuation if char not in skip)
+
+
+def default_character_list() -> str:
+    return string.digits + string.ascii_letters + special_characters()
+
+
+def load_wordlist() -> tuple[str, ...]:
+    """Load the EFF large passphrase wordlist. The file itself is unmodified."""
+    global _WORDLIST
+    if _WORDLIST is not None:
+        return _WORDLIST
+    try:
+        text = WORDLIST_PATH.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"Could not read the passphrase word list: {exc}") from exc
+    words = [line.split()[-1] for line in text.splitlines() if line.split()]
+    if len(words) < 1000:
+        raise ValueError("The passphrase word list is missing or too small.")
+    _WORDLIST = tuple(words)
+    return _WORDLIST
+
+
+def passphrase_entropy_bits(word_count: int, wordlist_size: int) -> float:
+    """Entropy of a passphrase drawn with replacement from a word list."""
+    if word_count <= 0 or wordlist_size <= 1:
+        return 0.0
+    return word_count * math.log2(wordlist_size)
+
+
+def require_word_count(word_count: int) -> int:
+    if isinstance(word_count, bool) or not isinstance(word_count, int):
+        raise ValueError("Word count must be an integer.")
+    if word_count < MIN_WORD_COUNT or word_count > MAX_WORD_COUNT:
+        raise ValueError(f"Word count must be between {MIN_WORD_COUNT} and {MAX_WORD_COUNT}.")
+    return word_count
+
+
+def generate_passphrase(word_count: int, *, wordlist: tuple[str, ...] | None = None) -> str:
+    """Build a passphrase of ``word_count`` words separated by spaces."""
+    word_count = require_word_count(word_count)
+    words = load_wordlist() if wordlist is None else wordlist
+    if not words:
+        raise ValueError("The passphrase word list is empty.")
+    return " ".join(secrets.choice(words) for _ in range(word_count))
 
 
 def unique_characters(character_list: str) -> str:
@@ -113,63 +173,83 @@ def generate_password(length: int, character_list: str) -> str:
     return "".join(characters)
 
 
-def is_strong_password(password: str) -> bool:
-    """A strong password is at least 8 characters and mixes both letter cases, a digit, and punctuation."""
-    return (
-        len(password) >= STRONG_PASSWORD_LENGTH
-        and any(char.islower() for char in password)
-        and any(char.isupper() for char in password)
-        and any(char.isdigit() for char in password)
-        and any(char in string.punctuation for char in password)
-    )
+def estimated_pool_size(password: str) -> int:
+    """Guess the alphabet size from the character classes present in a password."""
+    size = 0
+    if any(char.islower() for char in password):
+        size += len(string.ascii_lowercase)
+    if any(char.isupper() for char in password):
+        size += len(string.ascii_uppercase)
+    if any(char.isdigit() for char in password):
+        size += len(string.digits)
+    if any(char in string.punctuation for char in password):
+        size += len(string.punctuation)
+    extras = {
+        char
+        for char in password
+        if not (char.islower() or char.isupper() or char.isdigit() or char in string.punctuation)
+    }
+    return size + len(extras)
 
 
-def strength_label(password: str) -> str:
-    if is_strong_password(password):
+def password_strength_bits(
+    password: str,
+    pool_size: int | None = None,
+    entropy_bits: float | None = None,
+) -> float:
+    if entropy_bits is not None:
+        return entropy_bits
+    size = estimated_pool_size(password) if pool_size is None else pool_size
+    return password_entropy_bits(len(password), size)
+
+
+def is_strong_password(
+    password: str,
+    pool_size: int | None = None,
+    *,
+    entropy_bits: float | None = None,
+) -> bool:
+    """A strong password has about 75 bits of entropy or more."""
+    return password_strength_bits(password, pool_size, entropy_bits) >= STRONG_ENTROPY_BITS
+
+
+def strength_label(
+    password: str,
+    pool_size: int | None = None,
+    *,
+    entropy_bits: float | None = None,
+) -> str:
+    if is_strong_password(password, pool_size, entropy_bits=entropy_bits):
         return "Strong Password"
-    missing: list[str] = []
-    if len(password) < STRONG_PASSWORD_LENGTH:
-        missing.append(f"at least {STRONG_PASSWORD_LENGTH} characters")
-    if not any(char.islower() for char in password):
-        missing.append("a lowercase letter")
-    if not any(char.isupper() for char in password):
-        missing.append("an uppercase letter")
-    if not any(char.isdigit() for char in password):
-        missing.append("a digit")
-    if not any(char in string.punctuation for char in password):
-        missing.append("a special character")
-    return "Weak Password (missing " + ", ".join(missing) + ")"
+    return "Weak Password"
 
 
-def describe_passwords(passwords: list[str], pool_size: int) -> str:
+def describe_passwords(
+    passwords: list[str],
+    pool_size: int | None = None,
+    *,
+    entropy_bits: float | None = None,
+) -> str:
     """Summarize strength and the approximate size of the search space."""
-    bits = round(password_entropy_bits(len(passwords[0]), pool_size))
+    exact_bits = password_strength_bits(passwords[0], pool_size, entropy_bits)
+    bits = round(exact_bits)
+    kind = "strong" if exact_bits >= STRONG_ENTROPY_BITS else "weak"
     if len(passwords) == 1:
-        return f"{strength_label(passwords[0])}; about {bits} bits"
-    strong = sum(1 for password in passwords if is_strong_password(password))
-    weak = len(passwords) - strong
-    lines = [f"About {bits} bits of entropy each."]
-    if weak == 0:
-        noun = "password" if strong == 1 else "passwords"
-        lines.append(f"{strong} strong {noun}.")
-    elif strong == 0:
-        noun = "password" if weak == 1 else "passwords"
-        lines.append(f"{weak} weak {noun}.")
-    else:
-        strong_noun = "password" if strong == 1 else "passwords"
-        weak_noun = "password" if weak == 1 else "passwords"
-        lines.append(f"{strong} strong {strong_noun}, {weak} weak {weak_noun}.")
-    return "\n".join(lines)
+        title = "Strong Password" if kind == "strong" else "Weak Password"
+        return f"{title}; about {bits} bits"
+    noun = "password" if len(passwords) == 1 else "passwords"
+    return f"About {bits} bits of entropy each.\n{len(passwords)} {kind} {noun}."
 
 
 def can_be_strong(length: int, character_list: str) -> bool:
     pool = unique_characters(character_list)
+    return password_entropy_bits(length, len(pool)) >= STRONG_ENTROPY_BITS
+
+
+def strong_line_message() -> str:
     return (
-        length >= STRONG_PASSWORD_LENGTH
-        and any(char.islower() for char in pool)
-        and any(char.isupper() for char in pool)
-        and any(char.isdigit() for char in pool)
-        and any(char in string.punctuation for char in pool)
+        f"These options stay under {STRONG_ENTROPY_BITS} bits. "
+        "Add length or more character types to reach a strong password."
     )
 
 
@@ -277,7 +357,7 @@ def choose_character_types() -> str | None:
     print("Choose the character types to include in your password:")
     print("1. Digits (0-9)")
     print("2. Letters (both uppercase and lowercase)")
-    print("3. Special Characters (e.g. @#$%)")
+    print("3. Special characters (shell-safe, such as @%+=)")
     print("4. Finish")
 
     selected: set[int] = set()
@@ -310,18 +390,14 @@ def _pool_from_choices(selected: set[int]) -> str:
     if 2 in selected:
         parts.append(string.ascii_letters)
     if 3 in selected:
-        parts.append(string.punctuation)
+        parts.append(special_characters())
     return "".join(parts)
 
 
 def _warn_if_cannot_be_strong(length: int, character_list: str) -> None:
     if can_be_strong(length, character_list):
         return
-    print(
-        "These options cannot produce a strong password. "
-        "A strong password needs at least 8 characters, lowercase and uppercase letters, "
-        "a digit, and a special character."
-    )
+    print(strong_line_message())
 
 
 def save_password(password: str) -> None:
@@ -360,16 +436,37 @@ def save_password(password: str) -> None:
         print(f"Password saved to '{path.name}' file")
 
 
+def run_interactive_passphrase() -> None:
+    word_count = get_valid_integer_input(
+        f"How many words ({MIN_WORD_COUNT}-{MAX_WORD_COUNT}, 6 is a readable default): ",
+        minimum=MIN_WORD_COUNT,
+        maximum=MAX_WORD_COUNT,
+    )
+    try:
+        wordlist = load_wordlist()
+        passphrase = generate_passphrase(word_count, wordlist=wordlist)
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        return
+    print("Generated Passphrase:", passphrase)
+    save_password(passphrase)
+    bits = passphrase_entropy_bits(word_count, len(wordlist))
+    print(describe_passwords([passphrase], entropy_bits=bits))
+
+
 def run_interactive() -> None:
     print("Welcome to the Password Generator")
     print("Follow the prompts to create a secure password.")
     print(
-        "A strong password should be at least 8 characters long and include "
-        "lowercase and uppercase letters, digits, and special characters."
+        f"A strong password has about {STRONG_ENTROPY_BITS} bits of entropy or more. "
+        "Sixteen random characters, or six random words, reaches that."
     )
+    if ask_yes_no("Generate a word passphrase? (yes/no): "):
+        run_interactive_passphrase()
+        return
 
     length = get_valid_integer_input(
-        "Enter password length (e.g., 12): ",
+        "Enter password length (e.g., 16): ",
         minimum=MIN_PASSWORD_LENGTH,
         maximum=MAX_PASSWORD_LENGTH,
     )
@@ -420,7 +517,24 @@ def _build_parser() -> argparse.ArgumentParser:
         "-s",
         "--special",
         action="store_true",
-        help="Include special characters",
+        help="Include shell-safe special characters such as @%+=",
+    )
+    parser.add_argument(
+        "--all-special",
+        action="store_true",
+        help="Include every punctuation character, including quotes, backticks, and backslashes",
+    )
+    parser.add_argument(
+        "--passphrase",
+        action="store_true",
+        help=f"Generate {DEFAULT_WORD_COUNT} random words instead of a character password",
+    )
+    parser.add_argument(
+        "-w",
+        "--words",
+        type=int,
+        default=None,
+        help=f"Passphrase length in words ({MIN_WORD_COUNT}-{MAX_WORD_COUNT})",
     )
     parser.add_argument(
         "--no-ambiguous",
@@ -462,16 +576,34 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _noninteractive_pool(args: argparse.Namespace) -> str:
+    class_chosen = args.digits or args.letters or args.special
+    if not class_chosen:
+        return string.digits + string.ascii_letters + special_characters(all_special=args.all_special)
     parts: list[str] = []
     if args.digits:
         parts.append(string.digits)
     if args.letters:
         parts.append(string.ascii_letters)
-    if args.special:
-        parts.append(string.punctuation)
-    if parts:
-        return "".join(parts)
-    return string.digits + string.ascii_letters + string.punctuation
+    if args.special or args.all_special:
+        parts.append(special_characters(all_special=args.all_special))
+    return "".join(parts)
+
+
+def _passphrase_requested(args: argparse.Namespace) -> bool:
+    return args.passphrase or args.words is not None
+
+
+def _reject_mixed_passphrase_options(args: argparse.Namespace) -> None:
+    character_options = any(
+        (args.length is not None, args.digits, args.letters, args.special, args.all_special, args.no_ambiguous)
+    )
+    if _passphrase_requested(args) and character_options:
+        print(
+            "Error: a passphrase is made of words. "
+            "Leave off --length and the character-type options.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
 
 
 def _password_count(args: argparse.Namespace) -> int:
@@ -489,22 +621,37 @@ def _passwords_as_text(passwords: list[str]) -> str:
     return "\n".join(passwords)
 
 
+def _generate_values(args: argparse.Namespace) -> tuple[list[str], str]:
+    """Return the generated secrets and the strength report for them."""
+    count = _password_count(args)
+    if _passphrase_requested(args):
+        word_count = DEFAULT_WORD_COUNT if args.words is None else require_word_count(args.words)
+        wordlist = load_wordlist()
+        values = [generate_passphrase(word_count, wordlist=wordlist) for _ in range(count)]
+        bits = passphrase_entropy_bits(word_count, len(wordlist))
+        return values, describe_passwords(values, entropy_bits=bits)
+
+    require_password_length(args.length)
+    character_list = prepare_character_list(
+        _noninteractive_pool(args),
+        exclude_ambiguous=args.no_ambiguous,
+    )
+    values = [generate_password(args.length, character_list) for _ in range(count)]
+    return values, describe_passwords(values, len(character_list))
+
+
 def run_noninteractive(args: argparse.Namespace) -> None:
-    if args.length is None:
+    _reject_mixed_passphrase_options(args)
+    if args.length is None and not _passphrase_requested(args):
         print("Error: --length is required when other options are set.", file=sys.stderr)
         raise SystemExit(2)
 
     explicit_types = args.digits or args.letters or args.special
     output_path: Path | None = None
     try:
-        count = _password_count(args)
-        require_password_length(args.length)
-        character_list = prepare_character_list(
-            _noninteractive_pool(args),
-            exclude_ambiguous=args.no_ambiguous,
-        )
         if args.output:
             output_path = password_file_path(args.output)
+        values, report = _generate_values(args)
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
@@ -522,13 +669,17 @@ def run_noninteractive(args: argparse.Namespace) -> None:
         )
         raise SystemExit(1)
 
-    passwords = [generate_password(args.length, character_list) for _ in range(count)]
-    print(_passwords_as_text(passwords))
+    print(_passwords_as_text(values))
     sys.stdout.flush()
     if not args.quiet:
-        if not explicit_types:
+        if not _passphrase_requested(args) and not explicit_types:
             print(
                 "Password uses digits, letters, and special characters.",
+                file=sys.stderr,
+            )
+        if args.all_special:
+            print(
+                "Special characters include quotes, backticks, and backslashes.",
                 file=sys.stderr,
             )
         if args.no_ambiguous:
@@ -536,22 +687,20 @@ def run_noninteractive(args: argparse.Namespace) -> None:
                 f"Ambiguous characters left out: {AMBIGUOUS_CHARACTERS}.",
                 file=sys.stderr,
             )
-        if not can_be_strong(args.length, character_list):
-            print(
-                "These options cannot produce a strong password. "
-                "A strong password needs at least 8 characters, lowercase and uppercase letters, "
-                "a digit, and a special character.",
-                file=sys.stderr,
-            )
-        print(describe_passwords(passwords, len(character_list)), file=sys.stderr)
+        if not _passphrase_requested(args) and not can_be_strong(args.length, prepare_character_list(
+            _noninteractive_pool(args),
+            exclude_ambiguous=args.no_ambiguous,
+        )):
+            print(strong_line_message(), file=sys.stderr)
+        print(report, file=sys.stderr)
 
     exit_code = 0
-    if args.copy and not copy_to_clipboard(_passwords_as_text(passwords)):
+    if args.copy and not copy_to_clipboard(_passwords_as_text(values)):
         exit_code = 1
     if args.output:
         try:
             path = save_password_to_file(
-                _passwords_as_text(passwords),
+                _passwords_as_text(values),
                 args.output,
                 overwrite=args.force,
             )
@@ -592,6 +741,9 @@ def main(argv: list[str] | None = None) -> None:
             args.digits,
             args.letters,
             args.special,
+            args.all_special,
+            args.passphrase,
+            args.words is not None,
             args.no_ambiguous,
             args.count is not None,
             args.copy,

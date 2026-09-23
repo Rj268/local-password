@@ -2,7 +2,7 @@
 
 Generate a cryptographically secure password with Python's `secrets` module. You can answer a short series of prompts, or pass the length and character types as flags.
 
-A strong password here has at least 8 characters, with a lowercase letter, an uppercase letter, a digit, and a special character. The generator also prints an entropy estimate: the size of the search space for that length and alphabet, in bits. When the length is long enough, it places at least one character from each selected group, then fills the rest at random. Each distinct character is equally likely.
+A strong password here has about 75 bits of entropy or more. That is the size of the search space for the length and alphabet you chose. An 8-character mix is about 50 bits, so it is reported as weak. Sixteen characters, or six random words, clears the line. When the length is long enough, the generator places at least one character from each selected group, then fills the rest at random. Each distinct character is equally likely.
 
 ## Run
 
@@ -12,7 +12,7 @@ Interactive:
 python3 random_password_generator.py
 ```
 
-The prompts ask for a length, then which of digits, letters, and special characters to include. You can leave out characters that are easy to mix up (`0`, `O`, `o`, `1`, `l`, `I`, `|`). You can copy the result to the clipboard or write it to a `.txt` file in the current directory. An unclear yes/no answer is asked again. An existing file is replaced only after you confirm.
+The prompts ask whether you want a word passphrase, then a length and which of digits, letters, and special characters to include. The default symbols are safe to paste into a shell: quotes, backticks, backslashes, and other shell metacharacters stay out unless you pass `--all-special`. You can also leave out characters that are easy to mix up (`0`, `O`, `o`, `1`, `l`, `I`). You can copy the result to the clipboard or write it to a `.txt` file in the current directory. An unclear yes/no answer is asked again. An existing file is replaced only after you confirm.
 
 Non-interactive:
 
@@ -24,11 +24,16 @@ Pass `--length` on its own to use digits, letters, and special characters. The p
 
 ```bash
 python3 random_password_generator.py --length 20 --quiet
+python3 random_password_generator.py --passphrase
+python3 random_password_generator.py --words 5
 python3 random_password_generator.py --length 20 --count 5 --no-ambiguous
+python3 random_password_generator.py --length 20 --all-special
 python3 random_password_generator.py --length 20 --output vault
 python3 random_password_generator.py --length 20 --output vault --force
 python3 random_password_generator.py --length 20 --copy
 ```
+
+`--passphrase` prints six words from the [EFF large wordlist](https://www.eff.org/files/2016/07/18/eff_large_wordlist.txt), separated by spaces. That list has 7,776 words, so six words are about 78 bits. Five words are about 65 bits and show up as weak. The wordlist is included unmodified. Joseph Bonneau and the Electronic Frontier Foundation created it, and it is used here under [CC BY 3.0 US](https://creativecommons.org/licenses/by/3.0/us/). The EFF does not endorse this project.
 
 `--output vault` writes `vault.txt` in the current directory. The file mode is readable and writable only by you, and the contents are the password in plaintext. A second run leaves that file in place until you pass `--force`. Several passwords are stored one per line. Names are stripped of path characters, so the file stays in the current directory, and a symbolic link is refused.
 
@@ -53,7 +58,10 @@ python3 -m unittest discover -s tests -t .
 | `-l`, `--length` | Password length from 1 to 1024 |
 | `-d`, `--digits` | Include `0-9` |
 | `-a`, `--letters` | Include `a-z` and `A-Z` |
-| `-s`, `--special` | Include punctuation |
+| `-s`, `--special` | Include shell-safe symbols such as `@%+=` |
+| `--all-special` | Include every punctuation character, including quotes and backslashes |
+| `--passphrase` | Generate six random words |
+| `-w`, `--words` | Passphrase length in words (1–20) |
 | `--no-ambiguous` | Leave out `0`/`O`, `1`/`l`/`I`, and the vertical bar |
 | `-n`, `--count` | How many passwords to generate (1–100) |
 | `-c`, `--copy` | Copy to the clipboard |
