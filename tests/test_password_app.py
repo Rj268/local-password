@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import string
 import tempfile
 import unittest
@@ -87,6 +88,42 @@ class GenerateTests(unittest.TestCase):
     def test_chip_label_states_on_and_off(self) -> None:
         self.assertIn("On", password_app.chip_label("Digits", True))
         self.assertIn("Off", password_app.chip_label("Letters", False))
+
+
+class SavedPasswordTests(unittest.TestCase):
+    def test_save_round_trip_is_private_to_the_user(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "local-password" / "saved.txt"
+            password_app.store_saved_passwords(["first-secret", "second-secret"], path)
+            self.assertEqual(
+                password_app.load_saved_passwords(path),
+                ["first-secret", "second-secret"],
+            )
+            file_mode = stat.S_IMODE(path.stat().st_mode)
+            directory_mode = stat.S_IMODE(path.parent.stat().st_mode)
+            self.assertEqual(file_mode & 0o077, 0)
+            self.assertEqual(directory_mode & 0o077, 0)
+
+    def test_new_passwords_are_kept_once_and_listed_first(self) -> None:
+        saved = password_app.remember_passwords(["older"], ["newer", "older"])
+        self.assertEqual(saved, ["newer", "older"])
+
+    def test_symlink_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "real.txt"
+            target.write_text("keep\n", encoding="utf-8")
+            link = Path(directory) / "saved.txt"
+            link.symlink_to(target)
+            with self.assertRaises(ValueError):
+                password_app.store_saved_passwords(["stolen"], link)
+            self.assertEqual(target.read_text(encoding="utf-8"), "keep\n")
+            with self.assertRaises(ValueError):
+                password_app.load_saved_passwords(link)
+
+    def test_missing_file_means_nothing_is_saved(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "saved.txt"
+            self.assertEqual(password_app.load_saved_passwords(path), [])
 
 
 class ClipboardTests(unittest.TestCase):

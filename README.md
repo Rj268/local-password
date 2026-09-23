@@ -1,6 +1,6 @@
 # Local Password
 
-Generate a cryptographically secure password on this computer and copy it. The password stays in the window until you close it. Copy is the only way it leaves. Nothing is written to disk, and the app does not open a network port.
+Generate a cryptographically secure password on this computer and copy it. The password stays in the window until you close it. Save keeps that password on this computer so it is still there the next time you open the app. The app does not open a network port.
 
 A strong password here has about 75 bits of entropy or more. That is the size of the search space for the length and alphabet you chose. An 8-character mix is about 50 bits, so it is reported as weak. Sixteen characters, or six random words, clears the line. When the length is long enough, the generator places at least one character from each selected group, then fills the rest at random. Each distinct character is equally likely.
 
@@ -9,7 +9,7 @@ A strong password here has about 75 bits of entropy or more. That is the size of
 The Debian package installs the local window:
 
 ```bash
-sudo dpkg -i dist/local-password_1.0.0_all.deb
+sudo dpkg -i dist/local-password_1.1.0_all.deb
 local-password
 ```
 
@@ -28,7 +28,7 @@ sudo apt install python3-gi gir1.2-gtk-3.0 xclip
 python3 password_app.py
 ```
 
-The window has Characters and Words. Length, word count, and number of passwords are numeric. Digits, Letters, and Symbols show **On** or **Off**. Symbols include quotes, backticks, and backslashes. Generate fills the window. Copy places the password on the clipboard.
+The window has Characters and Words. Length, word count, and number of passwords are numeric. Digits, Letters, and Symbols show **On** or **Off**. Symbols include quotes, backticks, and backslashes. Generate fills the window. Copy places the password on the clipboard. Save writes it to a file only your user can read, under `~/.local/share/local-password/saved.txt`. A password you do not save is gone when the window closes. Remove drops a saved password from that file.
 
 ## Command line
 

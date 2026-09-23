@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Local window for the password generator.
 
-The password stays in this process. Copy is the only way it leaves.
-Nothing is written to disk, and the app does not listen on a network port.
+The password stays in this process until you close the window.
+Copy places it on the clipboard. Save keeps it for the next time you open the app.
+The app does not listen on a network port.
 """
 
 from __future__ import annotations
 
+import os
 import shutil
 import string
 import subprocess
@@ -195,6 +197,64 @@ def generate(
     )
 
 
+def saved_passwords_path() -> Path:
+    """Per-user file for passwords the person chose to keep."""
+    data_home = os.environ.get("XDG_DATA_HOME")
+    root = Path(data_home) if data_home else Path.home() / ".local" / "share"
+    return root / "local-password" / "saved.txt"
+
+
+def load_saved_passwords(path: Path | None = None) -> list[str]:
+    """Read passwords the person saved. A missing file means none are saved."""
+    path = saved_passwords_path() if path is None else path
+    if path.is_symlink():
+        raise ValueError("The saved password file is a symbolic link.")
+    if not path.exists():
+        return []
+    if not path.is_file():
+        raise ValueError("The saved password file is not a regular file.")
+    text = path.read_text(encoding="utf-8")
+    return [line for line in text.splitlines() if line]
+
+
+def remember_passwords(existing: list[str], fresh: list[str]) -> list[str]:
+    """Put newly saved passwords first and keep a single copy of each."""
+    saved: list[str] = []
+    for password in list(fresh) + list(existing):
+        if not password or "\n" in password or "\r" in password:
+            raise ValueError("A saved password must be a single line.")
+        if password not in saved:
+            saved.append(password)
+    return saved
+
+
+def store_saved_passwords(passwords: list[str], path: Path | None = None) -> Path:
+    """Write saved passwords so only the current user can read the file."""
+    path = saved_passwords_path() if path is None else path
+    for password in passwords:
+        if not password or "\n" in password or "\r" in password:
+            raise ValueError("A saved password must be a single line.")
+    directory = path.parent
+    directory.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(directory, 0o700)
+    except OSError:
+        pass
+    if path.is_symlink():
+        raise ValueError("The saved password file is a symbolic link.")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+        payload = "".join(f"{password}\n" for password in passwords).encode("utf-8")
+        os.write(descriptor, payload)
+    finally:
+        os.close(descriptor)
+    return path
+
+
 def copy_with_xclip(text: str) -> bool:
     """Copy text by piping it to xclip. The password is not a command argument."""
     if shutil.which("xclip") is None:
@@ -288,8 +348,7 @@ class PasswordWindow:
         title.get_style_context().add_class("title")
         lede = gtk.Label(
             label=(
-                "Generate it here, then copy it. The password stays in this window "
-                "until you close it. Nothing is written to disk."
+                "Generate it here, then copy it. Save keeps it on this computer after you close the window."
             ),
             xalign=0,
         )
@@ -456,19 +515,45 @@ class PasswordWindow:
         scroller.add(self.view)
         result.pack_start(scroller, True, True, 0)
 
+        actions = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
+        actions.set_homogeneous(True)
         self.copy_button = gtk.Button(label="Copy")
         self.copy_button.get_style_context().add_class("primary")
         self.copy_button.set_sensitive(False)
         self.copy_button.connect("clicked", self.on_copy)
-        result.pack_start(self.copy_button, False, False, 0)
+        self.save_button = gtk.Button(label="Save")
+        self.save_button.get_style_context().add_class("secondary")
+        self.save_button.set_sensitive(False)
+        self.save_button.connect("clicked", self.on_save)
+        actions.pack_start(self.copy_button, True, True, 0)
+        actions.pack_start(self.save_button, True, True, 0)
+        result.pack_start(actions, False, False, 0)
 
         self.status = gtk.Label(
-            label="Generate a password. It stays in this window.",
+            label="Generate a password. Save keeps it after you close.",
             xalign=0,
         )
         self.status.set_line_wrap(True)
         self.status.get_style_context().add_class("hint")
         result.pack_start(self.status, False, False, 0)
+
+        self.saved_heading = gtk.Label(label="Saved", xalign=0)
+        self.saved_heading.get_style_context().add_class("eyebrow")
+        self.saved_heading.set_no_show_all(True)
+        self.saved_heading.hide()
+        result.pack_start(self.saved_heading, False, False, 0)
+
+        self.saved_box = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=8)
+        self.saved_scroll = gtk.ScrolledWindow()
+        self.saved_scroll.set_policy(gtk.PolicyType.NEVER, gtk.PolicyType.AUTOMATIC)
+        self.saved_scroll.set_propagate_natural_height(True)
+        self.saved_scroll.set_max_content_height(160)
+        self.saved_scroll.set_no_show_all(True)
+        self.saved_scroll.hide()
+        self.saved_scroll.add(self.saved_box)
+        result.pack_start(self.saved_scroll, False, False, 0)
+        self.saved: list[str] = []
+        self._load_saved()
 
     def _labeled(self, caption: str, control):
         row = self.gtk.Box(orientation=self.gtk.Orientation.VERTICAL, spacing=4)
@@ -563,7 +648,8 @@ class PasswordWindow:
         self.meter.set_fraction(result.fraction)
         self.set_note(result.note)
         self.copy_button.set_sensitive(True)
-        self.status.set_text("In this window only.")
+        self.save_button.set_sensitive(True)
+        self.status.set_text("In this window only, until you save it.")
 
     def on_copy(self, _button) -> None:
         if not self.current:
@@ -581,7 +667,98 @@ class PasswordWindow:
         if copied:
             self.status.set_text("Copied.")
         else:
-            self.status.set_text("Copy failed. The password is still only in this window.")
+            self.status.set_text("Copy failed.")
+
+    def _load_saved(self) -> None:
+        try:
+            self.saved = load_saved_passwords()
+        except ValueError as exc:
+            self.saved = []
+            self.status.set_text(str(exc))
+            self._refresh_saved_rows()
+            return
+        self._refresh_saved_rows()
+        if not self.saved:
+            return
+        self.current = "\n".join(self.saved)
+        self.buffer.set_text(self.current)
+        self.strength.set_text("Saved")
+        self.bits.set_text("Kept after close")
+        self.copy_button.set_sensitive(True)
+        self.save_button.set_sensitive(True)
+        self.status.set_text("Saved on this computer.")
+
+    def _refresh_saved_rows(self) -> None:
+        for child in list(self.saved_box.get_children()):
+            self.saved_box.remove(child)
+        if not self.saved:
+            self.saved_heading.hide()
+            self.saved_scroll.hide()
+            return
+        self.saved_heading.show()
+        self.saved_scroll.show()
+        for password in self.saved:
+            self.saved_box.pack_start(self._saved_row(password), False, False, 0)
+        self.saved_box.show_all()
+
+    def _saved_row(self, password: str):
+        gtk = self.gtk
+        row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
+        label = gtk.Label(label=password, xalign=0)
+        label.set_line_wrap(True)
+        label.set_selectable(True)
+        label.set_hexpand(True)
+        label.get_style_context().add_class("hint")
+        remove = gtk.Button(label="Remove")
+        remove.get_style_context().add_class("secondary")
+        remove.connect("clicked", lambda *_args, item=password: self.on_remove(item))
+        row.pack_start(label, True, True, 0)
+        row.pack_start(remove, False, False, 0)
+        return row
+
+    def on_save(self, _button) -> None:
+        if not self.current:
+            return
+        fresh = [line for line in self.current.splitlines() if line]
+        try:
+            updated = remember_passwords(self.saved, fresh)
+            store_saved_passwords(updated)
+        except ValueError as exc:
+            self.status.set_text(str(exc))
+            return
+        except OSError:
+            self.status.set_text("Could not save the password.")
+            return
+        self.saved = updated
+        self._refresh_saved_rows()
+        self.status.set_text("Saved on this computer.")
+
+    def on_remove(self, password: str) -> None:
+        updated = [item for item in self.saved if item != password]
+        try:
+            store_saved_passwords(updated)
+        except ValueError as exc:
+            self.status.set_text(str(exc))
+            return
+        except OSError:
+            self.status.set_text("Could not remove the saved password.")
+            return
+        self.saved = updated
+        self._refresh_saved_rows()
+        lines = [line for line in self.current.splitlines() if line != password]
+        if lines:
+            self.current = "\n".join(lines)
+            self.buffer.set_text(self.current)
+            self.status.set_text("Removed from this computer.")
+            return
+        self.current = ""
+        self.buffer.set_text("")
+        self.copy_button.set_sensitive(False)
+        self.save_button.set_sensitive(False)
+        self.strength.set_text("Result")
+        self.bits.set_text("Waiting to generate")
+        self.meter.set_fraction(0)
+        self.status.set_text("Generate a password. Save keeps it after you close.")
 
 
 if __name__ == "__main__":
