@@ -144,7 +144,7 @@ class CommandLineTests(unittest.TestCase):
         self.assertEqual(len(copy.call_args.args[0]), 12)
 
     def test_interactive_flow_can_decline_saving(self) -> None:
-        answers = iter(["16", "1", "2", "3", "4", "no"])
+        answers = iter(["16", "1", "2", "3", "4", "no", "no"])
         stdout = StringIO()
         with patch("builtins.input", side_effect=lambda _prompt: next(answers)), patch("sys.stdout", stdout):
             generator.main([])
@@ -161,6 +161,125 @@ class CommandLineTests(unittest.TestCase):
             generator.main([])
         self.assertIn("You have chosen to exit.", stdout.getvalue())
         self.assertNotIn("Generated Password:", stdout.getvalue())
+
+    def test_count_prints_one_password_per_line(self) -> None:
+        stdout = StringIO()
+        stderr = StringIO()
+        with patch("sys.stdout", stdout), patch("sys.stderr", stderr):
+            generator.main(["--length", "12", "--count", "3", "--quiet"])
+        passwords = stdout.getvalue().splitlines()
+        self.assertEqual(len(passwords), 3)
+        self.assertEqual(len(set(passwords)), 3)
+        self.assertTrue(all(len(password) == 12 for password in passwords))
+        self.assertEqual(stderr.getvalue(), "")
+
+    def test_count_reports_entropy_once(self) -> None:
+        stderr = StringIO()
+        with patch("sys.stdout", StringIO()), patch("sys.stderr", stderr):
+            generator.main(["--length", "16", "--count", "4"])
+        text = stderr.getvalue()
+        self.assertIn("About ", text)
+        self.assertIn("bits of entropy each.", text)
+        self.assertIn("4 strong passwords.", text)
+
+    def test_invalid_count_exits(self) -> None:
+        with patch("sys.stderr", StringIO()):
+            with self.assertRaises(SystemExit) as caught:
+                generator.main(["--length", "12", "--count", "0"])
+        self.assertEqual(caught.exception.code, 2)
+
+    def test_no_ambiguous_leaves_out_confusable_characters(self) -> None:
+        stdout = StringIO()
+        with patch("sys.stdout", stdout), patch("sys.stderr", StringIO()):
+            generator.main(["--length", "40", "--no-ambiguous", "--quiet"])
+        password = stdout.getvalue().strip()
+        self.assertEqual(len(password), 40)
+        self.assertTrue(set(password).isdisjoint(generator.AMBIGUOUS_CHARACTERS))
+        self.assertTrue(generator.is_strong_password(password))
+
+    def test_existing_output_is_kept_until_force(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            previous = os.getcwd()
+            os.chdir(directory)
+            try:
+                path = Path("saved.txt")
+                path.write_text("keep", encoding="utf-8")
+                path.chmod(0o644)
+                stderr = StringIO()
+                with patch("sys.stderr", stderr):
+                    with self.assertRaises(SystemExit) as caught:
+                        generator.main(["--length", "12", "--output", "saved"])
+                self.assertEqual(caught.exception.code, 1)
+                self.assertEqual(path.read_text(encoding="utf-8"), "keep")
+                self.assertIn("--force", stderr.getvalue())
+
+                stdout = StringIO()
+                with patch("sys.stdout", stdout), patch("sys.stderr", StringIO()):
+                    generator.main(["--length", "12", "--output", "saved", "--force"])
+                self.assertEqual(path.read_text(encoding="utf-8"), stdout.getvalue().strip())
+                mode = stat.S_IMODE(path.stat().st_mode)
+                self.assertEqual(mode & 0o077, 0)
+            finally:
+                os.chdir(previous)
+
+    def test_interactive_repeats_an_unclear_answer(self) -> None:
+        answers = iter(["12", "1", "2", "3", "4", "maybe", "no", "no"])
+        stdout = StringIO()
+        with patch("builtins.input", side_effect=lambda _prompt: next(answers)), patch("sys.stdout", stdout):
+            generator.main([])
+        text = stdout.getvalue()
+        self.assertIn("Please answer yes or no.", text)
+        self.assertIn("Password not saved", text)
+
+    def test_interactive_can_skip_ambiguous_characters(self) -> None:
+        answers = iter(["20", "1", "2", "3", "4", "yes", "no"])
+        stdout = StringIO()
+        with patch("builtins.input", side_effect=lambda _prompt: next(answers)), patch("sys.stdout", stdout):
+            generator.main([])
+        text = stdout.getvalue()
+        password = text.split("Generated Password:", 1)[1].splitlines()[0].strip()
+        self.assertTrue(set(password).isdisjoint(generator.AMBIGUOUS_CHARACTERS))
+        self.assertIn("bits", text)
+
+
+class PoolAndEntropyTests(unittest.TestCase):
+    def test_ambiguous_filter_and_empty_pool(self) -> None:
+        self.assertEqual(generator.without_ambiguous("a0O1l"), "a")
+        with self.assertRaises(ValueError):
+            generator.prepare_character_list("0Ool1I|", exclude_ambiguous=True)
+
+    def test_entropy_matches_pool_size(self) -> None:
+        self.assertAlmostEqual(generator.password_entropy_bits(10, 2), 10.0)
+        self.assertIn("about 10 bits", generator.describe_passwords(["a" * 10], 2))
+
+    def test_symlink_output_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            previous = os.getcwd()
+            os.chdir(directory)
+            try:
+                target = Path("secret.txt")
+                target.write_text("keep", encoding="utf-8")
+                Path("link.txt").symlink_to(target)
+                with patch("sys.stderr", StringIO()):
+                    with self.assertRaises(SystemExit) as caught:
+                        generator.main(["--length", "12", "--output", "link", "--force"])
+                self.assertEqual(caught.exception.code, 1)
+                self.assertEqual(target.read_text(encoding="utf-8"), "keep")
+            finally:
+                os.chdir(previous)
+
+    def test_several_passwords_are_one_per_line_in_the_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            previous = os.getcwd()
+            os.chdir(directory)
+            try:
+                stdout = StringIO()
+                with patch("sys.stdout", stdout), patch("sys.stderr", StringIO()):
+                    generator.main(["--length", "8", "--count", "2", "--output", "batch", "--quiet"])
+                passwords = stdout.getvalue().splitlines()
+                self.assertEqual(Path("batch.txt").read_text(encoding="utf-8").splitlines(), passwords)
+            finally:
+                os.chdir(previous)
 
 
 if __name__ == "__main__":
