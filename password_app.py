@@ -697,17 +697,6 @@ class PasswordWindow:
         self.mode_characters.connect("clicked", lambda *_: self.set_mode("characters"))
         self.mode_words.connect("clicked", lambda *_: self.set_mode("passphrase"))
         controls.pack_start(mode_row, False, False, 0)
-        self.enterprise_button = gtk.Button(label="256 bits")
-        self.enterprise_button.get_style_context().add_class("secondary")
-        self.enterprise_button.connect("clicked", self.on_use_256)
-        controls.pack_start(self.enterprise_button, False, False, 0)
-        enterprise_hint = gtk.Label(
-            label="Sets the length or word count that reaches 256 bits, then generates.",
-            xalign=0,
-        )
-        enterprise_hint.set_line_wrap(True)
-        enterprise_hint.get_style_context().add_class("hint")
-        controls.pack_start(enterprise_hint, False, False, 0)
 
         self.character_box = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=12)
         controls.pack_start(self.character_box, False, False, 0)
@@ -755,7 +744,10 @@ class PasswordWindow:
         self.count.set_value(1)
         self.count.set_numeric(True)
         count_box = self._labeled("Number of passwords", self.count)
-        count_hint = gtk.Label(label="Generate this many passwords at once.", xalign=0)
+        count_hint = gtk.Label(
+            label="Each password can be named and saved on its own.",
+            xalign=0,
+        )
         count_hint.get_style_context().add_class("hint")
         count_box.pack_start(count_hint, False, False, 0)
         controls.pack_start(count_box, False, False, 0)
@@ -812,7 +804,6 @@ class PasswordWindow:
         scroller.set_min_content_height(160)
         scroller.set_vexpand(True)
         scroller.add(self.view)
-        result.pack_start(scroller, True, True, 0)
 
         name_box = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=4)
         name_label = gtk.Label(label="Name", xalign=0)
@@ -826,7 +817,6 @@ class PasswordWindow:
         name_box.pack_start(name_label, False, False, 0)
         name_box.pack_start(self.name_entry, False, False, 0)
         name_box.pack_start(name_hint, False, False, 0)
-        result.pack_start(name_box, False, False, 0)
 
         actions = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
         actions.set_homogeneous(True)
@@ -840,7 +830,24 @@ class PasswordWindow:
         self.save_button.connect("clicked", self.on_save)
         actions.pack_start(self.copy_button, True, True, 0)
         actions.pack_start(self.save_button, True, True, 0)
-        result.pack_start(actions, False, False, 0)
+
+        self.single_box = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=12)
+        self.single_box.set_vexpand(True)
+        self.single_box.pack_start(scroller, True, True, 0)
+        self.single_box.pack_start(name_box, False, False, 0)
+        self.single_box.pack_start(actions, False, False, 0)
+        result.pack_start(self.single_box, True, True, 0)
+
+        self.batch_box = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=12)
+        self.batch_scroll = gtk.ScrolledWindow()
+        self.batch_scroll.set_policy(gtk.PolicyType.NEVER, gtk.PolicyType.AUTOMATIC)
+        self.batch_scroll.set_vexpand(True)
+        self.batch_scroll.set_min_content_height(220)
+        self.batch_scroll.set_no_show_all(True)
+        self.batch_scroll.hide()
+        self.batch_scroll.add(self.batch_box)
+        result.pack_start(self.batch_scroll, True, True, 0)
+        self.batch: list[str] = []
 
         recovery = gtk.Label(label=PASSPHRASE_LOSS_WARNING, xalign=0)
         recovery.set_line_wrap(True)
@@ -980,23 +987,6 @@ class PasswordWindow:
                 style.add_class("off")
                 style.remove_class("on")
 
-    def on_use_256(self, _button) -> None:
-        """Set the length or word count that reaches 256 bits, then generate."""
-        try:
-            if self.mode == "passphrase":
-                self.words.set_value(words_for_bits())
-            else:
-                pool = character_pool(
-                    digits=self.digits.get_active(),
-                    letters=self.letters.get_active(),
-                    symbols=self.symbols.get_active(),
-                )
-                self.length.set_value(length_for_bits(pool))
-        except ValueError as exc:
-            self.set_note(str(exc))
-            return
-        self.on_generate(None)
-
     def set_note(self, text: str) -> None:
         self.note.set_text(text)
         if text:
@@ -1018,10 +1008,16 @@ class PasswordWindow:
         except ValueError as exc:
             self.set_note(str(exc))
             return
+        passwords = [line for line in result.text.splitlines() if line]
+        self.batch = passwords
         self.current = result.text
         self.showing_saved = False
         self.save_ready = True
         self.buffer.set_text(result.text)
+        if len(passwords) > 1:
+            self._show_batch(passwords)
+        else:
+            self._show_single()
         self.strength.set_text(result.label)
         strength_style = self.strength.get_style_context()
         if result.label == "Strong":
@@ -1037,7 +1033,89 @@ class PasswordWindow:
         self.set_note(result.note)
         self.copy_button.set_sensitive(True)
         self.save_button.set_sensitive(True)
-        self.status.set_text("Name it, then save it. Otherwise it is gone when you close.")
+        if len(passwords) > 1:
+            self.status.set_text("Name the ones you want to keep. The rest are gone when you close.")
+        else:
+            self.status.set_text("Name it, then save it. Otherwise it is gone when you close.")
+
+    def _show_single(self) -> None:
+        self.batch_scroll.hide()
+        self.batch_scroll.set_no_show_all(True)
+        self.single_box.set_no_show_all(False)
+        self.single_box.show_all()
+
+    def _show_batch(self, passwords: list[str]) -> None:
+        for child in list(self.batch_box.get_children()):
+            self.batch_box.remove(child)
+        for password in passwords:
+            self.batch_box.pack_start(self._batch_row(password), False, False, 0)
+        self.single_box.hide()
+        self.single_box.set_no_show_all(True)
+        self.batch_scroll.set_no_show_all(False)
+        self.batch_scroll.show_all()
+
+    def _batch_row(self, password: str):
+        gtk = self.gtk
+        row = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=6)
+        secret = gtk.Label(label=password, xalign=0)
+        secret.set_line_wrap(True)
+        secret.set_selectable(True)
+        secret.set_max_width_chars(42)
+        secret.get_style_context().add_class("saved-name")
+        name = gtk.Entry()
+        name.set_placeholder_text("Name this one")
+        name.set_max_length(MAX_NAME_LENGTH)
+        note = gtk.Label(label="", xalign=0)
+        note.set_line_wrap(True)
+        note.get_style_context().add_class("hint")
+        actions = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
+        copy = gtk.Button(label="Copy")
+        copy.get_style_context().add_class("primary")
+        copy.connect("clicked", lambda *_args, text=password: self.on_copy_text(text))
+        save = gtk.Button(label="Save")
+        save.get_style_context().add_class("secondary")
+        save.connect(
+            "clicked",
+            lambda *_args, text=password, entry=name, status=note: self.on_save_one(text, entry, status),
+        )
+        name.connect(
+            "activate",
+            lambda *_args, text=password, entry=name, status=note: self.on_save_one(text, entry, status),
+        )
+        actions.pack_start(copy, True, True, 0)
+        actions.pack_start(save, True, True, 0)
+        row.pack_start(secret, False, False, 0)
+        row.pack_start(name, False, False, 0)
+        row.pack_start(actions, False, False, 0)
+        row.pack_start(note, False, False, 0)
+        return row
+
+    def on_save_one(self, password: str, name_entry, row_status) -> None:
+        """Save one generated password. The others stay unsaved."""
+        try:
+            label = clean_name(name_entry.get_text())
+        except ValueError as exc:
+            row_status.set_text(str(exc))
+            self.status.set_text(str(exc))
+            return
+        if not self._ensure_vault_key():
+            return
+        try:
+            updated = remember_named(self.saved, label, [password])
+            write_vault(self.vault_key, updated)
+        except ValueError as exc:
+            row_status.set_text(str(exc))
+            self.status.set_text(str(exc))
+            return
+        except OSError:
+            row_status.set_text("Could not save the password.")
+            self.status.set_text("Could not save the password.")
+            return
+        self.saved = updated
+        self.locked = False
+        self._update_lock_button()
+        row_status.set_text(f"Saved as {label}.")
+        self.status.set_text(f"Saved as {label}. The others stay unsaved until you save them.")
 
     def on_copy(self, _button) -> None:
         if not self.current:

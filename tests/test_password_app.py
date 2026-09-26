@@ -293,6 +293,61 @@ class PassphraseWarningTests(unittest.TestCase):
             Gtk.main_iteration_do(False)
 
 
+class BatchSaveTests(unittest.TestCase):
+    @unittest.skipUnless(os.environ.get("DISPLAY"), "needs a graphical session")
+    def test_one_password_from_a_batch_can_be_saved_alone(self) -> None:
+        import gi
+
+        gi.require_version("Gtk", "3.0")
+        gi.require_version("Gdk", "3.0")
+        from gi.repository import Gdk, Gtk
+
+        with tempfile.TemporaryDirectory() as directory:
+            previous = os.environ.get("XDG_DATA_HOME")
+            os.environ["XDG_DATA_HOME"] = directory
+            try:
+                password_app.install_styles(Gtk, Gdk)
+                window = password_app.PasswordWindow(Gtk, Gdk)
+                window.count.set_value(3)
+                window.on_generate(None)
+                self.assertEqual(len(window.batch), 3)
+                self.assertFalse(window.single_box.get_visible())
+                self.assertTrue(window.batch_scroll.get_visible())
+                entries = [
+                    child
+                    for child in _gtk_descendants(window.batch_box)
+                    if isinstance(child, Gtk.Entry)
+                ]
+                self.assertEqual(len(entries), 3)
+                entries[1].set_text("Bank")
+                window._prompt_passphrase = lambda **_kwargs: "verify-passphrase-ok"
+                window.on_save_one(window.batch[1], entries[1], window.status)
+                self.assertEqual([item.name for item in window.saved], ["Bank"])
+                self.assertEqual(window.saved[0].password, window.batch[1])
+                self.assertNotIn(window.batch[0], [item.password for item in window.saved])
+                self.assertNotIn(window.batch[2], [item.password for item in window.saved])
+                self.assertEqual(window.section, "create")
+                entries[1].set_text("   ")
+                window.on_save_one(window.batch[0], entries[1], window.status)
+                self.assertEqual([item.name for item in window.saved], ["Bank"])
+                window.window.destroy()
+                while Gtk.events_pending():
+                    Gtk.main_iteration_do(False)
+            finally:
+                if previous is None:
+                    os.environ.pop("XDG_DATA_HOME", None)
+                else:
+                    os.environ["XDG_DATA_HOME"] = previous
+
+
+def _gtk_descendants(widget):
+    found = []
+    for child in getattr(widget, "get_children", lambda: [])():
+        found.append(child)
+        found.extend(_gtk_descendants(child))
+    return found
+
+
 class ClipboardTests(unittest.TestCase):
     def test_xclip_receives_the_password_on_stdin(self) -> None:
         with patch("password_app.shutil.which", return_value="/usr/bin/xclip"), patch(
