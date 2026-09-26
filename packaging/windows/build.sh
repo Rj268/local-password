@@ -12,7 +12,7 @@ if [ "${MSYSTEM:-}" != "UCRT64" ]; then
   echo "    mingw-w64-ucrt-x86_64-python \\" >&2
   echo "    mingw-w64-ucrt-x86_64-python-gobject \\" >&2
   echo "    mingw-w64-ucrt-x86_64-python-cryptography \\" >&2
-  echo "    mingw-w64-ucrt-x86_64-python-pyinstaller" >&2
+  echo "    mingw-w64-ucrt-x86_64-pyinstaller" >&2
   exit 1
 fi
 
@@ -29,7 +29,7 @@ for tool in python pyinstaller gdk-pixbuf-query-loaders glib-compile-schemas; do
 done
 if [ "$missing" -ne 0 ]; then
   echo "From the UCRT64 shell, install:" >&2
-  echo "  pacman -S --needed mingw-w64-ucrt-x86_64-gtk3 mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-python-gobject mingw-w64-ucrt-x86_64-python-cryptography mingw-w64-ucrt-x86_64-python-pyinstaller" >&2
+  echo "  pacman -S --needed mingw-w64-ucrt-x86_64-gtk3 mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-python-gobject mingw-w64-ucrt-x86_64-python-cryptography mingw-w64-ucrt-x86_64-pyinstaller" >&2
   exit 1
 fi
 

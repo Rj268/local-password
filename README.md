@@ -74,7 +74,7 @@ pacman -S --needed \
   mingw-w64-ucrt-x86_64-python \
   mingw-w64-ucrt-x86_64-python-gobject \
   mingw-w64-ucrt-x86_64-python-cryptography \
-  mingw-w64-ucrt-x86_64-python-pyinstaller
+  mingw-w64-ucrt-x86_64-pyinstaller
 ```
 
 3. From the project folder, run `bash packaging/windows/build.sh`.
