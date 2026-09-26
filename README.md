@@ -9,7 +9,7 @@ A strong password here has about 75 bits of entropy or more. The strength bar fi
 The Debian package installs the local window:
 
 ```bash
-sudo dpkg -i dist/local-password_1.6.0_all.deb
+sudo dpkg -i dist/local-password_1.6.1_all.deb
 local-password
 ```
 

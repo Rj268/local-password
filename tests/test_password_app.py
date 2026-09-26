@@ -320,6 +320,29 @@ class PassphraseWarningTests(unittest.TestCase):
             Gtk.main_iteration_do(False)
 
 
+class CreatePageTests(unittest.TestCase):
+    @unittest.skipUnless(os.environ.get("DISPLAY"), "needs a graphical session")
+    def test_create_page_stays_filled_after_opening_saved_first(self) -> None:
+        import gi
+
+        gi.require_version("Gtk", "3.0")
+        gi.require_version("Gdk", "3.0")
+        from gi.repository import Gdk, Gtk
+
+        password_app.install_styles(Gtk, Gdk)
+        window = password_app.PasswordWindow(Gtk, Gdk)
+        window.show_section("saved")
+        window.window.show_all()
+        window.show_section("create")
+        self.assertTrue(window.generate_button.get_visible())
+        self.assertTrue(window.length.get_visible())
+        self.assertTrue(window.digits.get_visible())
+        self.assertTrue(window.single_box.get_visible())
+        window.window.destroy()
+        while Gtk.events_pending():
+            Gtk.main_iteration_do(False)
+
+
 class BatchSaveTests(unittest.TestCase):
     @unittest.skipUnless(os.environ.get("DISPLAY"), "needs a graphical session")
     def test_one_password_from_a_batch_can_be_saved_alone(self) -> None:

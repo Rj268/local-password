@@ -722,7 +722,7 @@ def main() -> None:
     window = PasswordWindow(Gtk, Gdk)
     window.window.connect("destroy", Gtk.main_quit)
     window.window.show_all()
-    window.apply_mode()
+    window.show_section(window.section)
     Gtk.main()
 
 
@@ -1117,7 +1117,7 @@ class PasswordWindow:
             self.saved_view.set_no_show_all(True)
             self.saved_view.hide()
             self.create_view.set_no_show_all(False)
-            self.create_view.show()
+            self.create_view.show_all()
             self.apply_mode()
         for button, selected in (
             (self.create_tab, not saved),
