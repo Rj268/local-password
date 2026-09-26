@@ -233,11 +233,22 @@ class SavedPassword:
     password: str
 
 
+def data_directory() -> Path:
+    """Per-user folder for saved passwords. Windows uses Local AppData."""
+    data_home = os.environ.get("XDG_DATA_HOME")
+    if data_home:
+        return Path(data_home)
+    if sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA")
+        if local:
+            return Path(local)
+        return Path.home() / "AppData" / "Local"
+    return Path.home() / ".local" / "share"
+
+
 def saved_passwords_path() -> Path:
     """Per-user file for passwords the person chose to keep."""
-    data_home = os.environ.get("XDG_DATA_HOME")
-    root = Path(data_home) if data_home else Path.home() / ".local" / "share"
-    return root / "local-password" / "saved.txt"
+    return data_directory() / "local-password" / "saved.txt"
 
 
 def clean_name(name: str) -> str:
@@ -689,6 +700,7 @@ def _icon_candidates() -> list[Path]:
     return [
         here / "local-password.svg",
         here / "packaging" / "local-password.svg",
+        generator.app_root() / "local-password.svg",
         Path("/usr/share/icons/hicolor/scalable/apps/local-password.svg"),
     ]
 
@@ -1272,7 +1284,7 @@ class PasswordWindow:
             copied = True
         except Exception:
             copied = False
-        if copy_with_xclip(self.current):
+        if copy_with_xclip(self.current) or generator.copy_with_windows(self.current):
             copied = True
         if copied:
             self.status.set_text("Copied.")
@@ -1575,7 +1587,7 @@ class PasswordWindow:
             copied = True
         except Exception:
             copied = False
-        if copy_with_xclip(text):
+        if copy_with_xclip(text) or generator.copy_with_windows(text):
             copied = True
         message = "Copied." if copied else "Copy failed."
         self.status.set_text(message)

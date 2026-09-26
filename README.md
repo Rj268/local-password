@@ -59,9 +59,30 @@ pip install -r requirements.txt
 
 Generation itself needs only the Python standard library. The window needs GTK 3.
 
-## Other computers
+## Windows
 
-This environment produced the Debian package. A macOS disk image is built on macOS. A Windows executable is built on Windows. An Android package is built with the Android SDK. Those toolchains are not on this machine, so this project ships the local window and the `.deb`.
+The window is ready to build on Windows. Saved passwords go in `%LOCALAPPDATA%\local-password\saved.vault`. Copy uses the Windows clipboard. This Linux machine cannot build or run the `.exe`, because the Windows copies of GTK have to come from a Windows setup.
+
+On a Windows computer:
+
+1. Install [MSYS2](https://www.msys2.org/) and open the **UCRT64** shell.
+2. Install the libraries and the packager:
+
+```bash
+pacman -S --needed \
+  mingw-w64-ucrt-x86_64-gtk3 \
+  mingw-w64-ucrt-x86_64-python \
+  mingw-w64-ucrt-x86_64-python-gobject \
+  mingw-w64-ucrt-x86_64-python-cryptography \
+  mingw-w64-ucrt-x86_64-python-pyinstaller
+```
+
+3. From the project folder, run `bash packaging/windows/build.sh`.
+4. Run `dist/windows/LocalPassword/LocalPassword.exe` and try Generate, Copy, and Save.
+
+Windows may warn that the program is unrecognized until it is signed with a code-signing certificate. Signing is a separate step after the exe runs.
+
+A macOS disk image is built on macOS. An Android package is built with the Android SDK. Those are not on this machine.
 
 ## Tests
 

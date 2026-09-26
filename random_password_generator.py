@@ -32,7 +32,18 @@ STRONG_ENTROPY_BITS = 75
 AMBIGUOUS_CHARACTERS = "0Ool1I|"
 # Metacharacters that change meaning when pasted into a shell unquoted.
 SHELL_SENSITIVE_CHARACTERS = "!\"#$&'()*;<>?\\`|[]~{}"
-WORDLIST_PATH = Path(__file__).with_name("eff_large_wordlist.txt")
+def app_root() -> Path:
+    """Directory that holds this program and the wordlist.
+
+    A frozen Windows build unpacks those files into a temporary folder.
+    """
+    bundled = getattr(sys, "_MEIPASS", None)
+    if bundled:
+        return Path(bundled)
+    return Path(__file__).resolve().parent
+
+
+WORDLIST_PATH = app_root() / "eff_large_wordlist.txt"
 _WORDLIST: tuple[str, ...] | None = None
 
 
@@ -269,6 +280,39 @@ def _copy_with_pyperclip(password: str) -> bool:
     return True
 
 
+def copy_with_windows(password: str) -> bool:
+    """Copy with the Windows clipboard. The password is not a command argument."""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    data = password.encode("utf-16-le") + b"\0\0"
+    if not user32.OpenClipboard(None):
+        return False
+    handle = None
+    try:
+        if not user32.EmptyClipboard():
+            return False
+        handle = kernel32.GlobalAlloc(0x0002, len(data))
+        if not handle:
+            return False
+        locked = kernel32.GlobalLock(handle)
+        if not locked:
+            return False
+        ctypes.memmove(locked, data, len(data))
+        kernel32.GlobalUnlock(handle)
+        if not user32.SetClipboardData(13, handle):
+            return False
+        handle = None
+        return True
+    finally:
+        if handle:
+            kernel32.GlobalFree(handle)
+        user32.CloseClipboard()
+
+
 def _copy_with_xclip(password: str) -> bool:
     """Hand the password to xclip on standard input so it stays in memory."""
     if shutil.which("xclip") is None:
@@ -288,13 +332,10 @@ def _copy_with_xclip(password: str) -> bool:
 
 def copy_to_clipboard(password: str) -> bool:
     """Place the password on the clipboard. Nothing is written to disk."""
-    if _copy_with_pyperclip(password) or _copy_with_xclip(password):
+    if _copy_with_pyperclip(password) or copy_with_windows(password) or _copy_with_xclip(password):
         print("Password copied.", file=sys.stderr)
         return True
-    print(
-        "Clipboard support needs the pyperclip package or the xclip program.",
-        file=sys.stderr,
-    )
+    print("Could not copy to the clipboard.", file=sys.stderr)
     return False
 
 

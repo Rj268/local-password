@@ -418,5 +418,32 @@ class ClipboardTests(unittest.TestCase):
         run.assert_not_called()
 
 
+class WindowsPrepTests(unittest.TestCase):
+    def test_wordlist_lives_next_to_the_program(self) -> None:
+        self.assertTrue(password_app.generator.WORDLIST_PATH.is_file())
+        self.assertEqual(
+            password_app.generator.app_root(),
+            password_app.generator.WORDLIST_PATH.parent,
+        )
+
+    def test_windows_vault_uses_local_appdata(self) -> None:
+        with patch.object(password_app.sys, "platform", "win32"), patch.dict(
+            os.environ, {"LOCALAPPDATA": r"C:\Users\me\AppData\Local"}, clear=False
+        ):
+            previous = os.environ.pop("XDG_DATA_HOME", None)
+            try:
+                path = password_app.saved_passwords_path()
+            finally:
+                if previous is not None:
+                    os.environ["XDG_DATA_HOME"] = previous
+        self.assertEqual(
+            path,
+            Path(r"C:\Users\me\AppData\Local") / "local-password" / "saved.txt",
+        )
+
+    def test_windows_clipboard_is_not_used_here(self) -> None:
+        self.assertFalse(password_app.generator.copy_with_windows("secret-value"))
+
+
 if __name__ == "__main__":
     unittest.main()
