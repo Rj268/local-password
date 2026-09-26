@@ -101,36 +101,15 @@ def _prepare_gtk() -> None:
         os.environ["GDK_PIXBUF_MODULEDIR"] = str(loaders)
         break
 
-    _scrub_bundled_icons(exe_dir, meipass)
+    # password_app is the entry script, so the frozen app can import it.
+    # Repair runs again at the start of main, before GTK is imported.
+    try:
+        import password_app
+
+        password_app.repair_bundled_icons()
+    except (ImportError, OSError):
+        pass
 
 
-def _scrub_bundled_icons(exe_dir: Path, meipass: Path) -> None:
-    """Drop SVG theme icons before GTK looks up image-missing.svg."""
-    import importlib.util
-
-    script = None
-    for base in (meipass, exe_dir):
-        candidate = base / "scrub_icons.py"
-        if candidate.is_file():
-            script = candidate
-            break
-    if script is None:
-        return
-    spec = importlib.util.spec_from_file_location("_lp_scrub_icons", script)
-    if spec is None or spec.loader is None:
-        return
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    seen: set[Path] = set()
-    for base in (exe_dir, meipass):
-        resolved = base.resolve()
-        if resolved in seen:
-            continue
-        seen.add(resolved)
-        try:
-            module.scrub_icon_themes(base)
-        except (FileNotFoundError, RuntimeError, OSError):
-            continue
-
-
-_prepare_gtk()
+if getattr(sys, "frozen", False):
+    _prepare_gtk()

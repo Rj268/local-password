@@ -5,10 +5,12 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "packaging" / "windows"))
 
+import password_app  # noqa: E402
 import scrub_icons  # noqa: E402
 
 
@@ -79,6 +81,30 @@ class ScrubIconTests(unittest.TestCase):
             self.assertFalse((icons / "scalable" / "status" / "image-missing.svg").exists())
             self.assertEqual(scrub_icons.main([]), 2)
             self.assertEqual(scrub_icons.main(["/tmp/does-not-exist-local-password"]), 1)
+
+    def test_frozen_app_drops_svg_icons_before_gtk_starts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            status = root / "_internal" / "share" / "icons" / "Adwaita" / "scalable" / "status"
+            status.mkdir(parents=True)
+            (status / "image-missing.svg").write_text("<svg/>", encoding="utf-8")
+            theme = root / "_internal" / "share" / "icons" / "Adwaita" / "index.theme"
+            theme.write_text(
+                "[Icon Theme]\nDirectories=scalable/status\n\n[scalable/status]\nType=Scalable\n",
+                encoding="utf-8",
+            )
+            exe = root / "LocalPassword.exe"
+            exe.write_bytes(b"")
+            self.assertTrue((status / "image-missing.svg").is_file())
+            password_app.repair_bundled_icons()
+            self.assertTrue((status / "image-missing.svg").is_file())
+            with unittest.mock.patch.object(password_app.sys, "frozen", True, create=True), unittest.mock.patch.object(
+                password_app.sys, "executable", str(exe)
+            ), unittest.mock.patch.object(password_app.sys, "_MEIPASS", str(root / "_internal"), create=True):
+                password_app.repair_bundled_icons()
+            self.assertFalse((status / "image-missing.svg").exists())
+            self.assertTrue((status / "image-missing.png").is_file())
+            self.assertNotIn("scalable", theme.read_text(encoding="utf-8"))
 
     def test_missing_icon_tree_is_an_error(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

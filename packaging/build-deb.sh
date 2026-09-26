@@ -2,7 +2,7 @@
 # Build an architecture-independent Debian package for the local window.
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-VERSION=1.6.1
+VERSION=1.6.2
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 PKG="$STAGE/local-password"
@@ -33,7 +33,8 @@ install -m 0644 "$ROOT/eff_large_wordlist.LICENSE.txt" \
 cat > "$PKG/usr/share/doc/local-password/copyright" <<'EOF'
 Local Password generates a password in a local window.
 
-The Debian package installs that window. Copy places a password on the clipboard.
+The Debian package installs that window. Dark, beside the title, switches the colors.
+Copy places a password on the clipboard.
 Save keeps a named password, locked with a passphrase, after the window closes.
 A recovery key is shown once and can open the vault if the passphrase is lost.
 If both are lost, the saved passwords cannot be recovered.
@@ -57,6 +58,7 @@ Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-3.0, python3-cryptography, xc
 Maintainer: Local Password <local-password@localhost>
 Description: Air-gapped password generator
  Generate a password in a local window and copy it.
+ Dark, beside the title, switches the colors on this computer.
  Save keeps a named password, locked with a passphrase, after the window closes.
  A recovery key is shown once. Either it or the passphrase opens saved passwords.
  If both are lost, the saved passwords cannot be recovered.
