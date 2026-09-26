@@ -31,19 +31,32 @@ def _alias_loader(loaders: Path, name: str) -> Path | None:
     return None
 
 
+# os.add_dll_directory removes the directory again if its return value is
+# discarded. GTK then cannot find the SVG loader's libraries.
+_DLL_DIRECTORIES: list[object] = []
+
+
+def _keep_dll_dir(path: Path) -> None:
+    if hasattr(os, "add_dll_directory"):
+        _DLL_DIRECTORIES.append(os.add_dll_directory(str(path)))
+
+
 def _prepare_gtk() -> None:
     exe_dir = Path(sys.executable).resolve().parent
     meipass = Path(getattr(sys, "_MEIPASS", exe_dir))
 
     # PyInstaller searches _internal. The SVG loader's dependencies are also
-    # copied next to the exe. Both directories have to be on the DLL path.
+    # copied next to the exe. Both directories have to stay on the DLL path.
     os.environ["PATH"] = (
         str(meipass) + os.pathsep + str(exe_dir) + os.pathsep + os.environ.get("PATH", "")
     )
-    if hasattr(os, "add_dll_directory"):
-        os.add_dll_directory(str(exe_dir))
-        if meipass != exe_dir:
-            os.add_dll_directory(str(meipass))
+    _keep_dll_dir(exe_dir)
+    if meipass != exe_dir:
+        _keep_dll_dir(meipass)
+    if sys.platform == "win32":
+        import ctypes
+
+        ctypes.WinDLL("kernel32", use_last_error=True).SetDllDirectoryW(str(exe_dir))
 
     typelibs: list[str] = []
     data_dirs: list[str] = []
@@ -74,8 +87,7 @@ def _prepare_gtk() -> None:
         loaders = base / "lib" / "gdk-pixbuf-2.0" / "2.10.0" / "loaders"
         if not (cache.is_file() and loaders.is_dir()):
             continue
-        if hasattr(os, "add_dll_directory"):
-            os.add_dll_directory(str(loaders))
+        _keep_dll_dir(loaders)
         text = cache.read_text(encoding="utf-8", errors="replace")
 
         def relocate(match: re.Match[str]) -> str:
