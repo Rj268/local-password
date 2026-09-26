@@ -58,6 +58,23 @@ cp -a "$PREFIX/lib/girepository-1.0/." "$DEST/lib/girepository-1.0/"
 cp -a "$PREFIX/lib/gdk-pixbuf-2.0/2.10.0/." "$DEST/lib/gdk-pixbuf-2.0/2.10.0/"
 cp -a "$PREFIX/share/glib-2.0/schemas/." "$DEST/share/glib-2.0/schemas/"
 glib-compile-schemas "$DEST/share/glib-2.0/schemas"
+# librsvg ships one of pixbufloader_svg.dll or libpixbufloader_svg.dll.
+# Windows GTK tries both names, then loads that DLL from the loaders folder,
+# where the matching dependency DLLs also have to be visible.
+loaders="$DEST/lib/gdk-pixbuf-2.0/2.10.0/loaders"
+for loader in "$loaders"/*.dll; do
+  [ -e "$loader" ] || continue
+  base=$(basename "$loader")
+  if [ "${base#lib}" != "$base" ]; then
+    cp -an "$loader" "$loaders/${base#lib}"
+  else
+    cp -an "$loader" "$loaders/lib$base"
+  fi
+done
+for dll in "$DEST"/*.dll; do
+  [ -e "$dll" ] || continue
+  ln -f "$dll" "$loaders/$(basename "$dll")" 2>/dev/null || cp -a "$dll" "$loaders/"
+done
 gdk-pixbuf-query-loaders > "$DEST/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"
 cp "$ROOT/packaging/windows/fonts.conf" "$DEST/etc/fonts/fonts.conf"
 
