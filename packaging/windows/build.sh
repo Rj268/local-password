@@ -12,7 +12,8 @@ if [ "${MSYSTEM:-}" != "UCRT64" ]; then
   echo "    mingw-w64-ucrt-x86_64-python \\" >&2
   echo "    mingw-w64-ucrt-x86_64-python-gobject \\" >&2
   echo "    mingw-w64-ucrt-x86_64-python-cryptography \\" >&2
-  echo "    mingw-w64-ucrt-x86_64-pyinstaller" >&2
+  echo "    mingw-w64-ucrt-x86_64-pyinstaller \\" >&2
+  echo "    mingw-w64-ucrt-x86_64-librsvg" >&2
   exit 1
 fi
 
@@ -33,7 +34,7 @@ for tool in python pyinstaller gdk-pixbuf-query-loaders glib-compile-schemas; do
 done
 if [ "$missing" -ne 0 ]; then
   echo "From the UCRT64 shell, install:" >&2
-  echo "  pacman -S --needed mingw-w64-ucrt-x86_64-gtk3 mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-python-gobject mingw-w64-ucrt-x86_64-python-cryptography mingw-w64-ucrt-x86_64-pyinstaller" >&2
+  echo "  pacman -S --needed mingw-w64-ucrt-x86_64-gtk3 mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-python-gobject mingw-w64-ucrt-x86_64-python-cryptography mingw-w64-ucrt-x86_64-pyinstaller mingw-w64-ucrt-x86_64-librsvg" >&2
   exit 1
 fi
 
@@ -53,28 +54,23 @@ mkdir -p \
   "$DEST/lib/gdk-pixbuf-2.0/2.10.0" \
   "$DEST/share/glib-2.0/schemas" \
   "$DEST/etc/fonts"
+if [ ! -f "$PREFIX/lib/gdk-pixbuf-2.0/2.10.0/loaders/pixbufloader_svg.dll" ]; then
+  echo "Missing the SVG icon loader. From the UCRT64 shell, install:" >&2
+  echo "  pacman -S --needed mingw-w64-ucrt-x86_64-librsvg" >&2
+  exit 1
+fi
 cp -a "$PREFIX/bin/"*.dll "$DEST/"
+# PyInstaller searches _internal for DLLs. The SVG loader also needs those
+# libraries beside itself, under both filenames Windows asks for.
+mkdir -p "$DEST/_internal" "$DEST/lib/gdk-pixbuf-2.0/2.10.0/loaders"
+cp -a "$PREFIX/bin/"*.dll "$DEST/_internal/"
 cp -a "$PREFIX/lib/girepository-1.0/." "$DEST/lib/girepository-1.0/"
 cp -a "$PREFIX/lib/gdk-pixbuf-2.0/2.10.0/." "$DEST/lib/gdk-pixbuf-2.0/2.10.0/"
 cp -a "$PREFIX/share/glib-2.0/schemas/." "$DEST/share/glib-2.0/schemas/"
 glib-compile-schemas "$DEST/share/glib-2.0/schemas"
-# librsvg ships one of pixbufloader_svg.dll or libpixbufloader_svg.dll.
-# Windows GTK tries both names, then loads that DLL from the loaders folder,
-# where the matching dependency DLLs also have to be visible.
 loaders="$DEST/lib/gdk-pixbuf-2.0/2.10.0/loaders"
-for loader in "$loaders"/*.dll; do
-  [ -e "$loader" ] || continue
-  base=$(basename "$loader")
-  if [ "${base#lib}" != "$base" ]; then
-    cp -an "$loader" "$loaders/${base#lib}"
-  else
-    cp -an "$loader" "$loaders/lib$base"
-  fi
-done
-for dll in "$DEST"/*.dll; do
-  [ -e "$dll" ] || continue
-  ln -f "$dll" "$loaders/$(basename "$dll")" 2>/dev/null || cp -a "$dll" "$loaders/"
-done
+cp -a "$loaders/pixbufloader_svg.dll" "$loaders/libpixbufloader_svg.dll"
+cp -a "$PREFIX/bin/"*.dll "$loaders/"
 gdk-pixbuf-query-loaders > "$DEST/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"
 cp "$ROOT/packaging/windows/fonts.conf" "$DEST/etc/fonts/fonts.conf"
 

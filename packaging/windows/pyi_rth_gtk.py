@@ -35,10 +35,15 @@ def _prepare_gtk() -> None:
     exe_dir = Path(sys.executable).resolve().parent
     meipass = Path(getattr(sys, "_MEIPASS", exe_dir))
 
-    # The SVG loader lives under lib/ and its dependencies sit next to the exe.
-    os.environ["PATH"] = str(exe_dir) + os.pathsep + os.environ.get("PATH", "")
+    # PyInstaller searches _internal. The SVG loader's dependencies are also
+    # copied next to the exe. Both directories have to be on the DLL path.
+    os.environ["PATH"] = (
+        str(meipass) + os.pathsep + str(exe_dir) + os.pathsep + os.environ.get("PATH", "")
+    )
     if hasattr(os, "add_dll_directory"):
         os.add_dll_directory(str(exe_dir))
+        if meipass != exe_dir:
+            os.add_dll_directory(str(meipass))
 
     typelibs: list[str] = []
     data_dirs: list[str] = []
