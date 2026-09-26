@@ -47,6 +47,7 @@ MSYS2_ARG_CONV_EXCL='*' python -m PyInstaller --noconfirm --windowed --onedir --
   --add-data "$WINROOT/eff_large_wordlist.txt;." \
   --add-data "$WINROOT/eff_large_wordlist.LICENSE.txt;." \
   --add-data "$WINROOT/packaging/local-password.svg;." \
+  --add-data "$WINROOT/packaging/windows/scrub_icons.py;." \
   "$WINROOT/password_app.py"
 
 mkdir -p \
@@ -76,43 +77,10 @@ cp "$ROOT/packaging/windows/fonts.conf" "$DEST/etc/fonts/fonts.conf"
 
 # Adwaita symbolic icons are SVG. The Windows SVG loader aborts GTK when it
 # cannot open, including on the fallback image-missing icon. Keep the PNG icons.
-python - "$DEST" << 'PY'
-import base64
-import sys
-from pathlib import Path
-
-root = Path(sys.argv[1])
-png = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
-)
-for icons in root.rglob("icons"):
-    if not icons.is_dir():
-        continue
-    for theme in icons.rglob("index.theme"):
-        lines = theme.read_text(encoding="utf-8", errors="replace").splitlines()
-        kept = []
-        skip = False
-        for line in lines:
-            if line.startswith("[") and line.endswith("]"):
-                header = line[1:-1].lower()
-                skip = "scalable" in header or "symbolic" in header
-            if skip:
-                continue
-            if line.startswith("Directories="):
-                parts = [
-                    part
-                    for part in line.split("=", 1)[1].split(",")
-                    if "scalable" not in part.lower() and "symbolic" not in part.lower()
-                ]
-                line = "Directories=" + ",".join(parts)
-            kept.append(line)
-        theme.write_text("\n".join(kept) + "\n", encoding="utf-8")
-    for svg in icons.rglob("*.svg"):
-        svg.unlink()
-    for status in icons.rglob("status"):
-        if status.is_dir():
-            (status / "image-missing.png").write_bytes(png)
-PY
+# cygpath -m so Windows Python sees C:/Users/... even when MSYS leaves
+# arguments that start with /c/ unconverted.
+WINDEST=$(cygpath -m "$DEST")
+python "$WINROOT/packaging/windows/scrub_icons.py" "$WINDEST"
 
 echo "Built $DEST/LocalPassword.exe"
 echo "Run that file on this Windows computer. The saved vault will be in %LOCALAPPDATA%\\local-password\\saved.vault"

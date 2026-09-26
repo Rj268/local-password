@@ -78,7 +78,7 @@ pacman -S --needed \
   mingw-w64-ucrt-x86_64-librsvg
 ```
 
-3. From the project folder, run `bash packaging/windows/build.sh`.
+3. From the project folder, run `bash packaging/windows/build.sh`. The script removes SVG theme icons and leaves a PNG fallback, so the window can open.
 4. Run `dist/windows/LocalPassword/LocalPassword.exe` and try Generate, Copy, and Save. Dark, beside the title, switches the colors and remembers that choice in `%LOCALAPPDATA%\local-password\appearance`. That file holds no passwords.
 
 Windows may warn that the program is unrecognized until it is signed with a code-signing certificate. Signing is a separate step after the exe runs.
