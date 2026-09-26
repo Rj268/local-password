@@ -211,6 +211,32 @@ class VaultTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             password_app.new_vault_key("short")
 
+    def test_recovery_key_opens_the_vault_without_being_stored(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "saved.vault"
+            recovery = password_app.new_recovery_key()
+            self.assertEqual(len(recovery.split()), password_app.RECOVERY_WORD_COUNT)
+            material = password_app.new_vault_key("a-long-secret", recovery, n=2**14)
+            password_app.write_vault(material, self._items(), path)
+            blob = path.read_bytes()
+            self.assertTrue(blob.startswith(b"LPV2"))
+            self.assertNotIn(b"a-long-secret", blob)
+            self.assertNotIn(recovery.encode("utf-8"), blob)
+            self.assertNotIn(b"Email", blob)
+            opened, by_phrase = password_app.open_vault("a-long-secret", path)
+            self.assertEqual(by_phrase, self._items())
+            extra = [password_app.SavedPassword("Bank", "second-secret")]
+            password_app.write_vault(opened, self._items() + extra, path)
+            rewritten = path.read_bytes()
+            self.assertNotIn(recovery.encode("utf-8"), rewritten)
+            self.assertNotIn(b"second-secret", rewritten)
+            typed = recovery.upper().replace(" ", "  ")
+            _key, by_recovery = password_app.open_vault(typed, path)
+            self.assertEqual(by_recovery, self._items() + extra)
+            with self.assertRaises(ValueError) as caught:
+                password_app.open_vault("another-secret", path)
+            self.assertIn("did not unlock", str(caught.exception))
+
 
 class EnterpriseEntropyTests(unittest.TestCase):
     def test_meter_fills_toward_256_bits(self) -> None:
@@ -261,7 +287,8 @@ class EnterpriseEntropyTests(unittest.TestCase):
 class PassphraseWarningTests(unittest.TestCase):
     def test_warning_says_a_lost_passphrase_cannot_be_recovered(self) -> None:
         self.assertIn("cannot be recovered", password_app.PASSPHRASE_LOSS_WARNING)
-        self.assertIn("lose this passphrase", password_app.PASSPHRASE_LOSS_WARNING)
+        self.assertIn("passphrase", password_app.PASSPHRASE_LOSS_WARNING)
+        self.assertIn("recovery key", password_app.PASSPHRASE_LOSS_WARNING)
 
     @unittest.skipUnless(os.environ.get("DISPLAY"), "needs a graphical session")
     def test_new_passphrase_dialog_shows_the_warning(self) -> None:
@@ -321,6 +348,7 @@ class BatchSaveTests(unittest.TestCase):
                 self.assertEqual(len(entries), 3)
                 entries[1].set_text("Bank")
                 window._prompt_passphrase = lambda **_kwargs: "verify-passphrase-ok"
+                window._confirm_recovery_key = lambda _key: True
                 window.on_save_one(window.batch[1], entries[1], window.status)
                 self.assertEqual([item.name for item in window.saved], ["Bank"])
                 self.assertEqual(window.saved[0].password, window.batch[1])

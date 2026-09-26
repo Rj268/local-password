@@ -1,6 +1,6 @@
 # Local Password
 
-Generate a cryptographically secure password on this computer and copy it. The password stays in the window until you close it. Save keeps it under a name, locked with a passphrase you choose. Saved holds those named passwords on this computer. The passphrase is not stored. Saved passwords stay hidden until you unlock them. The app does not open a network port.
+Generate a cryptographically secure password on this computer and copy it. The password stays in the window until you close it. Save keeps it under a name. A passphrase you choose locks it, and a recovery key shown once can open it too. Neither is stored. Saved passwords stay hidden until you unlock them. The app does not open a network port.
 
 A strong password here has about 75 bits of entropy or more. The strength bar fills toward 256 bits. That is the size of the search space for the length and alphabet you chose. An 8-character mix is about 50 bits, so it is reported as weak. Sixteen characters, or six random words, clears the strong line. Forty characters from digits, letters, and punctuation reach 256 bits, as do twenty words from the EFF list. When the length is long enough, the generator places at least one character from each selected group, then fills the rest at random. Each distinct character is equally likely.
 
@@ -9,7 +9,7 @@ A strong password here has about 75 bits of entropy or more. The strength bar fi
 The Debian package installs the local window:
 
 ```bash
-sudo dpkg -i dist/local-password_1.5.0_all.deb
+sudo dpkg -i dist/local-password_1.6.0_all.deb
 local-password
 ```
 
@@ -28,7 +28,7 @@ sudo apt install python3-gi gir1.2-gtk-3.0 python3-cryptography xclip
 python3 password_app.py
 ```
 
-The window has Create and Saved. Create has Characters and Words. Length, word count, and number of passwords are numeric. Digits, Letters, and Symbols show **On** or **Off**. Symbols include quotes, backticks, and backslashes. Generate fills the window. Copy places the password on the clipboard. Name it, then Save. Generate several and each one has its own name and Save, so you can keep one and leave the rest. The first save asks for a passphrase of at least 8 characters. That passphrase locks every saved password. It is not written down. Saving the only password opens Saved, where the name sits above it. Saving one of several stays on Create, so the others are still there. Find filters that list by name. The next time you open the window, Saved stays locked until you unlock it. The lock file is `~/.local/share/local-password/saved.vault`, readable only by your user. A password you do not save is gone when the window closes. Lock hides them again during this session. Remove drops one after you unlock. Saving the same name again replaces that password. If you lose the passphrase, those saved passwords cannot be recovered. The window says so before you save.
+The window has Create and Saved. Create has Characters and Words. Length, word count, and number of passwords are numeric. Digits, Letters, and Symbols show **On** or **Off**. Symbols include quotes, backticks, and backslashes. Generate fills the window. Copy places the password on the clipboard. Name it, then Save. Generate several and each one has its own name and Save, so you can keep one and leave the rest. The first save asks for a passphrase of at least 8 characters, then shows a recovery key once. Write that key down. Either the passphrase or the recovery key opens every saved password. Neither one is stored. Saving the only password opens Saved, where the name sits above it. Saving one of several stays on Create, so the others are still there. Find filters that list by name. The next time you open the window, Saved stays locked until you unlock it. The lock file is `~/.local/share/local-password/saved.vault`, readable only by your user. A password you do not save is gone when the window closes. Lock hides them again during this session. Remove drops one after you unlock. Saving the same name again replaces that password. If you lose both the passphrase and the recovery key, those saved passwords cannot be recovered. The window says so before you save.
 
 ## Command line
 

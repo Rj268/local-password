@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import secrets
 import shutil
 import string
 import subprocess
@@ -28,13 +29,16 @@ METER_CAP_BITS = 256
 MAX_NAME_LENGTH = 80
 MIN_PASSPHRASE_LENGTH = 8
 PASSPHRASE_LOSS_WARNING = (
-    "If you lose this passphrase, your saved passwords cannot be recovered."
+    "If you lose both this passphrase and the recovery key, your saved passwords cannot be recovered."
 )
+RECOVERY_WORD_COUNT = 8
 # scrypt memory is 128 * N * r bytes. 2**15 is 32 MB, slow enough to resist guessing.
 SCRYPT_N = 2**15
 SCRYPT_R = 8
 SCRYPT_P = 1
 VAULT_MAGIC = b"LPV1"
+VAULT_MAGIC_V2 = b"LPV2"
+WRAP_LEN = 60
 
 STYLES = """
 window.app {
@@ -63,6 +67,12 @@ window.app {
   color: #5f584e;
 }
 .saved-name {
+  font-weight: 700;
+  color: #1c1915;
+}
+.recovery-key {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 16px;
   font-weight: 700;
   color: #1c1915;
 }
@@ -383,6 +393,9 @@ class VaultKey:
     n: int
     r: int
     p: int
+    recovery_salt: bytes = b""
+    passphrase_wrap: bytes = b""
+    recovery_wrap: bytes = b""
 
 
 def vault_path() -> Path:
@@ -398,11 +411,41 @@ def require_passphrase(passphrase: str) -> str:
     return passphrase
 
 
-def new_vault_key(passphrase: str, *, n: int = SCRYPT_N) -> VaultKey:
-    """Derive a key. The passphrase itself is not kept."""
+def normalize_recovery_key(recovery_key: str) -> str:
+    """Ignore case and extra spaces so a written key still matches."""
+    return " ".join(recovery_key.casefold().split())
+
+
+def new_recovery_key() -> str:
+    """Eight random words. This key is shown once and is not stored."""
+    words = generator.load_wordlist()
+    return " ".join(secrets.choice(words) for _ in range(RECOVERY_WORD_COUNT))
+
+
+def require_recovery_key(recovery_key: str) -> str:
+    normalized = normalize_recovery_key(recovery_key)
+    if len(normalized.split()) != RECOVERY_WORD_COUNT:
+        raise ValueError("The recovery key is not complete.")
+    return normalized
+
+
+def new_vault_key(passphrase: str, recovery_key: str | None = None, *, n: int = SCRYPT_N) -> VaultKey:
+    """Derive a key. The passphrase and recovery key are not kept."""
     require_passphrase(passphrase)
     salt = os.urandom(16)
-    return VaultKey(_derive_key(passphrase, salt, n, SCRYPT_R, SCRYPT_P), salt, n, SCRYPT_R, SCRYPT_P)
+    if recovery_key is None:
+        return VaultKey(_derive_key(passphrase, salt, n, SCRYPT_R, SCRYPT_P), salt, n, SCRYPT_R, SCRYPT_P)
+    normalized = require_recovery_key(recovery_key)
+    recovery_salt = os.urandom(16)
+    header = _v2_header(n, SCRYPT_R, SCRYPT_P, salt, recovery_salt)
+    dek = os.urandom(32)
+    passphrase_wrap = _wrap_dek(_derive_key(passphrase, salt, n, SCRYPT_R, SCRYPT_P), dek, header)
+    recovery_wrap = _wrap_dek(
+        _derive_key(normalized, recovery_salt, n, SCRYPT_R, SCRYPT_P),
+        dek,
+        header,
+    )
+    return VaultKey(dek, salt, n, SCRYPT_R, SCRYPT_P, recovery_salt, passphrase_wrap, recovery_wrap)
 
 
 def _derive_key(passphrase: str, salt: bytes, n: int, r: int, p: int) -> bytes:
@@ -443,8 +486,31 @@ def _decode_saved(raw: bytes) -> list[SavedPassword]:
     return saved
 
 
+def _v2_header(n: int, r: int, p: int, passphrase_salt: bytes, recovery_salt: bytes) -> bytes:
+    return (
+        VAULT_MAGIC_V2
+        + n.to_bytes(4, "big")
+        + r.to_bytes(4, "big")
+        + p.to_bytes(4, "big")
+        + passphrase_salt
+        + recovery_salt
+    )
+
+
+def _wrap_dek(kek: bytes, dek: bytes, header: bytes) -> bytes:
+    nonce = os.urandom(12)
+    return nonce + AESGCM(kek).encrypt(nonce, dek, header)
+
+
+def _unwrap_dek(kek: bytes, wrapped: bytes, header: bytes) -> bytes:
+    if len(wrapped) != WRAP_LEN:
+        raise ValueError("The saved password file is damaged.")
+    nonce, ciphertext = wrapped[:12], wrapped[12:]
+    return AESGCM(kek).decrypt(nonce, ciphertext, header)
+
+
 def write_vault(material: VaultKey, items: list[SavedPassword], path: Path | None = None) -> Path:
-    """Encrypt saved passwords. A later read needs the same passphrase."""
+    """Encrypt saved passwords. A later read needs the passphrase or the recovery key."""
     path = vault_path() if path is None else path
     directory = path.parent
     directory.mkdir(parents=True, exist_ok=True)
@@ -454,38 +520,53 @@ def write_vault(material: VaultKey, items: list[SavedPassword], path: Path | Non
         pass
     if path.is_symlink():
         raise ValueError("The saved password file is a symbolic link.")
-    header = (
-        VAULT_MAGIC
-        + material.n.to_bytes(4, "big")
-        + material.r.to_bytes(4, "big")
-        + material.p.to_bytes(4, "big")
-        + material.salt
-    )
+    if material.recovery_wrap:
+        header = _v2_header(material.n, material.r, material.p, material.salt, material.recovery_salt)
+        associated = header + material.passphrase_wrap + material.recovery_wrap
+        body = material.passphrase_wrap + material.recovery_wrap
+    else:
+        header = (
+            VAULT_MAGIC
+            + material.n.to_bytes(4, "big")
+            + material.r.to_bytes(4, "big")
+            + material.p.to_bytes(4, "big")
+            + material.salt
+        )
+        associated = header
+        body = b""
     nonce = os.urandom(12)
-    ciphertext = AESGCM(material.key).encrypt(nonce, _encode_saved(items), header)
+    ciphertext = AESGCM(material.key).encrypt(nonce, _encode_saved(items), associated)
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
     descriptor = os.open(path, flags, 0o600)
     try:
         os.fchmod(descriptor, 0o600)
-        os.write(descriptor, header + nonce + ciphertext)
+        os.write(descriptor, header + body + nonce + ciphertext)
     finally:
         os.close(descriptor)
     return path
 
 
-def open_vault(passphrase: str, path: Path | None = None) -> tuple[VaultKey, list[SavedPassword]]:
-    """Unlock saved passwords. A wrong passphrase raises ValueError."""
-    if len(passphrase) < MIN_PASSPHRASE_LENGTH:
-        raise ValueError("That passphrase did not unlock the saved passwords.")
+def open_vault(secret: str, path: Path | None = None) -> tuple[VaultKey, list[SavedPassword]]:
+    """Unlock saved passwords. A wrong passphrase or recovery key raises ValueError."""
+    if len(secret) < MIN_PASSPHRASE_LENGTH:
+        raise ValueError("That passphrase or recovery key did not unlock the saved passwords.")
     path = vault_path() if path is None else path
     if path.is_symlink():
         raise ValueError("The saved password file is a symbolic link.")
     if not path.is_file():
         raise ValueError("The saved password file is damaged.")
     blob = path.read_bytes()
-    if len(blob) < 44 + 16 or not blob.startswith(VAULT_MAGIC):
+    if blob.startswith(VAULT_MAGIC_V2):
+        return _open_vault_v2(secret, blob)
+    if blob.startswith(VAULT_MAGIC):
+        return _open_vault_v1(secret, blob)
+    raise ValueError("The saved password file is damaged.")
+
+
+def _open_vault_v1(passphrase: str, blob: bytes) -> tuple[VaultKey, list[SavedPassword]]:
+    if len(blob) < 44 + 16:
         raise ValueError("The saved password file is damaged.")
     n = int.from_bytes(blob[4:8], "big")
     r = int.from_bytes(blob[8:12], "big")
@@ -502,6 +583,69 @@ def open_vault(passphrase: str, path: Path | None = None) -> tuple[VaultKey, lis
     except ValueError as exc:
         raise ValueError("The saved password file is damaged.") from exc
     return VaultKey(key, salt, n, r, p), _decode_saved(raw)
+
+
+def _open_vault_v2(secret: str, blob: bytes) -> tuple[VaultKey, list[SavedPassword]]:
+    fixed = 48 + WRAP_LEN + WRAP_LEN + 12
+    if len(blob) < fixed + 16:
+        raise ValueError("The saved password file is damaged.")
+    n = int.from_bytes(blob[4:8], "big")
+    r = int.from_bytes(blob[8:12], "big")
+    p = int.from_bytes(blob[12:16], "big")
+    passphrase_salt = blob[16:32]
+    recovery_salt = blob[32:48]
+    passphrase_wrap = blob[48:48 + WRAP_LEN]
+    recovery_wrap = blob[48 + WRAP_LEN:48 + WRAP_LEN + WRAP_LEN]
+    nonce = blob[48 + WRAP_LEN + WRAP_LEN:48 + WRAP_LEN + WRAP_LEN + 12]
+    ciphertext = blob[48 + WRAP_LEN + WRAP_LEN + 12:]
+    header = blob[:48]
+    associated = header + passphrase_wrap + recovery_wrap
+    dek = _unlock_dek(secret, passphrase_salt, passphrase_wrap, n, r, p, header)
+    if dek is None:
+        dek = _unlock_dek(
+            normalize_recovery_key(secret),
+            recovery_salt,
+            recovery_wrap,
+            n,
+            r,
+            p,
+            header,
+        )
+    if dek is None:
+        raise ValueError("That passphrase or recovery key did not unlock the saved passwords.")
+    try:
+        raw = AESGCM(dek).decrypt(nonce, ciphertext, associated)
+    except InvalidTag as exc:
+        raise ValueError("The saved password file is damaged.") from exc
+    material = VaultKey(
+        dek,
+        passphrase_salt,
+        n,
+        r,
+        p,
+        recovery_salt,
+        passphrase_wrap,
+        recovery_wrap,
+    )
+    return material, _decode_saved(raw)
+
+
+def _unlock_dek(
+    secret: str,
+    salt: bytes,
+    wrapped: bytes,
+    n: int,
+    r: int,
+    p: int,
+    header: bytes,
+) -> bytes | None:
+    try:
+        kek = _derive_key(secret, salt, n, r, p)
+        return _unwrap_dek(kek, wrapped, header)
+    except InvalidTag:
+        return None
+    except ValueError as exc:
+        raise ValueError("The saved password file is damaged.") from exc
 
 
 def erase_saved_file(path: Path) -> None:
@@ -616,7 +760,7 @@ class PasswordWindow:
         title.get_style_context().add_class("title")
         lede = gtk.Label(
             label=(
-                "Create a password here, or open Saved to use the ones you already kept. One passphrase locks all of them."
+                "Create a password here, or open Saved to use the ones you already kept. A passphrase or a recovery key opens all of them."
             ),
             xalign=0,
         )
@@ -1165,7 +1309,7 @@ class PasswordWindow:
             self.saved_heading.set_text("Saved")
             self.saved_heading.show()
             self.manager_message.set_text(
-                "Saved passwords are locked. One passphrase opens all of them. "
+                "Saved passwords are locked. The passphrase or the recovery key opens all of them. "
                 + PASSPHRASE_LOSS_WARNING
             )
             self.manager_message.show()
@@ -1259,7 +1403,7 @@ class PasswordWindow:
                 "Choose a passphrase to lock saved passwords. It is not stored."
             )
         else:
-            message = "Enter the passphrase to unlock saved passwords."
+            message = "Enter the passphrase or the recovery key."
         label = gtk.Label(label=message, xalign=0)
         label.set_line_wrap(True)
         label.set_max_width_chars(42)
@@ -1273,7 +1417,7 @@ class PasswordWindow:
         entry = gtk.Entry()
         entry.set_visibility(False)
         entry.set_input_purpose(gtk.InputPurpose.PASSWORD)
-        entry.set_placeholder_text("Passphrase")
+        entry.set_placeholder_text("Passphrase" if confirm else "Passphrase or recovery key")
         content.pack_start(entry, False, False, 0)
         confirm_entry = None
         if confirm:
@@ -1307,6 +1451,47 @@ class PasswordWindow:
             dialog.destroy()
             return first
 
+    def _confirm_recovery_key(self, recovery_key: str) -> bool:
+        """Show the recovery key once. Saving continues only after it is written down."""
+        gtk = self.gtk
+        dialog = gtk.Dialog(title="Local Password", transient_for=self.window, modal=True)
+        dialog.add_button("Cancel", gtk.ResponseType.CANCEL)
+        continue_button = dialog.add_button("Continue", gtk.ResponseType.OK)
+        continue_button.set_sensitive(False)
+        content = dialog.get_content_area()
+        content.set_margin_top(16)
+        content.set_margin_bottom(16)
+        content.set_margin_start(16)
+        content.set_margin_end(16)
+        content.set_spacing(8)
+        label = gtk.Label(
+            label=(
+                "Write down this recovery key. It opens your saved passwords if you forget the passphrase. "
+                "It will not be shown again."
+            ),
+            xalign=0,
+        )
+        label.set_line_wrap(True)
+        label.set_max_width_chars(42)
+        content.pack_start(label, False, False, 0)
+        key = gtk.Label(label=recovery_key, xalign=0)
+        key.set_line_wrap(True)
+        key.set_selectable(True)
+        key.set_max_width_chars(42)
+        key.get_style_context().add_class("recovery-key")
+        content.pack_start(key, False, False, 0)
+        copy = gtk.Button(label="Copy recovery key")
+        copy.get_style_context().add_class("secondary")
+        copy.connect("clicked", lambda *_args: self.on_copy_text(recovery_key))
+        content.pack_start(copy, False, False, 0)
+        check = gtk.CheckButton(label="I wrote this down")
+        check.connect("toggled", lambda widget: continue_button.set_sensitive(widget.get_active()))
+        content.pack_start(check, False, False, 0)
+        dialog.show_all()
+        response = dialog.run()
+        dialog.destroy()
+        return response == gtk.ResponseType.OK and check.get_active()
+
     def _ensure_vault_key(self) -> bool:
         if self.vault_key is not None:
             return True
@@ -1319,6 +1504,11 @@ class PasswordWindow:
                     self.status.set_text("Not saved. Saved passwords stay locked.")
                     return False
                 material, items = open_vault(phrase)
+                if not material.recovery_wrap:
+                    recovery = new_recovery_key()
+                    if self._confirm_recovery_key(recovery):
+                        material = new_vault_key(phrase, recovery, n=material.n)
+                        write_vault(material, items)
                 self.vault_key = material
                 self.saved = items
                 self.locked = False
@@ -1327,8 +1517,12 @@ class PasswordWindow:
             if phrase is None:
                 self.status.set_text("Not saved. A passphrase is what locks it.")
                 return False
+            recovery = new_recovery_key()
+            if not self._confirm_recovery_key(recovery):
+                self.status.set_text("Not saved. Write down the recovery key to finish.")
+                return False
             items = load_saved_passwords(plain) if plain.exists() and plain.is_file() else []
-            material = new_vault_key(phrase)
+            material = new_vault_key(phrase, recovery)
             write_vault(material, items)
             if plain.exists():
                 erase_saved_file(plain)
