@@ -46,7 +46,9 @@ MSYS2_ARG_CONV_EXCL='*' python -m PyInstaller --noconfirm --windowed --onedir --
   --runtime-hook "$WINROOT/packaging/windows/pyi_rth_gtk.py" \
   --add-data "$WINROOT/eff_large_wordlist.txt;." \
   --add-data "$WINROOT/eff_large_wordlist.LICENSE.txt;." \
+  --icon "$WINROOT/packaging/windows/local-password.ico" \
   --add-data "$WINROOT/packaging/local-password.svg;." \
+  --add-data "$WINROOT/packaging/windows/local-password.png;." \
   --add-data "$WINROOT/packaging/windows/scrub_icons.py;." \
   "$WINROOT/password_app.py"
 
@@ -81,6 +83,30 @@ cp "$ROOT/packaging/windows/fonts.conf" "$DEST/etc/fonts/fonts.conf"
 # arguments that start with /c/ unconverted.
 WINDEST=$(cygpath -m "$DEST")
 python "$WINROOT/packaging/windows/scrub_icons.py" "$WINDEST"
+cp "$ROOT/packaging/windows/SHARE.txt" "$DEST/Read-this.txt"
+
+# The exe needs the libraries beside it. The zip is the file other people download.
+python - "$WINDEST" "$WINROOT/dist/windows/LocalPassword-windows.zip" << 'PY'
+import sys
+import zipfile
+from pathlib import Path
+
+folder = Path(sys.argv[1])
+archive_path = Path(sys.argv[2])
+exe = folder / "LocalPassword.exe"
+if not exe.is_file():
+    raise SystemExit(f"Missing {exe}")
+if archive_path.exists():
+    archive_path.unlink()
+with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+    for path in folder.rglob("*"):
+        if path.is_file():
+            name = "LocalPassword/" + path.relative_to(folder).as_posix()
+            archive.write(path, name)
+print(f"Shareable zip: {archive_path}")
+PY
 
 echo "Built $DEST/LocalPassword.exe"
-echo "Run that file on this Windows computer. The saved vault will be in %LOCALAPPDATA%\\local-password\\saved.vault"
+echo "The green key icon is on that exe. Share dist/windows/LocalPassword-windows.zip."
+echo "Other people unzip it and open LocalPassword.exe inside the LocalPassword folder."
+echo "The saved vault will be in %LOCALAPPDATA%\\local-password\\saved.vault"

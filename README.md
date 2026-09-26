@@ -78,10 +78,12 @@ pacman -S --needed \
   mingw-w64-ucrt-x86_64-librsvg
 ```
 
-3. From the project folder, run `bash packaging/windows/build.sh`. The script removes SVG theme icons and leaves a PNG fallback, so the window can open.
+3. From the project folder, run `bash packaging/windows/build.sh`. The script removes SVG theme icons and leaves a PNG fallback, so the window can open. It also stamps the green key onto `LocalPassword.exe` and writes `dist/windows/LocalPassword-windows.zip`.
 4. Run `dist/windows/LocalPassword/LocalPassword.exe` and try Generate, Copy, and Save. Dark, beside the title, switches the colors and remembers that choice in `%LOCALAPPDATA%\local-password\appearance`. That file holds no passwords.
 
-Windows may warn that the program is unrecognized until it is signed with a code-signing certificate. Signing is a separate step after the exe runs.
+The zip is what other people download. It contains the exe and the libraries that have to sit beside it. Send `dist/windows/LocalPassword-windows.zip`. They unzip it, open the `LocalPassword` folder, and run `LocalPassword.exe`. A copy of the exe by itself will not start.
+
+Windows may warn that the program is unrecognized until it is signed with a code-signing certificate. Signing is a separate step after the exe runs. Recipients choose **More info**, then **Run anyway**.
 
 A macOS disk image is built on macOS. An Android package is built with the Android SDK. Those are not on this machine.
 

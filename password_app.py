@@ -915,10 +915,14 @@ def copy_with_xclip(text: str) -> bool:
 
 def _icon_candidates() -> list[Path]:
     here = Path(__file__).resolve().parent
+    root = generator.app_root()
     return [
+        root / "local-password.png",
+        here / "local-password.png",
+        here / "packaging" / "windows" / "local-password.png",
+        root / "local-password.svg",
         here / "local-password.svg",
         here / "packaging" / "local-password.svg",
-        generator.app_root() / "local-password.svg",
         Path("/usr/share/icons/hicolor/scalable/apps/local-password.svg"),
     ]
 

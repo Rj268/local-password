@@ -1,0 +1,11 @@
+Local Password
+
+Open LocalPassword.exe in this folder. Leave the other files beside it.
+
+Generate makes a password. Copy puts it on the clipboard. Save is optional.
+The first save asks for a passphrase and then shows a recovery key once.
+Write that key down. Either one opens the saved passwords.
+
+Dark, beside the title, switches the colors.
+
+Windows may say it protected your PC. Choose More info, then Run anyway.

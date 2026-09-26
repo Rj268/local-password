@@ -118,3 +118,21 @@ class ScrubIconTests(unittest.TestCase):
         self.assertIn('WINDEST=$(cygpath -m "$DEST")', script)
         self.assertIn('python "$WINROOT/packaging/windows/scrub_icons.py" "$WINDEST"', script)
         self.assertNotIn('python - "$DEST"', script)
+        self.assertIn('--icon "$WINROOT/packaging/windows/local-password.ico"', script)
+        self.assertIn("LocalPassword-windows.zip", script)
+
+    def test_windows_icon_is_a_multisize_key(self) -> None:
+        root = Path(__file__).resolve().parents[1] / "packaging" / "windows"
+        ico = (root / "local-password.ico").read_bytes()
+        png = (root / "local-password.png").read_bytes()
+        self.assertEqual(int.from_bytes(ico[0:2], "little"), 0)
+        self.assertEqual(int.from_bytes(ico[2:4], "little"), 1)
+        count = int.from_bytes(ico[4:6], "little")
+        widths = []
+        for index in range(count):
+            width = ico[6 + index * 16]
+            widths.append(256 if width == 0 else width)
+        self.assertIn(16, widths)
+        self.assertIn(32, widths)
+        self.assertIn(256, widths)
+        self.assertTrue(png.startswith(b"\x89PNG\r\n\x1a\n"))
