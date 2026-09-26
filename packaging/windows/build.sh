@@ -17,6 +17,10 @@ if [ "${MSYSTEM:-}" != "UCRT64" ]; then
 fi
 
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
+# PyInstaller is a Windows program. An MSYS path such as /c/Users, once it
+# sits in a --add-data argument that contains ";", is left unconverted and
+# Windows then reads it as C:/c/Users. cygpath -m yields C:/Users/...
+WINROOT=$(cygpath -m "$ROOT")
 PREFIX="${MINGW_PREFIX:-/ucrt64}"
 DEST="$ROOT/dist/windows/LocalPassword"
 
@@ -33,15 +37,16 @@ if [ "$missing" -ne 0 ]; then
   exit 1
 fi
 
-python -m PyInstaller --noconfirm --windowed --onedir --name LocalPassword \
-  --distpath "$ROOT/dist/windows" \
-  --workpath "$ROOT/build/windows" \
-  --specpath "$ROOT/build/windows" \
-  --runtime-hook "$ROOT/packaging/windows/pyi_rth_gtk.py" \
-  --add-data "$ROOT/eff_large_wordlist.txt;." \
-  --add-data "$ROOT/eff_large_wordlist.LICENSE.txt;." \
-  --add-data "$ROOT/packaging/local-password.svg;." \
-  "$ROOT/password_app.py"
+# Keep MSYS from rewriting the Windows paths in this command line.
+MSYS2_ARG_CONV_EXCL='*' python -m PyInstaller --noconfirm --windowed --onedir --name LocalPassword \
+  --distpath "$WINROOT/dist/windows" \
+  --workpath "$WINROOT/build/windows" \
+  --specpath "$WINROOT/build/windows" \
+  --runtime-hook "$WINROOT/packaging/windows/pyi_rth_gtk.py" \
+  --add-data "$WINROOT/eff_large_wordlist.txt;." \
+  --add-data "$WINROOT/eff_large_wordlist.LICENSE.txt;." \
+  --add-data "$WINROOT/packaging/local-password.svg;." \
+  "$WINROOT/password_app.py"
 
 mkdir -p \
   "$DEST/lib/girepository-1.0" \
