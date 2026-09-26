@@ -133,6 +133,98 @@ progressbar progress {
 progressbar.weak progress {
   background-color: #8a4b08;
 }
+window.app.dark {
+  background-color: #141210;
+  color: #f3efe6;
+}
+window.app.dark .card {
+  background-color: #221f1b;
+  border-color: #3a342c;
+}
+window.app.dark .title,
+window.app.dark .saved-name,
+window.app.dark .recovery-key,
+window.app.dark .bits {
+  color: #f3efe6;
+}
+window.app.dark .lede,
+window.app.dark .hint,
+window.app.dark .footer,
+window.app.dark .caption {
+  color: #b7aea0;
+}
+window.app.dark .eyebrow,
+window.app.dark .strength.strong {
+  color: #7dcea0;
+}
+window.app.dark .strength.weak,
+window.app.dark .danger,
+window.app.dark button.note-danger {
+  color: #f0a8a0;
+}
+window.app.dark button.mode.off,
+window.app.dark button.chip.off,
+window.app.dark button.secondary {
+  background-color: #2c2823;
+  color: #b7aea0;
+  border-color: #3a342c;
+}
+window.app.dark button.mode.off label,
+window.app.dark button.chip.off label,
+window.app.dark button.secondary label {
+  color: #b7aea0;
+}
+window.app.dark entry {
+  background-color: #141210;
+  color: #f3efe6;
+  border-color: #3a342c;
+}
+window.app.dark entry selection {
+  background-color: #0e6b52;
+  color: #ffffff;
+}
+window.app.dark progressbar trough {
+  background-color: #3a342c;
+}
+window.app.dark textview {
+  background-color: #141210;
+  color: #f3efe6;
+}
+window.app.dark textview text {
+  background-color: #141210;
+  color: #f3efe6;
+}
+window.app.dark .slab,
+window.app.dark .slab text {
+  background-color: #0c0b0a;
+  color: #f6f1e7;
+}
+window.app.dark spinbutton,
+window.app.dark spinbutton entry {
+  background-color: #141210;
+  color: #f3efe6;
+}
+window.app.dark spinbutton button {
+  background-image: none;
+  background-color: #2c2823;
+  color: #f3efe6;
+  border-color: #3a342c;
+}
+window.app.dark spinbutton button label {
+  color: #f3efe6;
+}
+window.app.dark scrollbar trough {
+  background-color: #1c1916;
+}
+window.app.dark scrollbar slider {
+  background-color: #4a433a;
+}
+window.app.dark checkbutton label {
+  color: #f3efe6;
+}
+window.app.dark progressbar.weak progress {
+  background-color: #e0a15a;
+}
 """
 
 
@@ -249,6 +341,38 @@ def data_directory() -> Path:
 def saved_passwords_path() -> Path:
     """Per-user file for passwords the person chose to keep."""
     return data_directory() / "local-password" / "saved.txt"
+
+
+def appearance_path() -> Path:
+    """This computer's light or dark choice. It holds no passwords."""
+    return data_directory() / "local-password" / "appearance"
+
+
+def load_dark_mode(path: Path | None = None) -> bool:
+    path = appearance_path() if path is None else path
+    if path.is_symlink() or not path.is_file():
+        return False
+    return path.read_text(encoding="utf-8").strip() == "dark"
+
+
+def store_appearance(dark: bool, path: Path | None = None) -> None:
+    """Remember Dark on this computer. The file is readable only by this user."""
+    path = appearance_path() if path is None else path
+    if path.is_symlink():
+        raise ValueError("The appearance file is a link.")
+    directory = path.parent
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(directory, 0o700)
+    payload = b"dark\n" if dark else b"light\n"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        os.write(descriptor, payload)
+    finally:
+        os.close(descriptor)
+    os.chmod(path, 0o600)
 
 
 def clean_name(name: str) -> str:
@@ -769,7 +893,17 @@ class PasswordWindow:
         eyebrow = gtk.Label(label="ON THIS COMPUTER", xalign=0)
         eyebrow.get_style_context().add_class("eyebrow")
         title = gtk.Label(label="Local Password", xalign=0)
+        title.set_hexpand(True)
+        title.set_xalign(0)
         title.get_style_context().add_class("title")
+        self.dark = load_dark_mode()
+        self.dark_button = gtk.Button(label=chip_label("Dark", self.dark))
+        self.dark_button.get_style_context().add_class("chip")
+        self.dark_button.set_valign(gtk.Align.CENTER)
+        self.dark_button.connect("clicked", self.on_toggle_dark)
+        heading = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=12)
+        heading.pack_start(title, True, True, 0)
+        heading.pack_start(self.dark_button, False, False, 0)
         lede = gtk.Label(
             label=(
                 "Create a password here, or open Saved to use the ones you already kept. A passphrase or a recovery key opens all of them."
@@ -779,8 +913,9 @@ class PasswordWindow:
         lede.set_line_wrap(True)
         lede.get_style_context().add_class("lede")
         root.pack_start(eyebrow, False, False, 0)
-        root.pack_start(title, False, False, 0)
+        root.pack_start(heading, False, False, 0)
         root.pack_start(lede, False, False, 0)
+        self.apply_dark()
 
         nav = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
         nav.set_homogeneous(True)
@@ -825,6 +960,33 @@ class PasswordWindow:
         footer.set_line_wrap(True)
         footer.get_style_context().add_class("footer")
         root.pack_start(footer, False, False, 0)
+
+    def on_toggle_dark(self, *_args) -> None:
+        self.dark = not self.dark
+        self.apply_dark()
+        try:
+            store_appearance(self.dark)
+        except OSError:
+            pass
+
+    def apply_dark(self) -> None:
+        context = self.window.get_style_context()
+        button = self.dark_button.get_style_context()
+        if self.dark:
+            context.add_class("dark")
+            button.remove_class("off")
+            button.add_class("on")
+        else:
+            context.remove_class("dark")
+            button.remove_class("on")
+            button.add_class("off")
+        self.dark_button.set_label(chip_label("Dark", self.dark))
+
+    def _match_dialog(self, dialog) -> None:
+        context = dialog.get_style_context()
+        context.add_class("app")
+        if self.dark:
+            context.add_class("dark")
 
     def _card(self):
         outer = self.gtk.Box(orientation=self.gtk.Orientation.VERTICAL)
@@ -1401,6 +1563,7 @@ class PasswordWindow:
     def _prompt_passphrase(self, *, confirm: bool) -> str | None:
         gtk = self.gtk
         dialog = gtk.Dialog(title="Local Password", transient_for=self.window, modal=True)
+        self._match_dialog(dialog)
         dialog.add_button("Cancel", gtk.ResponseType.CANCEL)
         dialog.add_button("Continue", gtk.ResponseType.OK)
         dialog.set_default_response(gtk.ResponseType.OK)
@@ -1467,6 +1630,7 @@ class PasswordWindow:
         """Show the recovery key once. Saving continues only after it is written down."""
         gtk = self.gtk
         dialog = gtk.Dialog(title="Local Password", transient_for=self.window, modal=True)
+        self._match_dialog(dialog)
         dialog.add_button("Cancel", gtk.ResponseType.CANCEL)
         continue_button = dialog.add_button("Continue", gtk.ResponseType.OK)
         continue_button.set_sensitive(False)

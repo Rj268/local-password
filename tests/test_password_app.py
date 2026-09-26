@@ -284,6 +284,61 @@ class EnterpriseEntropyTests(unittest.TestCase):
         self.assertEqual(len(result.text.split()), 20)
 
 
+class AppearanceTests(unittest.TestCase):
+    def test_dark_choice_stays_private_on_this_computer(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            previous = os.environ.get("XDG_DATA_HOME")
+            os.environ["XDG_DATA_HOME"] = directory
+            try:
+                self.assertFalse(password_app.load_dark_mode())
+                password_app.store_appearance(True)
+                path = password_app.appearance_path()
+                self.assertEqual(path.read_text(encoding="utf-8"), "dark\n")
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+                self.assertTrue(password_app.load_dark_mode())
+                password_app.store_appearance(False)
+                self.assertFalse(password_app.load_dark_mode())
+                path.unlink()
+                path.symlink_to(path.with_name("other"))
+                with self.assertRaises(ValueError):
+                    password_app.store_appearance(True)
+                self.assertFalse(password_app.load_dark_mode())
+            finally:
+                if previous is None:
+                    os.environ.pop("XDG_DATA_HOME", None)
+                else:
+                    os.environ["XDG_DATA_HOME"] = previous
+
+    @unittest.skipUnless(os.environ.get("DISPLAY"), "needs a graphical session")
+    def test_dark_switch_changes_the_window(self) -> None:
+        import gi
+
+        gi.require_version("Gtk", "3.0")
+        gi.require_version("Gdk", "3.0")
+        from gi.repository import Gdk, Gtk
+
+        with tempfile.TemporaryDirectory() as directory:
+            previous = os.environ.get("XDG_DATA_HOME")
+            os.environ["XDG_DATA_HOME"] = directory
+            try:
+                password_app.install_styles(Gtk, Gdk)
+                window = password_app.PasswordWindow(Gtk, Gdk)
+                self.assertEqual(window.dark_button.get_label(), "Dark    Off")
+                self.assertFalse(window.window.get_style_context().has_class("dark"))
+                window.on_toggle_dark()
+                self.assertEqual(window.dark_button.get_label(), "Dark    On")
+                self.assertTrue(window.window.get_style_context().has_class("dark"))
+                self.assertTrue(password_app.load_dark_mode())
+                window.window.destroy()
+                while Gtk.events_pending():
+                    Gtk.main_iteration_do(False)
+            finally:
+                if previous is None:
+                    os.environ.pop("XDG_DATA_HOME", None)
+                else:
+                    os.environ["XDG_DATA_HOME"] = previous
+
+
 class PassphraseWarningTests(unittest.TestCase):
     def test_warning_says_a_lost_passphrase_cannot_be_recovered(self) -> None:
         self.assertIn("cannot be recovered", password_app.PASSPHRASE_LOSS_WARNING)
