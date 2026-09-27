@@ -29,7 +29,9 @@ class WindowsInstallTests(unittest.TestCase):
         self.assertIn("AAABAAcA", script)
         self.assertIn(r"Programs\Local Password", script)
         self.assertIn("local-password.ico", script)
-        self.assertNotIn("BeginUpdateResource", script)
+        self.assertIn("0x4D, 0x45, 0x49, 0x0C, 0x0D, 0x0A, 0x0D, 0x0B", script)
+        self.assertIn("BeginUpdateResource", script)
+        self.assertIn("installed copy was left as it is", script)
 
     def test_build_puts_the_installer_in_the_zip(self) -> None:
         script = (WINDOWS / "build.sh").read_text(encoding="utf-8")
