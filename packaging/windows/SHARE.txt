@@ -1,6 +1,9 @@
 Local Password
 
-Open LocalPassword.exe in this folder. Leave the other files beside it.
+Double-click "Install Local Password" in the folder above this one.
+The app then appears in the Start menu and on the desktop.
+
+You can also open LocalPassword.exe in this folder. Leave the other files beside it.
 
 Generate makes a password. Copy puts it on the clipboard. Save is optional.
 The first save asks for a passphrase and then shows a recovery key once.

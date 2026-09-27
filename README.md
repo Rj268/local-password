@@ -79,9 +79,15 @@ pacman -S --needed \
 ```
 
 3. From the project folder, run `bash packaging/windows/build.sh`. The script removes SVG theme icons and leaves a PNG fallback, so the window can open. It also stamps the green key onto `LocalPassword.exe` and writes `dist/windows/LocalPassword-windows.zip`.
-4. Run `dist/windows/LocalPassword/LocalPassword.exe` and try Generate, Copy, and Save. Dark, beside the title, switches the colors and remembers that choice in `%LOCALAPPDATA%\local-password\appearance`. That file holds no passwords.
+4. Install it into the Start menu and onto the desktop:
 
-The zip is what other people download. It contains the exe and the libraries that have to sit beside it. Send `dist/windows/LocalPassword-windows.zip`. They unzip it, open the `LocalPassword` folder, and run `LocalPassword.exe`. A copy of the exe by itself will not start.
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File dist/windows/install.ps1 -Source dist/windows/LocalPassword
+```
+
+Open **Local Password** from the Start menu. Dark, beside the title, switches the colors and remembers that choice in `%LOCALAPPDATA%\local-password\appearance`. That file holds no passwords. Remove the app from Settings, Apps.
+
+The zip is what other people download. Send `dist/windows/LocalPassword-windows.zip`. They unzip it and double-click **Install Local Password**. The program then appears in the Start menu and on the desktop. The libraries stay in the installed folder.
 
 Windows may warn that the program is unrecognized until it is signed with a code-signing certificate. Signing is a separate step after the exe runs. Recipients choose **More info**, then **Run anyway**.
 

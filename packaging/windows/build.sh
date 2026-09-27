@@ -84,29 +84,35 @@ cp "$ROOT/packaging/windows/fonts.conf" "$DEST/etc/fonts/fonts.conf"
 WINDEST=$(cygpath -m "$DEST")
 python "$WINROOT/packaging/windows/scrub_icons.py" "$WINDEST"
 cp "$ROOT/packaging/windows/SHARE.txt" "$DEST/Read-this.txt"
+cp "$ROOT/packaging/windows/install.ps1" "$ROOT/dist/windows/install.ps1"
+cp "$ROOT/packaging/windows/Install Local Password.cmd" "$ROOT/dist/windows/Install Local Password.cmd"
 
 # The exe needs the libraries beside it. The zip is the file other people download.
-python - "$WINDEST" "$WINROOT/dist/windows/LocalPassword-windows.zip" << 'PY'
+python - "$WINDEST" "$WINROOT/dist/windows/LocalPassword-windows.zip" "$WINROOT/dist/windows" << 'PY'
 import sys
 import zipfile
 from pathlib import Path
 
 folder = Path(sys.argv[1])
 archive_path = Path(sys.argv[2])
+bundle = Path(sys.argv[3])
 exe = folder / "LocalPassword.exe"
 if not exe.is_file():
     raise SystemExit(f"Missing {exe}")
 if archive_path.exists():
     archive_path.unlink()
 with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+    for name in ("install.ps1", "Install Local Password.cmd"):
+        path = bundle / name
+        if path.is_file():
+            archive.write(path, name)
     for path in folder.rglob("*"):
         if path.is_file():
-            name = "LocalPassword/" + path.relative_to(folder).as_posix()
-            archive.write(path, name)
+            archive.write(path, "LocalPassword/" + path.relative_to(folder).as_posix())
 print(f"Shareable zip: {archive_path}")
 PY
 
 echo "Built $DEST/LocalPassword.exe"
-echo "The green key icon is on that exe. Share dist/windows/LocalPassword-windows.zip."
-echo "Other people unzip it and open LocalPassword.exe inside the LocalPassword folder."
+echo "Install it into the Start menu with: powershell.exe -NoProfile -ExecutionPolicy Bypass -File dist/windows/install.ps1 -Source dist/windows/LocalPassword"
+echo "Other people unzip dist/windows/LocalPassword-windows.zip and double-click Install Local Password."
 echo "The saved vault will be in %LOCALAPPDATA%\\local-password\\saved.vault"

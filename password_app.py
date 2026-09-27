@@ -937,7 +937,20 @@ def install_styles(gtk, gdk) -> None:
     )
 
 
+def set_windows_app_id() -> None:
+    """Tell Windows this window is its own app, so the taskbar keeps its icon."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("LocalPassword.App")
+    except Exception:
+        return
+
+
 def main() -> None:
+    set_windows_app_id()
     repair_bundled_icons()
     import gi
 
