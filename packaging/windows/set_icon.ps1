@@ -27,71 +27,8 @@ foreach ($lnk in @(
     $shortcut.Save()
 }
 
-Add-Type -TypeDefinition @"
-using System;
-using System.ComponentModel;
-using System.IO;
-using System.Runtime.InteropServices;
-public class LocalPasswordIcon {
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    static extern IntPtr BeginUpdateResource(string file, bool deleteExisting);
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    static extern bool UpdateResource(IntPtr handle, IntPtr type, IntPtr name, ushort lang, byte[] data, uint size);
-    [DllImport("kernel32.dll", SetLastError = true)]
-    static extern bool EndUpdateResource(IntPtr handle, bool discard);
-    [DllImport("shell32.dll")]
-    public static extern void SHChangeNotify(uint eventId, uint flags, IntPtr item1, IntPtr item2);
-    public static void Apply(string exePath, string icoPath) {
-        byte[] ico = File.ReadAllBytes(icoPath);
-        if (ico.Length < 22 || BitConverter.ToUInt16(ico, 0) != 0 || BitConverter.ToUInt16(ico, 2) != 1)
-            throw new InvalidDataException("The icon file is not an .ico.");
-        int count = BitConverter.ToUInt16(ico, 4);
-        byte[] group = new byte[6 + (count * 14)];
-        group[2] = 1;
-        group[4] = (byte)(count & 255);
-        group[5] = (byte)((count >> 8) & 255);
-        byte[][] images = new byte[count][];
-        for (int i = 0; i < count; i++) {
-            int entry = 6 + (i * 16);
-            ushort planes = BitConverter.ToUInt16(ico, entry + 4);
-            ushort bits = BitConverter.ToUInt16(ico, entry + 6);
-            uint nbytes = BitConverter.ToUInt32(ico, entry + 8);
-            uint offset = BitConverter.ToUInt32(ico, entry + 12);
-            if (planes == 0) planes = 1;
-            if (bits == 0) bits = 32;
-            int slot = 6 + (i * 14);
-            group[slot] = ico[entry];
-            group[slot + 1] = ico[entry + 1];
-            group[slot + 2] = ico[entry + 2];
-            group[slot + 3] = ico[entry + 3];
-            BitConverter.GetBytes(planes).CopyTo(group, slot + 4);
-            BitConverter.GetBytes(bits).CopyTo(group, slot + 6);
-            BitConverter.GetBytes(nbytes).CopyTo(group, slot + 8);
-            BitConverter.GetBytes((ushort)(i + 1)).CopyTo(group, slot + 12);
-            images[i] = new byte[nbytes];
-            Buffer.BlockCopy(ico, (int)offset, images[i], 0, (int)nbytes);
-        }
-        IntPtr handle = BeginUpdateResource(exePath, false);
-        if (handle == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
-        try {
-            foreach (ushort lang in new ushort[] { 0, 1033 }) {
-                if (!UpdateResource(handle, (IntPtr)14, (IntPtr)1, lang, group, (uint)group.Length))
-                    throw new Win32Exception(Marshal.GetLastWin32Error());
-                for (int i = 0; i < count; i++) {
-                    if (!UpdateResource(handle, (IntPtr)3, (IntPtr)(i + 1), lang, images[i], (uint)images[i].Length))
-                        throw new Win32Exception(Marshal.GetLastWin32Error());
-                }
-            }
-        } catch {
-            EndUpdateResource(handle, true);
-            throw;
-        }
-        if (!EndUpdateResource(handle, false)) throw new Win32Exception(Marshal.GetLastWin32Error());
-    }
-}
-"@
-[LocalPasswordIcon]::Apply($exe, $icon)
-[LocalPasswordIcon]::SHChangeNotify(0x08000000, 0x1000, [IntPtr]::Zero, [IntPtr]::Zero)
+# Leave LocalPassword.exe unchanged. PyInstaller stores the program archive
+# after the normal Windows icon data, and rewriting that icon removes the archive.
 $reg = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\LocalPassword"
 if (Test-Path -LiteralPath $reg) {
     Set-ItemProperty -LiteralPath $reg -Name DisplayIcon -Value $icon

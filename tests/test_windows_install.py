@@ -28,8 +28,8 @@ class WindowsInstallTests(unittest.TestCase):
         script = (WINDOWS / "set_icon.ps1").read_text(encoding="utf-8")
         self.assertIn("AAABAAcA", script)
         self.assertIn(r"Programs\Local Password", script)
-        self.assertIn("BeginUpdateResource", script)
         self.assertIn("local-password.ico", script)
+        self.assertNotIn("BeginUpdateResource", script)
 
     def test_build_puts_the_installer_in_the_zip(self) -> None:
         script = (WINDOWS / "build.sh").read_text(encoding="utf-8")
