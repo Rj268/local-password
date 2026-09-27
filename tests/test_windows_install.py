@@ -24,6 +24,13 @@ class WindowsInstallTests(unittest.TestCase):
         self.assertIn(b"\r\n", command)
         self.assertIn(b"install.ps1", command)
 
+    def test_icon_script_embeds_the_green_key(self) -> None:
+        script = (WINDOWS / "set_icon.ps1").read_text(encoding="utf-8")
+        self.assertIn("AAABAAcA", script)
+        self.assertIn(r"Programs\Local Password", script)
+        self.assertIn("BeginUpdateResource", script)
+        self.assertIn("local-password.ico", script)
+
     def test_build_puts_the_installer_in_the_zip(self) -> None:
         script = (WINDOWS / "build.sh").read_text(encoding="utf-8")
         self.assertIn('cp "$ROOT/packaging/windows/install.ps1"', script)
