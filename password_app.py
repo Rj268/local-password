@@ -3,7 +3,8 @@
 
 The password stays in this process until you close the window.
 Copy places it on the clipboard. Save keeps it for the next time you open the app.
-The app does not listen on a network port.
+Send vault opens a port only while another device on the same network is pulling
+the encrypted file. The passphrase is not sent.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import shutil
 import string
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,6 +27,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
 import random_password_generator as generator
+import vault_sync
 
 METER_CAP_BITS = 256
 MAX_NAME_LENGTH = 80
@@ -71,11 +74,14 @@ window.app {
   font-weight: 700;
   color: #1c1915;
 }
-.recovery-key {
+.recovery-key, .pairing-code {
   font-family: "DejaVu Sans Mono", monospace;
   font-size: 16px;
   font-weight: 700;
   color: #1c1915;
+}
+.pairing-code {
+  font-size: 28px;
 }
 .strength.strong { color: #0e6b52; font-weight: 700; }
 .strength.weak { color: #8a4b08; font-weight: 700; }
@@ -145,6 +151,7 @@ window.app.dark .card {
 window.app.dark .title,
 window.app.dark .saved-name,
 window.app.dark .recovery-key,
+window.app.dark .pairing-code,
 window.app.dark .bits {
   color: #f3efe6;
 }
@@ -779,19 +786,101 @@ def write_vault(material: VaultKey, items: list[SavedPassword], path: Path | Non
 
 def open_vault(secret: str, path: Path | None = None) -> tuple[VaultKey, list[SavedPassword]]:
     """Unlock saved passwords. A wrong passphrase or recovery key raises ValueError."""
-    if len(secret) < MIN_PASSPHRASE_LENGTH:
-        raise ValueError("That passphrase or recovery key did not unlock the saved passwords.")
     path = vault_path() if path is None else path
     if path.is_symlink():
         raise ValueError("The saved password file is a symbolic link.")
     if not path.is_file():
         raise ValueError("The saved password file is damaged.")
-    blob = path.read_bytes()
+    return open_vault_bytes(secret, path.read_bytes())
+
+
+def open_vault_bytes(secret: str, blob: bytes) -> tuple[VaultKey, list[SavedPassword]]:
+    """Unlock a vault that is already in memory."""
+    if len(secret) < MIN_PASSPHRASE_LENGTH:
+        raise ValueError("That passphrase or recovery key did not unlock the saved passwords.")
     if blob.startswith(VAULT_MAGIC_V2):
         return _open_vault_v2(secret, blob)
     if blob.startswith(VAULT_MAGIC):
         return _open_vault_v1(secret, blob)
     raise ValueError("The saved password file is damaged.")
+
+
+def items_from_same_vault(blob: bytes, material: VaultKey) -> list[SavedPassword] | None:
+    """Read a vault sealed with this same key. A different vault returns None."""
+    if not material.recovery_wrap or not blob.startswith(VAULT_MAGIC_V2):
+        return None
+    header = _v2_header(material.n, material.r, material.p, material.salt, material.recovery_salt)
+    prefix = header + material.passphrase_wrap + material.recovery_wrap
+    if not blob.startswith(prefix) or len(blob) < len(prefix) + 12 + 16:
+        return None
+    nonce = blob[len(prefix) : len(prefix) + 12]
+    ciphertext = blob[len(prefix) + 12 :]
+    try:
+        raw = AESGCM(material.key).decrypt(nonce, ciphertext, prefix)
+    except InvalidTag:
+        return None
+    return _decode_saved(raw)
+
+
+def merge_saved(
+    local: list[SavedPassword], incoming: list[SavedPassword]
+) -> tuple[list[SavedPassword], int]:
+    """Keep every name. A different password for the same name is stored beside it."""
+    merged: list[SavedPassword] = []
+    taken: dict[str, int] = {}
+    splits = 0
+    for item in local:
+        taken[item.name] = len(merged)
+        merged.append(item)
+    for item in incoming:
+        slot = taken.get(item.name)
+        if slot is None:
+            taken[item.name] = len(merged)
+            merged.append(item)
+            continue
+        if merged[slot].password == item.password:
+            continue
+        splits += 1
+        name = _other_device_name(item.name, taken)
+        taken[name] = len(merged)
+        merged.append(SavedPassword(name, item.password))
+    return merged, splits
+
+
+def _other_device_name(name: str, taken: dict[str, int]) -> str:
+    suffix = " (other device)"
+    room = MAX_NAME_LENGTH - len(suffix)
+    base = name[:room].rstrip() if len(name) + len(suffix) > MAX_NAME_LENGTH else name
+    candidate = f"{base}{suffix}"
+    number = 2
+    while candidate in taken:
+        extra = f" {number}"
+        room = MAX_NAME_LENGTH - len(suffix) - len(extra)
+        base = name[:room].rstrip()
+        candidate = f"{base}{suffix}{extra}"
+        number += 1
+    return candidate
+
+
+def store_vault_blob(blob: bytes, path: Path | None = None) -> Path:
+    """Write a vault received from another device without changing its bytes."""
+    if not blob.startswith((VAULT_MAGIC, VAULT_MAGIC_V2)):
+        raise ValueError("The saved password file is damaged.")
+    path = vault_path() if path is None else path
+    directory = path.parent
+    directory.mkdir(parents=True, exist_ok=True)
+    if path.is_symlink():
+        raise ValueError("The saved password file is a symbolic link.")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+        os.write(descriptor, blob)
+    finally:
+        os.close(descriptor)
+    return path
 
 
 def _open_vault_v1(passphrase: str, blob: bytes) -> tuple[VaultKey, list[SavedPassword]]:
@@ -1060,6 +1149,30 @@ class PasswordWindow:
         self.saved_view.hide()
         root.pack_start(self.saved_view, True, True, 0)
         self._build_manager(saved_inner)
+
+        sync_row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
+        self.send_button = gtk.Button(label="Send vault")
+        self.receive_button = gtk.Button(label="Receive vault")
+        for button in (self.send_button, self.receive_button):
+            button.get_style_context().add_class("secondary")
+            sync_row.pack_start(button, True, True, 0)
+        self.send_button.connect("clicked", self.on_send_vault)
+        self.receive_button.connect("clicked", self.on_receive_vault)
+        root.pack_start(sync_row, False, False, 0)
+        sync_hint = gtk.Label(
+            label=(
+                "Send vault shares the encrypted file with another device on the same Wi-Fi. "
+                "The passphrase stays here."
+            ),
+            xalign=0,
+        )
+        sync_hint.set_line_wrap(True)
+        sync_hint.get_style_context().add_class("hint")
+        root.pack_start(sync_hint, False, False, 0)
+        self.sync_status = gtk.Label(label="", xalign=0)
+        self.sync_status.set_line_wrap(True)
+        self.sync_status.get_style_context().add_class("hint")
+        root.pack_start(self.sync_status, False, False, 0)
 
         footer = gtk.Label(
             label=(
@@ -1672,7 +1785,231 @@ class PasswordWindow:
             return
         self.lock_button.hide()
 
-    def _prompt_passphrase(self, *, confirm: bool) -> str | None:
+    def _sync_note(self, text: str) -> bool:
+        self.sync_status.set_text(text)
+        self.status.set_text(text)
+        self.manager_message.set_text(text)
+        if text:
+            self.sync_status.show()
+            self.manager_message.show()
+        return False
+
+    def on_send_vault(self, *_args) -> None:
+        """Offer the encrypted vault until another device presents the pairing code."""
+        path = vault_path()
+        if not path.is_file():
+            self._sync_note("Save a password on this computer first.")
+            return
+        try:
+            offer = vault_sync.VaultOffer(path.read_bytes())
+            offer.start()
+        except (OSError, ValueError) as exc:
+            self._sync_note(str(exc))
+            return
+        if offer.error or offer.port == 0:
+            offer.stop()
+            self._sync_note(offer.error or "Could not offer the vault on this network.")
+            return
+        self._show_offer(offer)
+
+    def _show_offer(self, offer: vault_sync.VaultOffer) -> None:
+        from gi.repository import GLib
+
+        gtk = self.gtk
+        dialog = gtk.Dialog(title="Send vault", transient_for=self.window, modal=True)
+        self._match_dialog(dialog)
+        dialog.add_button("Cancel", gtk.ResponseType.CANCEL)
+        content = dialog.get_content_area()
+        content.set_margin_top(16)
+        content.set_margin_bottom(16)
+        content.set_margin_start(16)
+        content.set_margin_end(16)
+        content.set_spacing(8)
+        label = gtk.Label(
+            label=(
+                "On the other device, choose Receive vault and enter this code. "
+                "Both devices need the same Wi-Fi. The passphrase stays on this computer. "
+                "The first time, Windows may ask to allow this app on private networks."
+            ),
+            xalign=0,
+        )
+        label.set_line_wrap(True)
+        label.set_max_width_chars(42)
+        content.pack_start(label, False, False, 0)
+        code = gtk.Label(label=offer.code, xalign=0)
+        code.set_selectable(True)
+        code.get_style_context().add_class("pairing-code")
+        content.pack_start(code, False, False, 0)
+        where = offer.where()
+        if where:
+            address = gtk.Label(
+                label=f"If the code is not found, enter this address: {where}",
+                xalign=0,
+            )
+            address.set_line_wrap(True)
+            address.set_max_width_chars(42)
+            address.set_selectable(True)
+            content.pack_start(address, False, False, 0)
+        limit = gtk.Label(label="The offer lasts two minutes.", xalign=0)
+        limit.get_style_context().add_class("hint")
+        content.pack_start(limit, False, False, 0)
+        dialog.show_all()
+
+        def tick() -> bool:
+            if offer.sent:
+                dialog.response(gtk.ResponseType.OK)
+                return False
+            if offer.error:
+                dialog.response(gtk.ResponseType.CANCEL)
+                return False
+            return True
+
+        source = GLib.timeout_add(400, tick)
+        dialog.run()
+        GLib.source_remove(source)
+        sent = offer.sent
+        problem = offer.error
+        offer.stop()
+        dialog.destroy()
+        if sent:
+            self._sync_note("The encrypted vault was sent. The passphrase stayed on this computer.")
+        elif problem:
+            self._sync_note(problem)
+        else:
+            self._sync_note("The offer was cancelled. Nothing was sent.")
+
+    def on_receive_vault(self, *_args) -> None:
+        """Pull an encrypted vault from a device that is offering one."""
+        from gi.repository import GLib
+
+        gtk = self.gtk
+        dialog = gtk.Dialog(title="Receive vault", transient_for=self.window, modal=True)
+        self._match_dialog(dialog)
+        dialog.add_button("Cancel", gtk.ResponseType.CANCEL)
+        dialog.add_button("Receive", gtk.ResponseType.OK)
+        dialog.set_default_response(gtk.ResponseType.OK)
+        content = dialog.get_content_area()
+        content.set_margin_top(16)
+        content.set_margin_bottom(16)
+        content.set_margin_start(16)
+        content.set_margin_end(16)
+        content.set_spacing(8)
+        label = gtk.Label(
+            label=(
+                "Enter the 6-digit code from the other device. "
+                "Both devices need the same Wi-Fi. The passphrase is not sent."
+            ),
+            xalign=0,
+        )
+        label.set_line_wrap(True)
+        label.set_max_width_chars(42)
+        content.pack_start(label, False, False, 0)
+        code_entry = gtk.Entry()
+        code_entry.set_placeholder_text("6-digit code")
+        code_entry.set_max_length(6)
+        content.pack_start(code_entry, False, False, 0)
+        address_entry = gtk.Entry()
+        address_entry.set_placeholder_text("Optional address, such as 192.168.1.20:12345")
+        content.pack_start(address_entry, False, False, 0)
+        problem = gtk.Label(label="", xalign=0)
+        problem.set_line_wrap(True)
+        problem.get_style_context().add_class("danger")
+        content.pack_start(problem, False, False, 0)
+        dialog.show_all()
+        code_entry.grab_focus()
+        code_entry.connect("activate", lambda *_args: dialog.response(gtk.ResponseType.OK))
+        code = ""
+        address = ""
+        while True:
+            response = dialog.run()
+            if response != gtk.ResponseType.OK:
+                dialog.destroy()
+                return
+            try:
+                code = vault_sync.normalize_code(code_entry.get_text())
+            except ValueError as exc:
+                problem.set_text(str(exc))
+                continue
+            address = address_entry.get_text().strip()
+            dialog.destroy()
+            break
+        self._sync_note("Looking for the other device.")
+
+        def work() -> None:
+            try:
+                blob = vault_sync.receive_vault(code, address or None)
+            except ValueError as exc:
+                GLib.idle_add(self._sync_note, str(exc))
+                return
+            GLib.idle_add(self._apply_received, blob)
+
+        threading.Thread(target=work, name="vault-receive", daemon=True).start()
+
+    def _apply_received(self, blob: bytes) -> bool:
+        try:
+            self._merge_or_store(blob)
+        except ValueError as exc:
+            self._sync_note(str(exc))
+        except OSError:
+            self._sync_note("Could not save the vault from the other device.")
+        return False
+
+    def _merge_or_store(self, blob: bytes) -> None:
+        path = vault_path()
+        if not path.is_file():
+            store_vault_blob(blob, path)
+            self._prepare_saved()
+            self.show_section("saved")
+            self._sync_note(
+                "Vault received. The passphrase was not sent. Unlock with the same passphrase."
+            )
+            return
+        if not self._ensure_vault_key():
+            self._sync_note("Unlock this computer's vault before merging. Nothing was replaced.")
+            return
+        incoming = items_from_same_vault(blob, self.vault_key)
+        if incoming is None:
+            self._merge_foreign(blob)
+            return
+        self._finish_merge(incoming)
+
+    def _merge_foreign(self, blob: bytes) -> None:
+        while True:
+            secret = self._prompt_passphrase(
+                confirm=False,
+                message=(
+                    "This vault uses a different passphrase. Enter it to merge the passwords. "
+                    "It is not sent."
+                ),
+            )
+            if secret is None:
+                self._sync_note("Nothing was merged.")
+                return
+            try:
+                _material, incoming = open_vault_bytes(secret, blob)
+            except ValueError as exc:
+                self._sync_note(str(exc))
+                continue
+            self._finish_merge(incoming)
+            return
+
+    def _finish_merge(self, incoming: list[SavedPassword]) -> None:
+        merged, splits = merge_saved(self.saved, incoming)
+        write_vault(self.vault_key, merged)
+        self.saved = merged
+        self.locked = False
+        self.show_section("saved")
+        self._refresh_saved_rows()
+        self._update_lock_button()
+        if splits == 1:
+            extra = " One name differed, so both copies were kept."
+        elif splits:
+            extra = f" {splits} names differed, so both copies were kept."
+        else:
+            extra = ""
+        self._sync_note("Passwords arrived. The passphrase was not sent." + extra)
+
+    def _prompt_passphrase(self, *, confirm: bool, message: str | None = None) -> str | None:
         gtk = self.gtk
         dialog = gtk.Dialog(title="Local Password", transient_for=self.window, modal=True)
         self._match_dialog(dialog)
@@ -1685,11 +2022,9 @@ class PasswordWindow:
         content.set_margin_start(16)
         content.set_margin_end(16)
         content.set_spacing(8)
-        if confirm:
-            message = (
-                "Choose a passphrase to lock saved passwords. It is not stored."
-            )
-        else:
+        if message is None and confirm:
+            message = "Choose a passphrase to lock saved passwords. It is not stored."
+        elif message is None:
             message = "Enter the passphrase or the recovery key."
         label = gtk.Label(label=message, xalign=0)
         label.set_line_wrap(True)

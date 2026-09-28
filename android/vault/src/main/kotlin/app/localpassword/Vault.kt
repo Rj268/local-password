@@ -78,6 +78,60 @@ object Vault {
         throw VaultException("The saved password file is damaged.")
     }
 
+    fun itemsFromSameVault(blob: ByteArray, opened: OpenVault): List<SavedPassword>? {
+        if (opened.recoveryWrap.isEmpty() || !blob.startsWith(MAGIC_V2)) return null
+        val header = headerV2(opened.n, opened.r, opened.p, opened.passphraseSalt, opened.recoverySalt)
+        val prefix = header + opened.passphraseWrap + opened.recoveryWrap
+        if (blob.size < prefix.size + 12 + 16 || !blob.startsWith(prefix)) return null
+        val nonce = blob.copyOfRange(prefix.size, prefix.size + 12)
+        val ciphertext = blob.copyOfRange(prefix.size + 12, blob.size)
+        return try {
+            decodeSaved(decrypt(opened.dek, nonce, ciphertext, prefix))
+        } catch (_: VaultException) {
+            null
+        }
+    }
+
+    fun mergeSaved(local: List<SavedPassword>, incoming: List<SavedPassword>): Pair<List<SavedPassword>, Int> {
+        val merged = mutableListOf<SavedPassword>()
+        val taken = mutableMapOf<String, Int>()
+        var splits = 0
+        for (item in local) {
+            taken[item.name] = merged.size
+            merged.add(item)
+        }
+        for (item in incoming) {
+            val slot = taken[item.name]
+            if (slot == null) {
+                taken[item.name] = merged.size
+                merged.add(item)
+                continue
+            }
+            if (merged[slot].password == item.password) continue
+            splits += 1
+            val name = otherDeviceName(item.name, taken)
+            taken[name] = merged.size
+            merged.add(SavedPassword(name, item.password))
+        }
+        return merged to splits
+    }
+
+    private fun otherDeviceName(name: String, taken: Map<String, Int>): String {
+        val suffix = " (other device)"
+        val limit = 80
+        var room = limit - suffix.length
+        val base = if (name.length + suffix.length > limit) name.take(room).trimEnd() else name
+        var candidate = base + suffix
+        var number = 2
+        while (candidate in taken) {
+            val extra = " $number"
+            room = limit - suffix.length - extra.length
+            candidate = name.take(room).trimEnd() + suffix + extra
+            number += 1
+        }
+        return candidate
+    }
+
     fun seal(opened: OpenVault, items: List<SavedPassword>): ByteArray {
         val checked = items.map { SavedPassword(cleanName(it.name), passwordLine(it.password)) }
         if (opened.recoveryWrap.isNotEmpty()) {

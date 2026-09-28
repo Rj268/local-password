@@ -63,7 +63,7 @@ Description: Air-gapped password generator
  A recovery key is shown once. Either it or the passphrase opens saved passwords.
  If both are lost, the saved passwords cannot be recovered.
  Each generated password can be saved on its own.
- The app does not open a network port.
+ Send vault opens a port only while another device pulls the encrypted file.
 EOF
 
 cat > "$PKG/DEBIAN/postinst" <<'EOF'

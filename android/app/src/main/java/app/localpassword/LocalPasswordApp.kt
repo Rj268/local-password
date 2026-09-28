@@ -103,6 +103,25 @@ fun LocalPasswordApp(model: PasswordModel = viewModel()) {
                 } else {
                     SavedPane(model, card, ink, muted, dark)
                 }
+                Text(
+                    "Send vault shares the encrypted file with another device on the same Wi-Fi. The passphrase stays here.",
+                    color = muted,
+                    fontSize = 13.sp,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(
+                        onClick = { model.sendVault() },
+                        enabled = !model.busy && model.offerCode == null,
+                    ) {
+                        Text("Send vault", color = Green)
+                    }
+                    TextButton(
+                        onClick = { model.askReceive = true },
+                        enabled = !model.busy,
+                    ) {
+                        Text("Receive vault", color = Green)
+                    }
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = { importVault.launch(arrayOf("*/*")) }) {
                         Text("Import vault", color = Green)
@@ -141,6 +160,38 @@ fun LocalPasswordApp(model: PasswordModel = viewModel()) {
             busy = model.busy,
             onDismiss = { model.askUnlock = false },
         ) { phrase, _ -> model.unlock(phrase, thenSave = model.section == "create" && model.current.isNotEmpty()) }
+    }
+    val offerCode = model.offerCode
+    if (offerCode != null) {
+        AlertDialog(
+            onDismissRequest = { model.cancelOffer() },
+            title = { Text("Send vault") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("On the other device, choose Receive vault and enter this code. Both devices need the same Wi-Fi. The passphrase stays on this phone.")
+                    Text(offerCode, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 32.sp, color = Green)
+                    if (model.offerWhere.isNotEmpty()) {
+                        Text("If the code is not found, enter this address: ${model.offerWhere}")
+                    }
+                    Text("The offer lasts two minutes.")
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { model.cancelOffer() }) { Text("Cancel") }
+            },
+        )
+    }
+    if (model.askReceive) {
+        ReceiveDialog(model)
+    }
+    if (model.askIncomingPassphrase) {
+        PassphraseDialog(
+            title = "Other vault",
+            body = "This vault uses a different passphrase. Enter it to merge the passwords. It is not sent.",
+            confirm = false,
+            busy = model.busy,
+            onDismiss = { model.dismissIncoming() },
+        ) { phrase, _ -> model.mergeWithIncomingPassphrase(phrase) }
     }
     val recovery = model.recoveryKey
     if (recovery != null) {
@@ -298,6 +349,44 @@ private fun Stepper(label: String, value: Int, min: Int, max: Int, ink: Color, m
             TextButton(onClick = { if (value < max) onChange(value + 1) }) { Text("+", color = Green, fontSize = 20.sp) }
         }
     }
+}
+
+@Composable
+private fun ReceiveDialog(model: PasswordModel) {
+    var code by remember { mutableStateOf("") }
+    var address by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = { model.askReceive = false },
+        title = { Text("Receive vault") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Enter the 6-digit code from the other device. Both devices need the same Wi-Fi. The passphrase is not sent.")
+                OutlinedTextField(
+                    value = code,
+                    onValueChange = { if (it.length <= 6) code = it },
+                    label = { Text("6-digit code") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                )
+                OutlinedTextField(
+                    value = address,
+                    onValueChange = { address = it },
+                    label = { Text("Optional address") },
+                    placeholder = { Text("192.168.1.20:12345") },
+                    singleLine = true,
+                )
+                if (model.error.isNotEmpty()) {
+                    Text(model.error, color = Danger)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { model.receiveVault(code, address) }, enabled = !model.busy) { Text("Receive") }
+        },
+        dismissButton = {
+            TextButton(onClick = { model.askReceive = false }) { Text("Cancel") }
+        },
+    )
 }
 
 @Composable

@@ -3,12 +3,14 @@ package app.localpassword
 import android.app.Application
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.net.wifi.WifiManager
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -37,8 +39,14 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     var recoveryKey by mutableStateOf<String?>(null)
     var error by mutableStateOf("")
     var dark by mutableStateOf(loadDark())
+    var offerCode by mutableStateOf<String?>(null)
+    var offerWhere by mutableStateOf("")
+    var askReceive by mutableStateOf(false)
+    var askIncomingPassphrase by mutableStateOf(false)
 
     private var opened: OpenVault? = null
+    private var offer: VaultSync.Offer? = null
+    private var incomingBlob: ByteArray? = null
     private val words: List<String> by lazy { loadWords() }
 
     fun vaultFile(): File = File(getApplication<Application>().filesDir, "saved.vault")
@@ -159,8 +167,14 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
                 saved = fresh.items
                 unlocked = true
                 askUnlock = false
-                status = "Unlocked."
-                if (thenSave) persist(fresh)
+                val waiting = incomingBlob
+                if (waiting != null) {
+                    status = "Unlocked."
+                    mergeInto(fresh, waiting)
+                } else {
+                    status = "Unlocked."
+                    if (thenSave) persist(fresh)
+                }
             } catch (exc: VaultException) {
                 error = exc.message ?: "That passphrase or recovery key did not unlock the saved passwords."
             } finally {
@@ -189,6 +203,197 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
         askUnlock = true
         status = "Vault copied onto this phone. The same passphrase opens it."
         error = ""
+    }
+
+    fun sendVault() {
+        if (busy || offerCode != null) return
+        if (!hasVault()) {
+            error = "Save a password on this phone first."
+            return
+        }
+        viewModelScope.launch {
+            busy = true
+            error = ""
+            try {
+                val bytes = withContext(Dispatchers.IO) { vaultFile().readBytes() }
+                val started = withContext(Dispatchers.IO) {
+                    VaultSync.Offer(bytes).also { it.start() }
+                }
+                if (started.error.isNotEmpty() || started.port == 0) {
+                    started.stop()
+                    error = started.error.ifEmpty { "Could not offer the vault on this network." }
+                    return@launch
+                }
+                offer?.stop()
+                offer = started
+                offerCode = started.code
+                offerWhere = started.where()
+                watchOffer(started)
+            } catch (exc: VaultException) {
+                error = exc.message ?: "Could not offer the vault on this network."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    fun cancelOffer() {
+        val current = offer
+        val sent = current?.sent == true
+        current?.stop()
+        offer = null
+        offerCode = null
+        offerWhere = ""
+        status = if (sent) {
+            "The encrypted vault was sent. The passphrase stayed on this phone."
+        } else {
+            "The offer was cancelled. Nothing was sent."
+        }
+    }
+
+    fun receiveVault(code: String, address: String) {
+        if (busy) return
+        try {
+            VaultSync.normalizeCode(code)
+        } catch (exc: VaultException) {
+            error = exc.message ?: "The pairing code is 6 digits."
+            return
+        }
+        askReceive = false
+        error = ""
+        viewModelScope.launch {
+            busy = true
+            status = "Looking for the other device."
+            try {
+                val blob = withContext(Dispatchers.IO) {
+                    withMulticastLock {
+                        VaultSync.receiveVault(code, address.trim().ifEmpty { null })
+                    }
+                }
+                applyReceived(blob)
+            } catch (exc: VaultException) {
+                error = exc.message ?: "Could not receive the vault."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    fun mergeWithIncomingPassphrase(secret: String) {
+        val blob = incomingBlob ?: return
+        val current = opened ?: return
+        viewModelScope.launch {
+            busy = true
+            error = ""
+            try {
+                val foreign = withContext(Dispatchers.Default) { Vault.open(secret, blob) }
+                incomingBlob = null
+                askIncomingPassphrase = false
+                finishMerge(current, foreign.items)
+            } catch (exc: VaultException) {
+                error = exc.message ?: "That passphrase or recovery key did not unlock the saved passwords."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    fun dismissIncoming() {
+        askIncomingPassphrase = false
+        incomingBlob = null
+        status = "Nothing was merged."
+    }
+
+    override fun onCleared() {
+        offer?.stop()
+        super.onCleared()
+    }
+
+    private fun watchOffer(started: VaultSync.Offer) {
+        viewModelScope.launch {
+            while (offer === started && !started.sent && started.error.isEmpty()) {
+                delay(400)
+            }
+            if (offer !== started) return@launch
+            if (started.sent) {
+                status = "The encrypted vault was sent. The passphrase stayed on this phone."
+            } else if (started.error.isNotEmpty()) {
+                error = started.error
+            } else {
+                status = "The offer ended. Nothing was sent."
+            }
+            offerCode = null
+            offerWhere = ""
+            started.stop()
+            if (offer === started) offer = null
+        }
+    }
+
+    private suspend fun applyReceived(blob: ByteArray) {
+        if (!hasVault()) {
+            withContext(Dispatchers.IO) { writeAtomically(blob) }
+            opened = null
+            unlocked = false
+            saved = emptyList()
+            revealed = null
+            section = "saved"
+            askUnlock = true
+            status = "Vault received. The passphrase was not sent. Unlock with the same passphrase."
+            error = ""
+            return
+        }
+        val current = opened
+        if (current == null) {
+            incomingBlob = blob
+            askUnlock = true
+            section = "saved"
+            status = "Unlock this phone's vault to merge. The passphrase is not sent."
+            return
+        }
+        mergeInto(current, blob)
+    }
+
+    private suspend fun mergeInto(current: OpenVault, blob: ByteArray) {
+        val same = withContext(Dispatchers.Default) { Vault.itemsFromSameVault(blob, current) }
+        if (same != null) {
+            incomingBlob = null
+            finishMerge(current, same)
+            return
+        }
+        incomingBlob = blob
+        askIncomingPassphrase = true
+        status = "This vault uses a different passphrase. Enter it to merge. It is not sent."
+    }
+
+    private fun finishMerge(current: OpenVault, incoming: List<SavedPassword>) {
+        val (merged, splits) = Vault.mergeSaved(current.items, incoming)
+        val extra = when (splits) {
+            0 -> ""
+            1 -> " One name differed, so both copies were kept."
+            else -> " $splits names differed, so both copies were kept."
+        }
+        replace(current, merged, "Passwords arrived. The passphrase was not sent.$extra")
+        section = "saved"
+    }
+
+    private inline fun <T> withMulticastLock(block: () -> T): T {
+        val lock = try {
+            val wifi = getApplication<Application>().applicationContext.getSystemService(WifiManager::class.java)
+            wifi?.createMulticastLock("local-password")?.also {
+                it.setReferenceCounted(false)
+                it.acquire()
+            }
+        } catch (_: SecurityException) {
+            null
+        }
+        try {
+            return block()
+        } finally {
+            try {
+                if (lock?.isHeld == true) lock.release()
+            } catch (_: RuntimeException) {
+            }
+        }
     }
 
     fun exportBytes(): ByteArray? {

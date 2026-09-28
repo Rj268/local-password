@@ -1,6 +1,6 @@
 # Local Password
 
-Generate a cryptographically secure password on this computer and copy it. The password stays in the window until you close it. Save keeps it under a name. A passphrase you choose locks it, and a recovery key shown once can open it too. Neither is stored. Saved passwords stay hidden until you unlock them. The app does not open a network port.
+Generate a cryptographically secure password on this computer and copy it. The password stays in the window until you close it. Save keeps it under a name. A passphrase you choose locks it, and a recovery key shown once can open it too. Neither is stored. Saved passwords stay hidden until you unlock them. Send vault opens a port only while another device on the same Wi-Fi pulls the encrypted file. The passphrase is not sent.
 
 A strong password here has about 75 bits of entropy or more. The strength bar fills toward 256 bits. That is the size of the search space for the length and alphabet you chose. An 8-character mix is about 50 bits, so it is reported as weak. Sixteen characters, or six random words, clears the strong line. Forty characters from digits, letters, and punctuation reach 256 bits, as do twenty words from the EFF list. When the length is long enough, the generator places at least one character from each selected group, then fills the rest at random. Each distinct character is equally likely.
 
@@ -95,7 +95,9 @@ A macOS disk image is built on macOS.
 
 ## Android
 
-The phone app reads and writes the same `saved.vault` file. It does not open a network connection. Generate a password, name it, and save it. The first save asks for a passphrase and shows a recovery key once. Import vault reads a `saved.vault` copied from a computer. Export vault writes that file so it can go back. Use the same passphrase on every device. Saving on two devices at the same time can overwrite the file, so close one before you save on the other.
+The phone app reads and writes the same `saved.vault` file. Generate a password, name it, and save it. The first save asks for a passphrase and shows a recovery key once. Import vault reads a `saved.vault` copied from a computer. Export vault writes that file so it can go back.
+
+Send vault and Receive vault move that encrypted file between a computer and a phone on the same Wi-Fi. One device shows a 6-digit code. The other enters it. The passphrase stays where it already is. If the same name has two different passwords, both are kept and the new one is labeled `(other device)`. The port closes when the send finishes or you cancel it. A lost phone still needs a copy of `saved.vault`; the recovery key opens a file you still have.
 
 Build it from `android/` with the Android SDK installed:
 
