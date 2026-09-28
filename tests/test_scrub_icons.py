@@ -106,6 +106,24 @@ class ScrubIconTests(unittest.TestCase):
             self.assertTrue((status / "image-missing.png").is_file())
             self.assertNotIn("scalable", theme.read_text(encoding="utf-8"))
 
+    def test_msys_symlink_cookie_is_replaced_with_the_real_dll(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = root / "LocalPassword"
+            source = root / "bin"
+            bundle.mkdir()
+            source.mkdir()
+            real = b"MZ" + b"\x00" * 30
+            (source / "expat-real.dll").write_bytes(real)
+            cookie = b"!<symlink>\xff\xfe" + "expat-real.dll".encode("utf-16le") + b"\x00\x00"
+            (source / "libexpat-1.dll").write_bytes(cookie)
+            (bundle / "libexpat-1.dll").write_bytes(cookie)
+            (bundle / "good.dll").write_bytes(real)
+            replaced = scrub_icons.materialize_dlls(bundle, source)
+            self.assertEqual(replaced, 1)
+            self.assertTrue((bundle / "libexpat-1.dll").read_bytes().startswith(b"MZ"))
+            self.assertEqual((bundle / "good.dll").read_bytes(), real)
+
     def test_missing_icon_tree_is_an_error(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(FileNotFoundError):
@@ -116,7 +134,8 @@ class ScrubIconTests(unittest.TestCase):
             Path(__file__).resolve().parents[1] / "packaging" / "windows" / "build.sh"
         ).read_text(encoding="utf-8")
         self.assertIn('WINDEST=$(cygpath -m "$DEST")', script)
-        self.assertIn('python "$WINROOT/packaging/windows/scrub_icons.py" "$WINDEST"', script)
+        self.assertIn('python "$WINROOT/packaging/windows/scrub_icons.py" "$WINDEST" "$WINBIN"', script)
+        self.assertIn('WINBIN=$(cygpath -m "$PREFIX/bin")', script)
         self.assertNotIn('python - "$DEST"', script)
         self.assertIn('--icon "$WINROOT/packaging/windows/local-password.ico"', script)
         self.assertIn("LocalPassword-windows.zip", script)

@@ -82,7 +82,8 @@ cp "$ROOT/packaging/windows/fonts.conf" "$DEST/etc/fonts/fonts.conf"
 # cygpath -m so Windows Python sees C:/Users/... even when MSYS leaves
 # arguments that start with /c/ unconverted.
 WINDEST=$(cygpath -m "$DEST")
-python "$WINROOT/packaging/windows/scrub_icons.py" "$WINDEST"
+WINBIN=$(cygpath -m "$PREFIX/bin")
+python "$WINROOT/packaging/windows/scrub_icons.py" "$WINDEST" "$WINBIN"
 cp "$ROOT/packaging/windows/SHARE.txt" "$DEST/Read-this.txt"
 cp "$ROOT/packaging/windows/install.ps1" "$ROOT/dist/windows/install.ps1"
 cp "$ROOT/packaging/windows/Install Local Password.cmd" "$ROOT/dist/windows/Install Local Password.cmd"
