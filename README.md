@@ -91,7 +91,21 @@ The zip is what other people download. Send `dist/windows/LocalPassword-windows.
 
 Windows may warn that the program is unrecognized until it is signed with a code-signing certificate. Signing is a separate step after the exe runs. Recipients choose **More info**, then **Run anyway**.
 
-A macOS disk image is built on macOS. An Android package is built with the Android SDK. Those are not on this machine.
+A macOS disk image is built on macOS.
+
+## Android
+
+The phone app reads and writes the same `saved.vault` file. It does not open a network connection. Generate a password, name it, and save it. The first save asks for a passphrase and shows a recovery key once. Import vault reads a `saved.vault` copied from a computer. Export vault writes that file so it can go back. Use the same passphrase on every device. Saving on two devices at the same time can overwrite the file, so close one before you save on the other.
+
+Build it from `android/` with the Android SDK installed:
+
+```bash
+cd android
+export ANDROID_HOME=/path/to/android-sdk
+./gradlew :vault:test :app:assembleDebug
+```
+
+The installable package is `dist/local-password.apk`. Copy it to the phone, open it, and allow installation from that source. The vault on the phone stays in the app's private storage until you export it.
 
 ## Tests
 
