@@ -19,7 +19,8 @@ import string
 import subprocess
 import sys
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from pathlib import Path
 
 from cryptography.exceptions import InvalidTag
@@ -43,6 +44,23 @@ SCRYPT_P = 1
 VAULT_MAGIC = b"LPV1"
 VAULT_MAGIC_V2 = b"LPV2"
 WRAP_LEN = 60
+MAX_USERNAME_LENGTH = 200
+MAX_URL_LENGTH = 500
+MAX_NOTES_LENGTH = 2000
+MAX_CATEGORY_LENGTH = 40
+KNOWN_ENTRY_KEYS = frozenset(
+    {
+        "name",
+        "password",
+        "username",
+        "url",
+        "notes",
+        "category",
+        "favorite",
+        "created",
+        "modified",
+    }
+)
 
 STYLES = """
 window.app {
@@ -465,6 +483,62 @@ def generate(
 class SavedPassword:
     name: str
     password: str
+    username: str = ""
+    url: str = ""
+    notes: str = ""
+    category: str = ""
+    favorite: bool = False
+    created: str = ""
+    modified: str = ""
+    extras: dict[str, object] = field(default_factory=dict)
+
+
+def utc_now() -> str:
+    """UTC timestamp for created/modified fields."""
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def clean_username(value: str) -> str:
+    text = value.strip()
+    if len(text) > MAX_USERNAME_LENGTH:
+        raise ValueError(f"The username must be {MAX_USERNAME_LENGTH} characters or fewer.")
+    return text
+
+
+def clean_url(value: str) -> str:
+    text = value.strip()
+    if len(text) > MAX_URL_LENGTH:
+        raise ValueError(f"The URL must be {MAX_URL_LENGTH} characters or fewer.")
+    return text
+
+
+def clean_notes(value: str) -> str:
+    text = value.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if len(text) > MAX_NOTES_LENGTH:
+        raise ValueError(f"Notes must be {MAX_NOTES_LENGTH} characters or fewer.")
+    return text
+
+
+def clean_category(value: str) -> str:
+    text = " ".join(value.strip().split())
+    if len(text) > MAX_CATEGORY_LENGTH:
+        raise ValueError(f"The category must be {MAX_CATEGORY_LENGTH} characters or fewer.")
+    return text
+
+
+def entry_matches(item: SavedPassword, query: str) -> bool:
+    """True when the search text hits name, username, URL, notes, or category."""
+    needle = query.strip().casefold()
+    if not needle:
+        return True
+    haystacks = (
+        item.name,
+        item.username,
+        item.url,
+        item.notes,
+        item.category,
+    )
+    return any(needle in value.casefold() for value in haystacks if value)
 
 
 def data_directory() -> Path:
@@ -683,20 +757,62 @@ def remember_named(
     label = clean_name(name)
     if not passwords:
         raise ValueError("There is no password to save.")
+    now = utc_now()
+    by_name = {item.name: item for item in existing}
+
+    def _fresh(entry_name: str, password: str) -> SavedPassword:
+        previous = by_name.get(entry_name)
+        return SavedPassword(
+            entry_name,
+            _password_line(password),
+            username=previous.username if previous else "",
+            url=previous.url if previous else "",
+            notes=previous.notes if previous else "",
+            category=previous.category if previous else "",
+            favorite=previous.favorite if previous else False,
+            created=previous.created if previous and previous.created else now,
+            modified=now,
+            extras=dict(previous.extras) if previous else {},
+        )
+
     if len(passwords) == 1:
-        fresh = [SavedPassword(label, _password_line(passwords[0]))]
+        fresh = [_fresh(label, passwords[0])]
     else:
         extra = len(str(len(passwords))) + 1
         if len(label) + extra > MAX_NAME_LENGTH:
             raise ValueError(f"The name must be {MAX_NAME_LENGTH - extra} characters or fewer for this many passwords.")
         fresh = [
-            SavedPassword(f"{label} {index}", _password_line(password))
+            _fresh(f"{label} {index}", password)
             for index, password in enumerate(passwords, start=1)
         ]
     replaced = {item.name for item in fresh}
     replaced.add(label)
     kept = [item for item in existing if item.name not in replaced]
     return fresh + kept
+
+
+def upsert_entry(existing: list[SavedPassword], item: SavedPassword, *, previous_name: str | None = None) -> list[SavedPassword]:
+    """Insert or replace one vault entry. Renames drop the old name."""
+    label = clean_name(item.name)
+    now = utc_now()
+    drop = {label}
+    if previous_name:
+        drop.add(clean_name(previous_name))
+    prior = next((entry for entry in existing if entry.name in drop), None)
+    stamped = replace(
+        item,
+        name=label,
+        password=_password_line(item.password),
+        username=clean_username(item.username),
+        url=clean_url(item.url),
+        notes=clean_notes(item.notes),
+        category=clean_category(item.category),
+        created=prior.created if prior and prior.created else (item.created or now),
+        modified=now,
+        extras=dict(item.extras),
+    )
+    kept = [entry for entry in existing if entry.name not in drop]
+    return [stamped] + kept
 
 
 def units_for_bits(pool_size: int, bits: int = METER_CAP_BITS) -> int:
@@ -825,11 +941,80 @@ def _derive_key(passphrase: str, salt: bytes, n: int, r: int, p: int) -> bytes:
     return kdf.derive(passphrase.encode("utf-8"))
 
 
+def _entry_to_json(item: SavedPassword) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "name": clean_name(item.name),
+        "password": _password_line(item.password),
+    }
+    if item.username:
+        payload["username"] = clean_username(item.username)
+    if item.url:
+        payload["url"] = clean_url(item.url)
+    if item.notes:
+        payload["notes"] = clean_notes(item.notes)
+    if item.category:
+        payload["category"] = clean_category(item.category)
+    if item.favorite:
+        payload["favorite"] = True
+    if item.created:
+        payload["created"] = item.created
+    if item.modified:
+        payload["modified"] = item.modified
+    for key, value in item.extras.items():
+        if key not in KNOWN_ENTRY_KEYS:
+            payload[key] = value
+    return payload
+
+
+def _entry_from_json(entry: dict) -> SavedPassword:
+    if not isinstance(entry.get("name"), str) or not isinstance(entry.get("password"), str):
+        raise ValueError("The saved password file is damaged.")
+    username = entry.get("username", "")
+    url = entry.get("url", "")
+    notes = entry.get("notes", "")
+    category = entry.get("category", "")
+    favorite = entry.get("favorite", False)
+    created = entry.get("created", "")
+    modified = entry.get("modified", "")
+    if username is None:
+        username = ""
+    if url is None:
+        url = ""
+    if notes is None:
+        notes = ""
+    if category is None:
+        category = ""
+    if created is None:
+        created = ""
+    if modified is None:
+        modified = ""
+    if not isinstance(username, str) or not isinstance(url, str) or not isinstance(notes, str):
+        raise ValueError("The saved password file is damaged.")
+    if not isinstance(category, str) or not isinstance(created, str) or not isinstance(modified, str):
+        raise ValueError("The saved password file is damaged.")
+    if not isinstance(favorite, bool):
+        raise ValueError("The saved password file is damaged.")
+    extras = {
+        key: value
+        for key, value in entry.items()
+        if key not in KNOWN_ENTRY_KEYS
+    }
+    return SavedPassword(
+        clean_name(entry["name"]),
+        _password_line(entry["password"]),
+        username=clean_username(username),
+        url=clean_url(url),
+        notes=clean_notes(notes),
+        category=clean_category(category),
+        favorite=favorite,
+        created=created.strip(),
+        modified=modified.strip(),
+        extras=extras,
+    )
+
+
 def _encode_saved(items: list[SavedPassword]) -> bytes:
-    payload = [
-        {"name": clean_name(item.name), "password": _password_line(item.password)}
-        for item in items
-    ]
+    payload = [_entry_to_json(item) for item in items]
     return json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
 
@@ -843,10 +1028,10 @@ def _decode_saved(raw: bytes) -> list[SavedPassword]:
     saved: list[SavedPassword] = []
     used: set[str] = set()
     for entry in parsed:
-        if not isinstance(entry, dict) or not isinstance(entry.get("name"), str) or not isinstance(entry.get("password"), str):
+        if not isinstance(entry, dict):
             raise ValueError("The saved password file is damaged.")
         try:
-            item = SavedPassword(clean_name(entry["name"]), _password_line(entry["password"]))
+            item = _entry_from_json(entry)
         except ValueError as exc:
             raise ValueError("The saved password file is damaged.") from exc
         if item.name in used:
@@ -854,6 +1039,34 @@ def _decode_saved(raw: bytes) -> list[SavedPassword]:
         used.add(item.name)
         saved.append(item)
     return saved
+
+
+def _prefer_text(left: str, right: str) -> str:
+    return left if left.strip() else right
+
+
+def _merge_matching_entry(local: SavedPassword, incoming: SavedPassword) -> SavedPassword:
+    """Same password: keep one row and fill empty optional fields from the other copy."""
+    favorites = local.favorite or incoming.favorite
+    extras = dict(local.extras)
+    for key, value in incoming.extras.items():
+        extras.setdefault(key, value)
+    created = local.created or incoming.created
+    modified = max(local.modified, incoming.modified) if local.modified and incoming.modified else (
+        local.modified or incoming.modified
+    )
+    return SavedPassword(
+        local.name,
+        local.password,
+        username=_prefer_text(local.username, incoming.username),
+        url=_prefer_text(local.url, incoming.url),
+        notes=_prefer_text(local.notes, incoming.notes),
+        category=_prefer_text(local.category, incoming.category),
+        favorite=favorites,
+        created=created,
+        modified=modified,
+        extras=extras,
+    )
 
 
 def _v2_header(n: int, r: int, p: int, passphrase_salt: bytes, recovery_salt: bytes) -> bytes:
@@ -973,11 +1186,12 @@ def merge_saved(
             merged.append(item)
             continue
         if merged[slot].password == item.password:
+            merged[slot] = _merge_matching_entry(merged[slot], item)
             continue
         splits += 1
         name = _other_device_name(item.name, taken)
         taken[name] = len(merged)
-        merged.append(SavedPassword(name, item.password))
+        merged.append(replace(item, name=name))
     return merged, splits
 
 
@@ -1815,7 +2029,7 @@ class PasswordWindow:
         self.saved_heading.get_style_context().add_class("section-title")
         page.pack_start(self.saved_heading, False, False, 0)
         saved_lede = gtk.Label(
-            label="Passwords stay masked until you show one. Copy when you need it, then hide it again.",
+            label="Passwords stay masked until you show one. Edit adds username, URL, notes, and a category.",
             xalign=0,
         )
         saved_lede.set_line_wrap(True)
@@ -1823,9 +2037,23 @@ class PasswordWindow:
         page.pack_start(saved_lede, False, False, 0)
 
         self.find_entry = gtk.Entry()
-        self.find_entry.set_placeholder_text("Search by name")
+        self.find_entry.set_placeholder_text("Search name, username, URL, notes, category")
         self.find_entry.connect("changed", lambda *_args: self._refresh_saved_rows())
         page.pack_start(self.find_entry, False, False, 0)
+
+        filter_row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
+        self.favorites_only = self._chip("Favorites", False)
+        self.favorites_only.connect("toggled", lambda *_args: self._refresh_saved_rows())
+        filter_row.pack_start(self.favorites_only, False, False, 0)
+        self.category_combo = gtk.ComboBoxText()
+        self.category_combo.append("all", "All categories")
+        self.category_combo.set_active_id("all")
+        self._suppress_category_change = False
+        self.category_combo.connect("changed", self._on_category_filter_changed)
+        self.category_combo.set_hexpand(True)
+        filter_row.pack_start(self.category_combo, True, True, 0)
+        page.pack_start(filter_row, False, False, 0)
+        self.filter_row = filter_row
 
         self.manager_message = gtk.Label(label="", xalign=0)
         self.manager_message.set_line_wrap(True)
@@ -2248,12 +2476,37 @@ class PasswordWindow:
         self._refresh_saved_rows()
         self._update_lock_button()
 
+    def _on_category_filter_changed(self, *_args) -> None:
+        if self._suppress_category_change:
+            return
+        self._refresh_saved_rows()
+
+    def _refresh_category_filter(self) -> None:
+        current = self.category_combo.get_active_id() or "all"
+        categories = sorted(
+            {item.category for item in self.saved if item.category},
+            key=str.casefold,
+        )
+        self._suppress_category_change = True
+        try:
+            self.category_combo.remove_all()
+            self.category_combo.append("all", "All categories")
+            for category in categories:
+                self.category_combo.append(category, category)
+            if current != "all" and current in categories:
+                self.category_combo.set_active_id(current)
+            else:
+                self.category_combo.set_active_id("all")
+        finally:
+            self._suppress_category_change = False
+
     def _refresh_saved_rows(self) -> None:
         for child in list(self.saved_box.get_children()):
             self.saved_box.remove(child)
-        query = self.find_entry.get_text().strip().casefold()
+        query = self.find_entry.get_text()
         if self.locked and self.vault_key is None:
             self.find_entry.hide()
+            self.filter_row.hide()
             self.saved_scroll.hide()
             self.saved_heading.set_text("Saved")
             self.saved_heading.show()
@@ -2264,6 +2517,7 @@ class PasswordWindow:
             self.manager_message.show()
             return
         self.find_entry.show()
+        self.filter_row.show()
         if not self.saved:
             self.saved_scroll.hide()
             self.saved_heading.set_text("Saved")
@@ -2273,17 +2527,23 @@ class PasswordWindow:
             )
             self.manager_message.show()
             return
+        self._refresh_category_filter()
+        category = self.category_combo.get_active_id() or "all"
+        favorites_only = self.favorites_only.get_active()
         matches = [
             item
             for item in self.saved
-            if not query or query in item.name.casefold()
+            if entry_matches(item, query)
+            and (not favorites_only or item.favorite)
+            and (category == "all" or item.category == category)
         ]
+        matches.sort(key=lambda item: (not item.favorite, item.name.casefold()))
         count = len(self.saved)
         self.saved_heading.set_text("1 saved" if count == 1 else f"{count} saved")
         self.saved_heading.show()
         if not matches:
             self.saved_scroll.hide()
-            self.manager_message.set_text("No saved password has that name.")
+            self.manager_message.set_text("No saved password matches that search.")
             self.manager_message.show()
             return
         self.manager_message.set_text("")
@@ -2306,31 +2566,51 @@ class PasswordWindow:
         ):
             setter(10)
         text = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=2)
-        name = gtk.Label(label=item.name, xalign=0)
+        title = f"★ {item.name}" if item.favorite else item.name
+        name = gtk.Label(label=title, xalign=0)
         name.set_halign(gtk.Align.START)
         name.get_style_context().add_class("saved-name")
+        meta_bits = [part for part in (item.username, item.category, item.url) if part]
+        if meta_bits:
+            meta = gtk.Label(label=" · ".join(meta_bits), xalign=0)
+            meta.set_line_wrap(True)
+            meta.set_halign(gtk.Align.START)
+            meta.get_style_context().add_class("hint")
+            text.pack_start(name, False, False, 0)
+            text.pack_start(meta, False, False, 0)
+        else:
+            text.pack_start(name, False, False, 0)
         shown = item.name in self.revealed_names
         secret = gtk.Label(label=item.password if shown else "••••••••••••", xalign=0)
         secret.set_line_wrap(True)
         secret.set_selectable(shown)
         secret.set_halign(gtk.Align.START)
         secret.get_style_context().add_class("hint")
-        text.pack_start(name, False, False, 0)
         text.pack_start(secret, False, False, 0)
+        if item.notes and shown:
+            notes = gtk.Label(label=item.notes, xalign=0)
+            notes.set_line_wrap(True)
+            notes.set_halign(gtk.Align.START)
+            notes.get_style_context().add_class("hint")
+            text.pack_start(notes, False, False, 0)
         text.set_hexpand(True)
+        actions = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=6)
         show = gtk.Button(label="Hide" if shown else "Show")
         show.get_style_context().add_class("secondary")
         show.connect("clicked", lambda *_args, label=item.name: self.on_toggle_reveal(label))
         copy = gtk.Button(label="Copy")
         copy.get_style_context().add_class("primary")
         copy.connect("clicked", lambda *_args, password=item.password: self.on_copy_text(password))
+        edit = gtk.Button(label="Edit")
+        edit.get_style_context().add_class("secondary")
+        edit.connect("clicked", lambda *_args, entry=item: self.on_edit_entry(entry))
         remove = gtk.Button(label="Remove")
         remove.get_style_context().add_class("secondary")
         remove.connect("clicked", lambda *_args, label=item.name: self.on_remove(label))
+        for button in (show, copy, edit, remove):
+            actions.pack_start(button, False, False, 0)
         row.pack_start(text, True, True, 0)
-        row.pack_start(show, False, False, 0)
-        row.pack_start(copy, False, False, 0)
-        row.pack_start(remove, False, False, 0)
+        row.pack_start(actions, False, False, 0)
         shell.pack_start(row, False, False, 0)
         return shell
 
@@ -2838,6 +3118,8 @@ class PasswordWindow:
         if self.vault_key is None:
             self.status.set_text("Saved passwords are locked.")
             return
+        if not self._confirm_remove(name):
+            return
         updated = [item for item in self.saved if item.name != name]
         try:
             write_vault(self.vault_key, updated)
@@ -2854,6 +3136,148 @@ class PasswordWindow:
         self.status.set_text("Removed from this computer.")
         if self.section == "dashboard":
             self._refresh_dashboard()
+
+    def _confirm_remove(self, name: str) -> bool:
+        gtk = self.gtk
+        dialog = gtk.Dialog(title="Remove saved password", transient_for=self.window, modal=True)
+        self._match_dialog(dialog)
+        dialog.add_button("Cancel", gtk.ResponseType.CANCEL)
+        remove = dialog.add_button("Remove", gtk.ResponseType.OK)
+        remove.get_style_context().add_class("primary")
+        content = dialog.get_content_area()
+        content.set_spacing(8)
+        for setter in (
+            content.set_margin_top,
+            content.set_margin_bottom,
+            content.set_margin_start,
+            content.set_margin_end,
+        ):
+            setter(16)
+        label = gtk.Label(
+            label=f'Remove "{name}" from this computer? This cannot be undone.',
+            xalign=0,
+        )
+        label.set_line_wrap(True)
+        label.set_max_width_chars(42)
+        content.pack_start(label, False, False, 0)
+        dialog.show_all()
+        response = dialog.run()
+        dialog.destroy()
+        return response == gtk.ResponseType.OK
+
+    def on_edit_entry(self, item: SavedPassword) -> None:
+        if self.vault_key is None:
+            self.status.set_text("Saved passwords are locked.")
+            return
+        edited = self._edit_entry_dialog(item)
+        if edited is None:
+            return
+        try:
+            updated = upsert_entry(self.saved, edited, previous_name=item.name)
+            write_vault(self.vault_key, updated)
+        except ValueError as exc:
+            self.status.set_text(str(exc))
+            self.manager_message.set_text(str(exc))
+            self.manager_message.show()
+            return
+        except OSError:
+            self.status.set_text("Could not save the changes.")
+            return
+        if item.name in self.revealed_names and edited.name != item.name:
+            self.revealed_names.discard(item.name)
+            self.revealed_names.add(edited.name)
+        self.saved = updated
+        self._refresh_saved_rows()
+        self.status.set_text(f"Updated {edited.name}.")
+        self.manager_message.set_text(f"Updated {edited.name}.")
+        self.manager_message.show()
+        if self.section == "dashboard":
+            self._refresh_dashboard()
+
+    def _edit_entry_dialog(self, item: SavedPassword) -> SavedPassword | None:
+        gtk = self.gtk
+        dialog = gtk.Dialog(title="Edit saved password", transient_for=self.window, modal=True)
+        self._match_dialog(dialog)
+        dialog.add_button("Cancel", gtk.ResponseType.CANCEL)
+        save = dialog.add_button("Save", gtk.ResponseType.OK)
+        save.get_style_context().add_class("primary")
+        dialog.set_default_response(gtk.ResponseType.OK)
+        content = dialog.get_content_area()
+        content.set_spacing(8)
+        for setter in (
+            content.set_margin_top,
+            content.set_margin_bottom,
+            content.set_margin_start,
+            content.set_margin_end,
+        ):
+            setter(16)
+
+        def field(caption: str, value: str, *, password: bool = False, multiline: bool = False):
+            box = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=4)
+            label = gtk.Label(label=caption, xalign=0)
+            box.pack_start(label, False, False, 0)
+            if multiline:
+                view = gtk.TextView()
+                view.set_wrap_mode(gtk.WrapMode.WORD_CHAR)
+                view.get_buffer().set_text(value)
+                view.set_size_request(-1, 72)
+                box.pack_start(view, False, False, 0)
+                content.pack_start(box, False, False, 0)
+                return view
+            entry = gtk.Entry()
+            entry.set_text(value)
+            if password:
+                entry.set_visibility(False)
+                entry.set_input_purpose(gtk.InputPurpose.PASSWORD)
+            box.pack_start(entry, False, False, 0)
+            content.pack_start(box, False, False, 0)
+            return entry
+
+        name_entry = field("Name", item.name)
+        username_entry = field("Username", item.username)
+        url_entry = field("URL", item.url)
+        password_entry = field("Password", item.password, password=True)
+        category_entry = field("Category", item.category)
+        notes_view = field("Notes", item.notes, multiline=True)
+        favorite = gtk.CheckButton(label="Favorite")
+        favorite.set_active(item.favorite)
+        content.pack_start(favorite, False, False, 0)
+        problem = gtk.Label(label="", xalign=0)
+        problem.set_line_wrap(True)
+        problem.get_style_context().add_class("danger")
+        content.pack_start(problem, False, False, 0)
+        dialog.show_all()
+        name_entry.grab_focus()
+        while True:
+            response = dialog.run()
+            if response != gtk.ResponseType.OK:
+                dialog.destroy()
+                return None
+            buffer = notes_view.get_buffer()
+            notes = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
+            try:
+                edited = SavedPassword(
+                    clean_name(name_entry.get_text()),
+                    _password_line(password_entry.get_text()),
+                    username=clean_username(username_entry.get_text()),
+                    url=clean_url(url_entry.get_text()),
+                    notes=clean_notes(notes),
+                    category=clean_category(category_entry.get_text()),
+                    favorite=favorite.get_active(),
+                    created=item.created,
+                    modified=item.modified,
+                    extras=dict(item.extras),
+                )
+            except ValueError as exc:
+                problem.set_text(str(exc))
+                continue
+            if any(
+                entry.name == edited.name and entry.name != item.name for entry in self.saved
+            ):
+                problem.set_text("Another saved password already uses that name.")
+                continue
+            dialog.destroy()
+            return edited
 
 
 if __name__ == "__main__":

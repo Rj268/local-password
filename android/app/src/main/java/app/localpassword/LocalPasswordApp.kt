@@ -278,23 +278,145 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
         } else if (model.saved.isEmpty()) {
             Text("The vault is empty.", color = muted)
         } else {
-            model.saved.forEach { item ->
-                Column(modifier = Modifier.fillMaxWidth().background(if (dark) Night else Cream, RoundedCornerShape(12.dp)).padding(12.dp)) {
-                    Text(item.name, color = ink, fontWeight = FontWeight.Bold)
-                    if (model.revealed == item.name) {
-                        Text(item.password, color = ink, fontFamily = FontFamily.Monospace)
-                    }
-                    Row {
-                        TextButton(onClick = { model.revealed = if (model.revealed == item.name) null else item.name }) {
-                            Text(if (model.revealed == item.name) "Hide" else "Show", color = Green)
+            Text("Passwords stay masked until you show one. Edit adds username, URL, notes, and a category.", color = muted, fontSize = 13.sp)
+            OutlinedTextField(
+                value = model.savedQuery,
+                onValueChange = { model.savedQuery = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("Search") },
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { model.favoritesOnly = !model.favoritesOnly }) {
+                    Text(if (model.favoritesOnly) "Favorites On" else "Favorites", color = if (model.favoritesOnly) Green else muted)
+                }
+                TextButton(onClick = { model.categoryFilter = "all" }) {
+                    Text(if (model.categoryFilter == "all") "All categories" else "Clear category", color = muted)
+                }
+            }
+            val categories = model.categories()
+            if (categories.isNotEmpty()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    categories.forEach { category ->
+                        TextButton(onClick = { model.categoryFilter = category }) {
+                            Text(category, color = if (model.categoryFilter == category) Green else muted)
                         }
-                        TextButton(onClick = { model.copy(item.password) }) { Text("Copy", color = Green) }
-                        TextButton(onClick = { model.remove(item) }) { Text("Remove", color = Danger) }
+                    }
+                }
+            }
+            val matches = model.filteredSaved()
+            if (matches.isEmpty()) {
+                Text("No saved password matches that search.", color = muted)
+            } else {
+                matches.forEach { item ->
+                    Column(modifier = Modifier.fillMaxWidth().background(if (dark) Night else Cream, RoundedCornerShape(12.dp)).padding(12.dp)) {
+                        Text(if (item.favorite) "★ ${item.name}" else item.name, color = ink, fontWeight = FontWeight.Bold)
+                        val meta = listOf(item.username, item.category, item.url).filter { it.isNotEmpty() }
+                        if (meta.isNotEmpty()) {
+                            Text(meta.joinToString(" · "), color = muted, fontSize = 13.sp)
+                        }
+                        if (model.revealed == item.name) {
+                            Text(item.password, color = ink, fontFamily = FontFamily.Monospace)
+                            if (item.notes.isNotEmpty()) {
+                                Text(item.notes, color = muted, fontSize = 13.sp)
+                            }
+                        } else {
+                            Text("••••••••••••", color = muted)
+                        }
+                        Row {
+                            TextButton(onClick = { model.revealed = if (model.revealed == item.name) null else item.name }) {
+                                Text(if (model.revealed == item.name) "Hide" else "Show", color = Green)
+                            }
+                            TextButton(onClick = { model.copy(item.password) }) { Text("Copy", color = Green) }
+                            TextButton(onClick = { model.beginEdit(item) }) { Text("Edit", color = Green) }
+                            TextButton(onClick = { model.requestRemove(item) }) { Text("Remove", color = Danger) }
+                        }
                     }
                 }
             }
         }
     }
+    model.pendingRemove?.let { item ->
+        AlertDialog(
+            onDismissRequest = { model.cancelRemove() },
+            title = { Text("Remove saved password") },
+            text = { Text("Remove \"${item.name}\" from this phone? This cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = { model.confirmRemove() }) { Text("Remove", color = Danger) }
+            },
+            dismissButton = {
+                TextButton(onClick = { model.cancelRemove() }) { Text("Cancel") }
+            },
+        )
+    }
+    model.editing?.let { item ->
+        EditEntryDialog(item = item, busy = model.busy, error = model.error, onCancel = { model.cancelEdit() }, onSave = { model.saveEdit(it) })
+    }
+}
+
+@Composable
+private fun EditEntryDialog(
+    item: SavedPassword,
+    busy: Boolean,
+    error: String,
+    onCancel: () -> Unit,
+    onSave: (SavedPassword) -> Unit,
+) {
+    var name by remember(item) { mutableStateOf(item.name) }
+    var username by remember(item) { mutableStateOf(item.username) }
+    var url by remember(item) { mutableStateOf(item.url) }
+    var password by remember(item) { mutableStateOf(item.password) }
+    var category by remember(item) { mutableStateOf(item.category) }
+    var notes by remember(item) { mutableStateOf(item.notes) }
+    var favorite by remember(item) { mutableStateOf(item.favorite) }
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Edit saved password") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = username, onValueChange = { username = it }, label = { Text("Username") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = url, onValueChange = { url = it }, label = { Text("URL") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Password") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(value = category, onValueChange = { category = it }, label = { Text("Category") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = notes, onValueChange = { notes = it }, label = { Text("Notes") }, modifier = Modifier.fillMaxWidth())
+                TextButton(onClick = { favorite = !favorite }) {
+                    Text(if (favorite) "Favorite On" else "Favorite Off", color = if (favorite) Green else Muted)
+                }
+                if (error.isNotEmpty()) {
+                    Text(error, color = Danger)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !busy,
+                onClick = {
+                    onSave(
+                        item.copy(
+                            name = name,
+                            username = username,
+                            url = url,
+                            password = password,
+                            category = category,
+                            notes = notes,
+                            favorite = favorite,
+                        ),
+                    )
+                },
+            ) { Text("Save", color = Green) }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel, enabled = !busy) { Text("Cancel") }
+        },
+    )
 }
 
 @Composable

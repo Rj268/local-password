@@ -143,19 +143,25 @@ class SavedPasswordTests(unittest.TestCase):
             self.assertEqual(directory_mode & 0o077, 0)
 
     def test_same_name_replaces_the_previous_password(self) -> None:
-        existing = [password_app.SavedPassword("Email", "old")]
+        existing = [
+            password_app.SavedPassword(
+                "Email",
+                "old",
+                username="me@example.com",
+                created="2020-01-01T00:00:00Z",
+            )
+        ]
         saved = password_app.remember_named(existing, "  Email  ", ["new"])
-        self.assertEqual(saved, [password_app.SavedPassword("Email", "new")])
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(saved[0].name, "Email")
+        self.assertEqual(saved[0].password, "new")
+        self.assertEqual(saved[0].username, "me@example.com")
+        self.assertEqual(saved[0].created, "2020-01-01T00:00:00Z")
+        self.assertTrue(saved[0].modified)
 
     def test_several_passwords_share_a_numbered_name(self) -> None:
         saved = password_app.remember_named([], "Router", ["one", "two"])
-        self.assertEqual(
-            saved,
-            [
-                password_app.SavedPassword("Router 1", "one"),
-                password_app.SavedPassword("Router 2", "two"),
-            ],
-        )
+        self.assertEqual([(item.name, item.password) for item in saved], [("Router 1", "one"), ("Router 2", "two")])
 
     def test_a_blank_name_is_refused(self) -> None:
         with self.assertRaises(ValueError):
@@ -273,6 +279,74 @@ class VaultTests(unittest.TestCase):
             with self.assertRaises(ValueError) as caught:
                 password_app.open_vault("another-secret", path)
             self.assertIn("did not unlock", str(caught.exception))
+
+    def test_optional_fields_round_trip_and_unknown_keys_survive(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "saved.vault"
+            material = password_app.new_vault_key("a-long-secret", n=2**14)
+            rich = password_app.SavedPassword(
+                "Email",
+                "secret",
+                username="me@example.com",
+                url="https://mail.example",
+                notes="work account",
+                category="Mail",
+                favorite=True,
+                created="2020-01-01T00:00:00Z",
+                modified="2020-02-01T00:00:00Z",
+                extras={"label_color": "green", "priority": 2},
+            )
+            password_app.write_vault(material, [rich], path)
+            _key, items = password_app.open_vault("a-long-secret", path)
+            self.assertEqual(items, [rich])
+
+    def test_old_name_password_entries_still_open(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "saved.vault"
+            material = password_app.new_vault_key("a-long-secret", n=2**14)
+            password_app.write_vault(
+                material,
+                [password_app.SavedPassword("Email", "secret")],
+                path,
+            )
+            _key, items = password_app.open_vault("a-long-secret", path)
+            self.assertEqual(items[0].name, "Email")
+            self.assertEqual(items[0].password, "secret")
+            self.assertEqual(items[0].username, "")
+            self.assertFalse(items[0].favorite)
+
+    def test_upsert_can_rename_and_edit_fields(self) -> None:
+        existing = [
+            password_app.SavedPassword(
+                "Email",
+                "secret",
+                created="2020-01-01T00:00:00Z",
+            )
+        ]
+        edited = password_app.SavedPassword(
+            "Work email",
+            "secret",
+            username="me",
+            category="Mail",
+            favorite=True,
+        )
+        updated = password_app.upsert_entry(existing, edited, previous_name="Email")
+        self.assertEqual(len(updated), 1)
+        self.assertEqual(updated[0].name, "Work email")
+        self.assertEqual(updated[0].username, "me")
+        self.assertEqual(updated[0].created, "2020-01-01T00:00:00Z")
+        self.assertTrue(updated[0].favorite)
+
+    def test_search_matches_username_and_category(self) -> None:
+        item = password_app.SavedPassword(
+            "Mailbox",
+            "secret",
+            username="me@example.com",
+            category="Mail",
+        )
+        self.assertTrue(password_app.entry_matches(item, "example"))
+        self.assertTrue(password_app.entry_matches(item, "mail"))
+        self.assertFalse(password_app.entry_matches(item, "bank"))
 
 
 class EnterpriseEntropyTests(unittest.TestCase):

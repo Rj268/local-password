@@ -14,6 +14,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.Locale
 
 class PasswordModel(app: Application) : AndroidViewModel(app) {
     var section by mutableStateOf("create")
@@ -43,6 +44,11 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     var offerWhere by mutableStateOf("")
     var askReceive by mutableStateOf(false)
     var askIncomingPassphrase by mutableStateOf(false)
+    var savedQuery by mutableStateOf("")
+    var favoritesOnly by mutableStateOf(false)
+    var categoryFilter by mutableStateOf("all")
+    var pendingRemove by mutableStateOf<SavedPassword?>(null)
+    var editing by mutableStateOf<SavedPassword?>(null)
 
     private var opened: OpenVault? = null
     private var offer: VaultSync.Offer? = null
@@ -136,7 +142,13 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
                     error = "Those passphrases do not match."
                     return@launch
                 }
-                val item = SavedPassword(Vault.cleanName(name), current)
+                val now = Vault.utcNow()
+                val item = SavedPassword(
+                    name = Vault.cleanName(name),
+                    password = current,
+                    created = now,
+                    modified = now,
+                )
                 val recovery = Generator.recoveryKey(words)
                 val (blob, fresh) = withContext(Dispatchers.Default) {
                     Vault.create(passphrase, recovery, listOf(item))
@@ -183,11 +195,82 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun remove(item: SavedPassword) {
+    fun requestRemove(item: SavedPassword) {
+        pendingRemove = item
+    }
+
+    fun confirmRemove() {
+        val item = pendingRemove ?: return
         val currentOpen = opened ?: return
+        pendingRemove = null
         replace(currentOpen, currentOpen.items.filter { it.name != item.name }, "Removed.")
         if (revealed == item.name) revealed = null
     }
+
+    fun cancelRemove() {
+        pendingRemove = null
+    }
+
+    fun beginEdit(item: SavedPassword) {
+        editing = item
+    }
+
+    fun cancelEdit() {
+        editing = null
+    }
+
+    fun saveEdit(updated: SavedPassword) {
+        val currentOpen = opened ?: return
+        val previous = editing ?: return
+        viewModelScope.launch {
+            busy = true
+            error = ""
+            try {
+                val now = Vault.utcNow()
+                val stamped = Vault.normalizeEntry(
+                    updated.copy(
+                        created = previous.created.ifEmpty { now },
+                        modified = now,
+                        extras = previous.extras,
+                    ),
+                )
+                if (stamped.name != previous.name && currentOpen.items.any { it.name == stamped.name }) {
+                    error = "Another saved password already uses that name."
+                    return@launch
+                }
+                val next = listOf(stamped) + currentOpen.items.filter { it.name != previous.name }
+                val blob = withContext(Dispatchers.Default) { Vault.seal(currentOpen, next) }
+                writeAtomically(blob)
+                opened = currentOpen.copy(items = next)
+                saved = next
+                unlocked = true
+                if (revealed == previous.name) revealed = stamped.name
+                editing = null
+                status = "Updated ${stamped.name}."
+            } catch (exc: VaultException) {
+                error = exc.message ?: "Not saved."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    fun filteredSaved(): List<SavedPassword> {
+        val needle = savedQuery.trim().lowercase(Locale.getDefault())
+        return saved
+            .filter { item ->
+                val matchesQuery = needle.isEmpty() || listOf(
+                    item.name, item.username, item.url, item.notes, item.category,
+                ).any { it.lowercase(Locale.getDefault()).contains(needle) }
+                val matchesFavorite = !favoritesOnly || item.favorite
+                val matchesCategory = categoryFilter == "all" || item.category == categoryFilter
+                matchesQuery && matchesFavorite && matchesCategory
+            }
+            .sortedWith(compareBy({ !it.favorite }, { it.name.lowercase(Locale.getDefault()) }))
+    }
+
+    fun categories(): List<String> =
+        saved.map { it.category }.filter { it.isNotEmpty() }.distinct().sortedBy { it.lowercase(Locale.getDefault()) }
 
     fun import(bytes: ByteArray) {
         if (bytes.size < 48 || (!bytes.startsWithMagic("LPV2") && !bytes.startsWithMagic("LPV1"))) {
@@ -406,7 +489,21 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun persist(currentOpen: OpenVault) {
-        val item = SavedPassword(Vault.cleanName(name), current)
+        val now = Vault.utcNow()
+        val label = Vault.cleanName(name)
+        val previous = currentOpen.items.firstOrNull { it.name == label }
+        val item = SavedPassword(
+            name = label,
+            password = current,
+            username = previous?.username.orEmpty(),
+            url = previous?.url.orEmpty(),
+            notes = previous?.notes.orEmpty(),
+            category = previous?.category.orEmpty(),
+            favorite = previous?.favorite == true,
+            created = previous?.created?.ifEmpty { now } ?: now,
+            modified = now,
+            extras = previous?.extras.orEmpty(),
+        )
         replace(currentOpen, currentOpen.items.filter { it.name != item.name } + item, "Saved.")
     }
 

@@ -1,8 +1,11 @@
 package app.localpassword
 
 import org.bouncycastle.crypto.generators.SCrypt
+import org.json.JSONArray
+import org.json.JSONObject
 import java.security.GeneralSecurityException
 import java.security.SecureRandom
+import java.time.Instant
 import java.util.Locale
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
@@ -14,7 +17,18 @@ import javax.crypto.spec.SecretKeySpec
  */
 class VaultException(message: String) : Exception(message)
 
-data class SavedPassword(val name: String, val password: String)
+data class SavedPassword(
+    val name: String,
+    val password: String,
+    val username: String = "",
+    val url: String = "",
+    val notes: String = "",
+    val category: String = "",
+    val favorite: Boolean = false,
+    val created: String = "",
+    val modified: String = "",
+    val extras: Map<String, Any?> = emptyMap(),
+)
 
 data class OpenVault(
     val items: List<SavedPassword>,
@@ -107,13 +121,38 @@ object Vault {
                 merged.add(item)
                 continue
             }
-            if (merged[slot].password == item.password) continue
+            if (merged[slot].password == item.password) {
+                merged[slot] = mergeMatching(merged[slot], item)
+                continue
+            }
             splits += 1
             val name = otherDeviceName(item.name, taken)
             taken[name] = merged.size
-            merged.add(SavedPassword(name, item.password))
+            merged.add(item.copy(name = name))
         }
         return merged to splits
+    }
+
+    private fun mergeMatching(local: SavedPassword, incoming: SavedPassword): SavedPassword {
+        val extras = local.extras.toMutableMap()
+        for ((key, value) in incoming.extras) {
+            extras.putIfAbsent(key, value)
+        }
+        val modified = when {
+            local.modified.isNotEmpty() && incoming.modified.isNotEmpty() ->
+                maxOf(local.modified, incoming.modified)
+            else -> local.modified.ifEmpty { incoming.modified }
+        }
+        return local.copy(
+            username = local.username.ifBlank { incoming.username },
+            url = local.url.ifBlank { incoming.url },
+            notes = local.notes.ifBlank { incoming.notes },
+            category = local.category.ifBlank { incoming.category },
+            favorite = local.favorite || incoming.favorite,
+            created = local.created.ifEmpty { incoming.created },
+            modified = modified,
+            extras = extras,
+        )
     }
 
     private fun otherDeviceName(name: String, taken: Map<String, Int>): String {
@@ -133,7 +172,7 @@ object Vault {
     }
 
     fun seal(opened: OpenVault, items: List<SavedPassword>): ByteArray {
-        val checked = items.map { SavedPassword(cleanName(it.name), passwordLine(it.password)) }
+        val checked = items.map { normalizeEntry(it) }
         if (opened.recoveryWrap.isNotEmpty()) {
             val header = headerV2(opened.n, opened.r, opened.p, opened.passphraseSalt, opened.recoverySalt)
             val associated = header + opened.passphraseWrap + opened.recoveryWrap
@@ -143,6 +182,46 @@ object Vault {
         val header = headerV1(opened.n, opened.r, opened.p, opened.passphraseSalt)
         val (nonce, ciphertext) = encrypt(opened.dek, encodeSaved(checked), header)
         return header + nonce + ciphertext
+    }
+
+    fun utcNow(): String = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString()
+
+    fun normalizeEntry(item: SavedPassword): SavedPassword {
+        return item.copy(
+            name = cleanName(item.name),
+            password = passwordLine(item.password),
+            username = cleanUsername(item.username),
+            url = cleanUrl(item.url),
+            notes = cleanNotes(item.notes),
+            category = cleanCategory(item.category),
+            created = item.created.trim(),
+            modified = item.modified.trim(),
+            extras = item.extras.filterKeys { it !in KNOWN_ENTRY_KEYS },
+        )
+    }
+
+    fun cleanUsername(value: String): String {
+        val text = value.trim()
+        if (text.length > 200) throw VaultException("The username must be 200 characters or fewer.")
+        return text
+    }
+
+    fun cleanUrl(value: String): String {
+        val text = value.trim()
+        if (text.length > 500) throw VaultException("The URL must be 500 characters or fewer.")
+        return text
+    }
+
+    fun cleanNotes(value: String): String {
+        val text = value.replace("\r\n", "\n").replace("\r", "\n").trim()
+        if (text.length > 2000) throw VaultException("Notes must be 2000 characters or fewer.")
+        return text
+    }
+
+    fun cleanCategory(value: String): String {
+        val text = value.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
+        if (text.length > 40) throw VaultException("The category must be 40 characters or fewer.")
+        return text
     }
 
     private fun openV2(secret: String, blob: ByteArray): OpenVault {
@@ -315,28 +394,28 @@ object Vault {
     }
 
     private fun encodeSaved(items: List<SavedPassword>): ByteArray {
-        val body = items.joinToString(prefix = "[", postfix = "]") { item ->
-            "{\"name\": ${jsonString(item.name)}, \"password\": ${jsonString(item.password)}}"
+        val array = JSONArray()
+        for (item in items) {
+            array.put(entryToJson(item))
         }
-        return body.toByteArray(Charsets.UTF_8)
+        return array.toString().toByteArray(Charsets.UTF_8)
     }
 
-    private fun jsonString(value: String): String {
-        val out = StringBuilder("\"")
-        for (ch in value) {
-            when (ch) {
-                '"' -> out.append("\\\"")
-                '\\' -> out.append("\\\\")
-                '\b' -> out.append("\\b")
-                '\u000C' -> out.append("\\f")
-                '\n' -> out.append("\\n")
-                '\r' -> out.append("\\r")
-                '\t' -> out.append("\\t")
-                else -> if (ch.code < 0x20) out.append("\\u%04x".format(ch.code)) else out.append(ch)
-            }
+    private fun entryToJson(item: SavedPassword): JSONObject {
+        val obj = JSONObject()
+        obj.put("name", cleanName(item.name))
+        obj.put("password", passwordLine(item.password))
+        if (item.username.isNotEmpty()) obj.put("username", cleanUsername(item.username))
+        if (item.url.isNotEmpty()) obj.put("url", cleanUrl(item.url))
+        if (item.notes.isNotEmpty()) obj.put("notes", cleanNotes(item.notes))
+        if (item.category.isNotEmpty()) obj.put("category", cleanCategory(item.category))
+        if (item.favorite) obj.put("favorite", true)
+        if (item.created.isNotEmpty()) obj.put("created", item.created)
+        if (item.modified.isNotEmpty()) obj.put("modified", item.modified)
+        for ((key, value) in item.extras) {
+            if (key !in KNOWN_ENTRY_KEYS) obj.put(key, value)
         }
-        out.append('"')
-        return out.toString()
+        return obj
     }
 
     private fun decodeSaved(raw: ByteArray): List<SavedPassword> {
@@ -347,117 +426,59 @@ object Vault {
         }
         return try {
             parseSaved(text)
-        } catch (_: VaultException) {
+        } catch (_: Exception) {
             throw VaultException("The saved password file is damaged.")
         }
     }
 
     private fun parseSaved(text: String): List<SavedPassword> {
-        val cursor = JsonCursor(text)
-        cursor.skip()
-        cursor.expect('[')
+        val array = JSONArray(text)
         val saved = mutableListOf<SavedPassword>()
         val used = mutableSetOf<String>()
-        cursor.skip()
-        if (cursor.peek() == ']') {
-            cursor.expect(']')
-            cursor.skip()
-            if (!cursor.done()) throw VaultException("The saved password file is damaged.")
-            return saved
-        }
-        while (true) {
-            cursor.expect('{')
-            var name: String? = null
-            var password: String? = null
-            while (true) {
-                val key = cursor.string()
-                cursor.expect(':')
-                val value = cursor.string()
-                if (key == "name") name = value
-                if (key == "password") password = value
-                cursor.skip()
-                if (cursor.peek() == ',') {
-                    cursor.expect(',')
-                    continue
-                }
-                break
-            }
-            cursor.expect('}')
-            if (name == null || password == null) throw VaultException("The saved password file is damaged.")
-            val item = SavedPassword(cleanName(name), passwordLine(password))
+        for (index in 0 until array.length()) {
+            val obj = array.getJSONObject(index)
+            val item = entryFromJson(obj)
             if (item.name !in used) {
                 used.add(item.name)
                 saved.add(item)
             }
-            cursor.skip()
-            if (cursor.peek() == ',') {
-                cursor.expect(',')
-                cursor.skip()
-                continue
-            }
-            break
         }
-        cursor.expect(']')
-        cursor.skip()
-        if (!cursor.done()) throw VaultException("The saved password file is damaged.")
         return saved
     }
-}
 
-private class JsonCursor(private val text: String) {
-    private var index = 0
-
-    fun done(): Boolean {
-        skip()
-        return index >= text.length
-    }
-
-    fun peek(): Char {
-        skip()
-        if (index >= text.length) throw VaultException("The saved password file is damaged.")
-        return text[index]
-    }
-
-    fun expect(char: Char) {
-        if (peek() != char) throw VaultException("The saved password file is damaged.")
-        index += 1
-    }
-
-    fun skip() {
-        while (index < text.length && text[index].isWhitespace()) index += 1
-    }
-
-    fun string(): String {
-        expect('"')
-        val out = StringBuilder()
-        while (index < text.length) {
-            val ch = text[index]
-            index += 1
-            if (ch == '"') return out.toString()
-            if (ch != '\\') {
-                out.append(ch)
-                continue
-            }
-            if (index >= text.length) throw VaultException("The saved password file is damaged.")
-            when (val escaped = text[index]) {
-                '"', '\\', '/' -> out.append(escaped)
-                'b' -> out.append('\b')
-                'f' -> out.append('\u000C')
-                'n' -> out.append('\n')
-                'r' -> out.append('\r')
-                't' -> out.append('\t')
-                'u' -> {
-                    if (index + 4 >= text.length) throw VaultException("The saved password file is damaged.")
-                    val hex = text.substring(index + 1, index + 5)
-                    out.append(hex.toInt(16).toChar())
-                    index += 4
-                }
-                else -> throw VaultException("The saved password file is damaged.")
-            }
-            index += 1
+    private fun entryFromJson(obj: JSONObject): SavedPassword {
+        val name = obj.optString("name", "")
+        val password = obj.optString("password", "")
+        if (name.isEmpty() || !obj.has("password")) {
+            throw VaultException("The saved password file is damaged.")
         }
-        throw VaultException("The saved password file is damaged.")
+        val extras = mutableMapOf<String, Any?>()
+        val keys = obj.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            if (key !in KNOWN_ENTRY_KEYS) {
+                extras[key] = obj.get(key)
+            }
+        }
+        return normalizeEntry(
+            SavedPassword(
+                name = name,
+                password = password,
+                username = obj.optString("username", ""),
+                url = obj.optString("url", ""),
+                notes = obj.optString("notes", ""),
+                category = obj.optString("category", ""),
+                favorite = obj.optBoolean("favorite", false),
+                created = obj.optString("created", ""),
+                modified = obj.optString("modified", ""),
+                extras = extras,
+            ),
+        )
     }
+
+    private val KNOWN_ENTRY_KEYS = setOf(
+        "name", "password", "username", "url", "notes", "category", "favorite", "created", "modified",
+    )
 }
 
 private fun ByteArray.startsWith(prefix: ByteArray): Boolean {

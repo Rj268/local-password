@@ -75,3 +75,22 @@ class VaultSyncTests(unittest.TestCase):
             ["Email", "Bank", "Bank (other device)", "Mail"],
         )
         self.assertEqual(merged[2].password, "two")
+
+    def test_matching_passwords_fill_empty_optional_fields(self) -> None:
+        local = [password_app.SavedPassword("Email", "alpha", username="me")]
+        incoming = [
+            password_app.SavedPassword(
+                "Email",
+                "alpha",
+                url="https://mail.example",
+                favorite=True,
+                extras={"custom": "keep"},
+            )
+        ]
+        merged, splits = password_app.merge_saved(local, incoming)
+        self.assertEqual(splits, 0)
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0].username, "me")
+        self.assertEqual(merged[0].url, "https://mail.example")
+        self.assertTrue(merged[0].favorite)
+        self.assertEqual(merged[0].extras["custom"], "keep")
