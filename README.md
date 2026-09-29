@@ -28,7 +28,7 @@ sudo apt install python3-gi gir1.2-gtk-3.0 python3-cryptography xclip
 python3 password_app.py
 ```
 
-The window has Create and Saved. Dark, beside the title, switches the colors and remembers that choice on this computer. Create has Characters and Words. Length, word count, and number of passwords are numeric. Digits, Letters, and Symbols show **On** or **Off**. Symbols include quotes, backticks, and backslashes. Generate fills the window. Copy places the password on the clipboard. Name it, then Save. Generate several and each one has its own name and Save, so you can keep one and leave the rest. The first save asks for a passphrase of at least 8 characters, then shows a recovery key once. Write that key down. Either the passphrase or the recovery key opens every saved password. Neither one is stored. Saving the only password opens Saved, where the name sits above it. Saving one of several stays on Create, so the others are still there. Find filters that list by name. The next time you open the window, Saved stays locked until you unlock it. The lock file is `~/.local/share/local-password/saved.vault`, readable only by your user. A password you do not save is gone when the window closes. Lock hides them again during this session. Remove drops one after you unlock. Saving the same name again replaces that password. If you lose both the passphrase and the recovery key, those saved passwords cannot be recovered. The window says so before you save.
+The window has Create, Saved, and Settings. Dark, on the Settings page, switches the colors and remembers that choice on this computer. Send vault and Receive vault are on that page too. Create has Characters and Words. Length, word count, and number of passwords are numeric. Digits, Letters, and Symbols show **On** or **Off**. Symbols include quotes, backticks, and backslashes. Generate fills the window. Copy places the password on the clipboard. Name it, then Save. Generate several and each one has its own name and Save, so you can keep one and leave the rest. The first save asks for a passphrase of at least 8 characters, then shows a recovery key once. Write that key down. Either the passphrase or the recovery key opens every saved password. Neither one is stored. Saving the only password opens Saved, where the name sits above it. Saving one of several stays on Create, so the others are still there. Find filters that list by name. The next time you open the window, Saved stays locked until you unlock it. The lock file is `~/.local/share/local-password/saved.vault`, readable only by your user. A password you do not save is gone when the window closes. Lock hides them again during this session. Remove drops one after you unlock. Saving the same name again replaces that password. If you lose both the passphrase and the recovery key, those saved passwords cannot be recovered. The window says so before you save.
 
 ## Command line
 
@@ -85,7 +85,7 @@ pacman -S --needed \
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File dist/windows/install.ps1 -Source dist/windows/LocalPassword
 ```
 
-Open **Local Password** from the Start menu. Dark, beside the title, switches the colors and remembers that choice in `%LOCALAPPDATA%\local-password\appearance`. That file holds no passwords. Remove the app from Settings, Apps.
+Open **Local Password** from the Start menu. Dark, on the Settings page, switches the colors and remembers that choice in `%LOCALAPPDATA%\local-password\appearance`. Send vault and Receive vault are on that page too. That file holds no passwords. Remove the app from Settings, Apps.
 
 The zip is what other people download. Send `dist/windows/LocalPassword-windows.zip`. They unzip it and double-click **Install Local Password**. The program then appears in the Start menu and on the desktop. The libraries stay in the installed folder.
 
@@ -95,7 +95,7 @@ A macOS disk image is built on macOS.
 
 ## Android
 
-The phone app reads and writes the same `saved.vault` file. Generate a password, name it, and save it. The first save asks for a passphrase and shows a recovery key once. Import vault reads a `saved.vault` copied from a computer. Export vault writes that file so it can go back.
+The phone app reads and writes the same `saved.vault` file. Generate a password, name it, and save it. The first save asks for a passphrase and shows a recovery key once. Settings holds dark mode, Send vault, Receive vault, Import vault, and Export vault. Import vault reads a `saved.vault` copied from a computer. Export vault writes that file so it can go back.
 
 Send vault and Receive vault move that encrypted file between a computer and a phone on the same Wi-Fi. One device shows a 6-digit code. The other enters it. The passphrase stays where it already is. If the same name has two different passwords, both are kept and the new one is labeled `(other device)`. The port closes when the send finishes or you cancel it. A lost phone still needs a copy of `saved.vault`; the recovery key opens a file you still have.
 

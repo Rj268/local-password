@@ -1098,16 +1098,13 @@ class PasswordWindow:
         title.set_xalign(0)
         title.get_style_context().add_class("title")
         self.dark = load_dark_mode()
-        self.dark_button = gtk.Button(label=chip_label("Dark", self.dark))
-        self.dark_button.get_style_context().add_class("chip")
-        self.dark_button.set_valign(gtk.Align.CENTER)
-        self.dark_button.connect("clicked", self.on_toggle_dark)
         heading = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=12)
         heading.pack_start(title, True, True, 0)
-        heading.pack_start(self.dark_button, False, False, 0)
         lede = gtk.Label(
             label=(
-                "Create a password here, or open Saved to use the ones you already kept. A passphrase or a recovery key opens all of them."
+                "Create a password here, or open Saved to use the ones you already kept. "
+                "Dark mode and sending the vault are in Settings. "
+                "A passphrase or a recovery key opens all of them."
             ),
             xalign=0,
         )
@@ -1116,17 +1113,18 @@ class PasswordWindow:
         root.pack_start(eyebrow, False, False, 0)
         root.pack_start(heading, False, False, 0)
         root.pack_start(lede, False, False, 0)
-        self.apply_dark()
 
         nav = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
         nav.set_homogeneous(True)
         self.create_tab = gtk.Button(label="Create")
         self.saved_tab = gtk.Button(label="Saved")
-        for button in (self.create_tab, self.saved_tab):
+        self.settings_tab = gtk.Button(label="Settings")
+        for button in (self.create_tab, self.saved_tab, self.settings_tab):
             button.get_style_context().add_class("mode")
             nav.pack_start(button, True, True, 0)
         self.create_tab.connect("clicked", lambda *_args: self.show_section("create"))
         self.saved_tab.connect("clicked", lambda *_args: self.show_section("saved"))
+        self.settings_tab.connect("clicked", lambda *_args: self.show_section("settings"))
         root.pack_start(nav, False, False, 0)
 
         columns = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=16)
@@ -1148,31 +1146,16 @@ class PasswordWindow:
         self.saved_view.set_no_show_all(True)
         self.saved_view.hide()
         root.pack_start(self.saved_view, True, True, 0)
-        self._build_manager(saved_inner)
 
-        sync_row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
-        self.send_button = gtk.Button(label="Send vault")
-        self.receive_button = gtk.Button(label="Receive vault")
-        for button in (self.send_button, self.receive_button):
-            button.get_style_context().add_class("secondary")
-            sync_row.pack_start(button, True, True, 0)
-        self.send_button.connect("clicked", self.on_send_vault)
-        self.receive_button.connect("clicked", self.on_receive_vault)
-        root.pack_start(sync_row, False, False, 0)
-        sync_hint = gtk.Label(
-            label=(
-                "Send vault shares the encrypted file with another device on the same Wi-Fi. "
-                "The passphrase stays here."
-            ),
-            xalign=0,
-        )
-        sync_hint.set_line_wrap(True)
-        sync_hint.get_style_context().add_class("hint")
-        root.pack_start(sync_hint, False, False, 0)
-        self.sync_status = gtk.Label(label="", xalign=0)
-        self.sync_status.set_line_wrap(True)
-        self.sync_status.get_style_context().add_class("hint")
-        root.pack_start(self.sync_status, False, False, 0)
+        settings_frame, settings_inner = self._card()
+        self.settings_view = settings_frame
+        self.settings_view.set_vexpand(True)
+        self.settings_view.set_no_show_all(True)
+        self.settings_view.hide()
+        root.pack_start(self.settings_view, True, True, 0)
+        self._build_settings(settings_inner)
+        self.apply_dark()
+        self._build_manager(saved_inner)
 
         footer = gtk.Label(
             label=(
@@ -1405,6 +1388,49 @@ class PasswordWindow:
         self.status.get_style_context().add_class("hint")
         result.pack_start(self.status, False, False, 0)
 
+    def _build_settings(self, page) -> None:
+        gtk = self.gtk
+        heading = gtk.Label(label="Settings", xalign=0)
+        heading.get_style_context().add_class("eyebrow")
+        page.pack_start(heading, False, False, 0)
+        lede = gtk.Label(
+            label="Appearance and moving the vault stay here. The passphrase is not sent.",
+            xalign=0,
+        )
+        lede.set_line_wrap(True)
+        lede.get_style_context().add_class("hint")
+        page.pack_start(lede, False, False, 0)
+
+        self.dark_button = gtk.Button(label=chip_label("Dark", self.dark))
+        self.dark_button.get_style_context().add_class("chip")
+        self.dark_button.set_halign(gtk.Align.START)
+        self.dark_button.connect("clicked", self.on_toggle_dark)
+        page.pack_start(self.dark_button, False, False, 0)
+
+        sync_row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
+        self.send_button = gtk.Button(label="Send vault")
+        self.receive_button = gtk.Button(label="Receive vault")
+        for button in (self.send_button, self.receive_button):
+            button.get_style_context().add_class("secondary")
+            sync_row.pack_start(button, True, True, 0)
+        self.send_button.connect("clicked", self.on_send_vault)
+        self.receive_button.connect("clicked", self.on_receive_vault)
+        page.pack_start(sync_row, False, False, 0)
+        sync_hint = gtk.Label(
+            label=(
+                "Send vault shares the encrypted file with another device on the same Wi-Fi. "
+                "The passphrase stays here."
+            ),
+            xalign=0,
+        )
+        sync_hint.set_line_wrap(True)
+        sync_hint.get_style_context().add_class("hint")
+        page.pack_start(sync_hint, False, False, 0)
+        self.sync_status = gtk.Label(label="", xalign=0)
+        self.sync_status.set_line_wrap(True)
+        self.sync_status.get_style_context().add_class("hint")
+        page.pack_start(self.sync_status, False, False, 0)
+
     def _build_manager(self, page) -> None:
         gtk = self.gtk
         self.saved_heading = gtk.Label(label="Saved", xalign=0)
@@ -1502,28 +1528,34 @@ class PasswordWindow:
         self._style_mode_buttons()
 
     def show_section(self, section: str) -> None:
-        """Show Create or Saved. The hidden page stays hidden after show_all."""
-        self.section = "saved" if section == "saved" else "create"
-        saved = self.section == "saved"
-        if saved:
-            self.create_view.set_no_show_all(True)
-            self.create_view.hide()
-            self.saved_view.set_no_show_all(False)
-            self.saved_view.show_all()
+        """Show Create, Saved, or Settings. Hidden pages stay hidden after show_all."""
+        if section not in ("saved", "settings"):
+            section = "create"
+        self.section = section
+        views = {
+            "create": self.create_view,
+            "saved": self.saved_view,
+            "settings": self.settings_view,
+        }
+        for name, view in views.items():
+            if name == section:
+                view.set_no_show_all(False)
+                view.show_all()
+            else:
+                view.set_no_show_all(True)
+                view.hide()
+        if section == "saved":
             self._refresh_saved_rows()
             self._update_lock_button()
-        else:
-            self.saved_view.set_no_show_all(True)
-            self.saved_view.hide()
-            self.create_view.set_no_show_all(False)
-            self.create_view.show_all()
+        elif section == "create":
             self.apply_mode()
-        for button, selected in (
-            (self.create_tab, not saved),
-            (self.saved_tab, saved),
+        for button, name in (
+            (self.create_tab, "create"),
+            (self.saved_tab, "saved"),
+            (self.settings_tab, "settings"),
         ):
             style = button.get_style_context()
-            if selected:
+            if name == section:
                 style.add_class("on")
                 style.remove_class("off")
             else:
@@ -1787,11 +1819,12 @@ class PasswordWindow:
 
     def _sync_note(self, text: str) -> bool:
         self.sync_status.set_text(text)
-        self.status.set_text(text)
-        self.manager_message.set_text(text)
         if text:
             self.sync_status.show()
-            self.manager_message.show()
+        if self.section == "saved":
+            self.manager_message.set_text(text)
+            if text:
+                self.manager_message.show()
         return False
 
     def on_send_vault(self, *_args) -> None:

@@ -81,54 +81,33 @@ fun LocalPasswordApp(model: PasswordModel = viewModel()) {
                     .padding(horizontal = 20.dp, vertical = 28.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("ON THIS PHONE", color = Green, fontWeight = FontWeight.Bold, fontSize = 11.sp, letterSpacing = 1.5.sp)
-                        Text("Local Password", color = ink, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, fontSize = 32.sp)
-                    }
-                    TextButton(onClick = { model.toggleDark() }) {
-                        Text(if (dark) "Dark    On" else "Dark    Off", color = if (dark) Green else muted)
-                    }
+                Column {
+                    Text("ON THIS PHONE", color = Green, fontWeight = FontWeight.Bold, fontSize = 11.sp, letterSpacing = 1.5.sp)
+                    Text("Local Password", color = ink, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, fontSize = 32.sp)
                 }
                 Text(
-                    "Create a password here, or open Saved to use the ones you already kept. A passphrase or a recovery key opens all of them.",
+                    "Create a password here, or open Saved to use the ones you already kept. Dark mode and sending the vault are in Settings. A passphrase or a recovery key opens all of them.",
                     color = muted,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Pill("Create", model.section == "create", dark) { model.section = "create" }
                     Pill("Saved", model.section == "saved", dark) { model.section = "saved" }
+                    Pill("Settings", model.section == "settings", dark) { model.section = "settings" }
                 }
                 if (model.section == "create") {
                     CreatePane(model, card, ink, muted, dark)
-                } else {
+                } else if (model.section == "saved") {
                     SavedPane(model, card, ink, muted, dark)
-                }
-                Text(
-                    "Send vault shares the encrypted file with another device on the same Wi-Fi. The passphrase stays here.",
-                    color = muted,
-                    fontSize = 13.sp,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(
-                        onClick = { model.sendVault() },
-                        enabled = !model.busy && model.offerCode == null,
-                    ) {
-                        Text("Send vault", color = Green)
-                    }
-                    TextButton(
-                        onClick = { model.askReceive = true },
-                        enabled = !model.busy,
-                    ) {
-                        Text("Receive vault", color = Green)
-                    }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = { importVault.launch(arrayOf("*/*")) }) {
-                        Text("Import vault", color = Green)
-                    }
-                    TextButton(onClick = { exportVault.launch("saved.vault") }) {
-                        Text("Export vault", color = Green)
-                    }
+                } else {
+                    SettingsPane(
+                        model,
+                        card,
+                        ink,
+                        muted,
+                        dark,
+                        onImport = { importVault.launch(arrayOf("*/*")) },
+                        onExport = { exportVault.launch("saved.vault") },
+                    )
                 }
                 if (model.error.isNotEmpty()) {
                     Text(model.error, color = Danger)
@@ -314,6 +293,54 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SettingsPane(
+    model: PasswordModel,
+    card: Color,
+    ink: Color,
+    muted: Color,
+    dark: Boolean,
+    onImport: () -> Unit,
+    onExport: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(card, RoundedCornerShape(18.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text("Settings", color = ink, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, fontSize = 24.sp)
+        Text("Appearance and moving the vault stay here. The passphrase is not sent.", color = muted)
+        TextButton(onClick = { model.toggleDark() }) {
+            Text(if (dark) "Dark    On" else "Dark    Off", color = if (dark) Green else muted)
+        }
+        Text(
+            "Send vault shares the encrypted file with another device on the same Wi-Fi. The passphrase stays here.",
+            color = muted,
+            fontSize = 13.sp,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(
+                onClick = { model.sendVault() },
+                enabled = !model.busy && model.offerCode == null,
+            ) {
+                Text("Send vault", color = Green)
+            }
+            TextButton(
+                onClick = { model.askReceive = true },
+                enabled = !model.busy,
+            ) {
+                Text("Receive vault", color = Green)
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = onImport) { Text("Import vault", color = Green) }
+            TextButton(onClick = onExport) { Text("Export vault", color = Green) }
         }
     }
 }
