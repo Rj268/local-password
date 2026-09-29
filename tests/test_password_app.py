@@ -280,6 +280,31 @@ class VaultTests(unittest.TestCase):
                 password_app.open_vault("another-secret", path)
             self.assertIn("did not unlock", str(caught.exception))
 
+    def test_change_vault_credentials_keeps_items_and_retires_old_secrets(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "saved.vault"
+            old_recovery = password_app.new_recovery_key()
+            material = password_app.new_vault_key("old-passphrase", old_recovery, n=2**14)
+            password_app.write_vault(material, self._items(), path)
+            new_recovery = password_app.new_recovery_key()
+            fresh, shown = password_app.change_vault_credentials(
+                self._items(),
+                "new-passphrase",
+                recovery_key=new_recovery,
+                path=path,
+                n=2**14,
+            )
+            self.assertEqual(shown, password_app.require_recovery_key(new_recovery))
+            self.assertTrue(fresh.recovery_wrap)
+            _key, by_phrase = password_app.open_vault("new-passphrase", path)
+            self.assertEqual(by_phrase, self._items())
+            _key, by_recovery = password_app.open_vault(new_recovery, path)
+            self.assertEqual(by_recovery, self._items())
+            with self.assertRaises(ValueError):
+                password_app.open_vault("old-passphrase", path)
+            with self.assertRaises(ValueError):
+                password_app.open_vault(old_recovery, path)
+
     def test_optional_fields_round_trip_and_unknown_keys_survive(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "saved.vault"

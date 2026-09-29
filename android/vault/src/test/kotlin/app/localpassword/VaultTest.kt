@@ -40,6 +40,23 @@ class VaultTest {
     }
 
     @Test
+    fun changingPassphraseKeepsItemsAndRetiresOldSecrets() {
+        val oldRecovery = "alpha bravo charlie delta echo foxtrot golf hotel"
+        val (oldBlob, opened) = Vault.create(
+            "old-passphrase",
+            oldRecovery,
+            listOf(SavedPassword("Bank", "horse-battery")),
+        )
+        val newRecovery = "one two three four five six seven eight"
+        val (freshBlob, _) = Vault.create("new-passphrase", newRecovery, opened.items)
+        assertEquals(opened.items, Vault.open("new-passphrase", freshBlob).items)
+        assertEquals(opened.items, Vault.open(newRecovery, freshBlob).items)
+        assertThrows<VaultException> { Vault.open("old-passphrase", freshBlob) }
+        assertThrows<VaultException> { Vault.open(oldRecovery, freshBlob) }
+        assertEquals(opened.items, Vault.open("old-passphrase", oldBlob).items)
+    }
+
+    @Test
     fun sixteenCharactersOfEverythingClearsTheStrongLine() {
         val pool = Generator.characterPool(digits = true, letters = true, symbols = true)
         val bits = Generator.characterBits(16, pool)

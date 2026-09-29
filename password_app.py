@@ -1233,6 +1233,25 @@ def write_vault(material: VaultKey, items: list[SavedPassword], path: Path | Non
     return path
 
 
+def change_vault_credentials(
+    items: list[SavedPassword],
+    new_passphrase: str,
+    *,
+    recovery_key: str | None = None,
+    path: Path | None = None,
+    n: int = SCRYPT_N,
+) -> tuple[VaultKey, str]:
+    """Seal the vault under a new passphrase and recovery key.
+
+    The previous passphrase and recovery key stop opening the file.
+    Returns the new key material and the recovery key to show once.
+    """
+    recovery = new_recovery_key() if recovery_key is None else require_recovery_key(recovery_key)
+    material = new_vault_key(new_passphrase, recovery, n=n)
+    write_vault(material, items, path)
+    return material, recovery
+
+
 def open_vault(secret: str, path: Path | None = None) -> tuple[VaultKey, list[SavedPassword]]:
     """Unlock saved passwords. A wrong passphrase or recovery key raises ValueError."""
     path = vault_path() if path is None else path
@@ -1755,6 +1774,60 @@ class PasswordWindow:
                 pass
         return False
 
+    def on_change_passphrase(self, *_args) -> None:
+        """Replace the vault passphrase and show a fresh recovery key once."""
+        self._note_activity()
+        if not vault_path().is_file():
+            self._sync_note("Save a password first. There is no vault to re-lock yet.")
+            return
+        current = self._prompt_passphrase(
+            confirm=False,
+            message="Enter the current passphrase or recovery key.",
+        )
+        if current is None:
+            return
+        try:
+            _material, items = open_vault(current)
+        except ValueError as exc:
+            self._sync_note(str(exc))
+            return
+        except OSError:
+            self._sync_note("Could not read the vault on this computer.")
+            return
+        new_phrase = self._prompt_passphrase(
+            confirm=True,
+            message="Choose a new passphrase to lock saved passwords. It is not stored.",
+        )
+        if new_phrase is None:
+            return
+        recovery = new_recovery_key()
+        if not self._confirm_recovery_key(recovery):
+            self._sync_note("Passphrase not changed. Write down the recovery key to finish.")
+            return
+        try:
+            material, _shown = change_vault_credentials(
+                items,
+                new_phrase,
+                recovery_key=recovery,
+            )
+        except ValueError as exc:
+            self._sync_note(str(exc))
+            return
+        except OSError:
+            self._sync_note("Could not rewrite the vault with the new passphrase.")
+            return
+        self.vault_key = material
+        self.saved = items
+        self.locked = False
+        self.revealed_names.clear()
+        self._update_lock_button()
+        self._refresh_saved_rows()
+        if self.section == "dashboard":
+            self._refresh_dashboard()
+        self._sync_note(
+            "Passphrase changed. The old passphrase and recovery key no longer open this vault."
+        )
+
     def on_export_vault(self, *_args) -> None:
         gtk = self.gtk
         try:
@@ -2257,7 +2330,7 @@ class PasswordWindow:
         heading.get_style_context().add_class("section-title")
         page.pack_start(heading, False, False, 0)
         lede = gtk.Label(
-            label="Appearance, clipboard and lock timing, and vault file transfer.",
+            label="Appearance, clipboard and lock timing, passphrase change, and vault file transfer.",
             xalign=0,
         )
         lede.set_line_wrap(True)
@@ -2288,7 +2361,8 @@ class PasswordWindow:
         security_hint = gtk.Label(
             label=(
                 "Clear the clipboard after a copy so a password does not linger. "
-                "Auto-lock hides saved passwords after the window sits idle."
+                "Auto-lock hides saved passwords after the window sits idle. "
+                "Change passphrase seals the vault under a new passphrase and recovery key."
             ),
             xalign=0,
         )
@@ -2319,6 +2393,12 @@ class PasswordWindow:
         self.auto_lock_combo.connect("changed", self._on_auto_lock_changed)
         lock_row.pack_start(self.auto_lock_combo, False, False, 0)
         security.pack_start(lock_row, False, False, 0)
+
+        self.change_passphrase_button = gtk.Button(label="Change passphrase")
+        self.change_passphrase_button.get_style_context().add_class("secondary")
+        self.change_passphrase_button.set_halign(gtk.Align.START)
+        self.change_passphrase_button.connect("clicked", self.on_change_passphrase)
+        security.pack_start(self.change_passphrase_button, False, False, 0)
         page.pack_start(security, False, False, 0)
 
         files = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=10)

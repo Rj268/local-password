@@ -140,6 +140,24 @@ fun LocalPasswordApp(model: PasswordModel = viewModel()) {
             onDismiss = { model.askUnlock = false },
         ) { phrase, _ -> model.unlock(phrase, thenSave = model.section == "create" && model.current.isNotEmpty()) }
     }
+    if (model.askChangeCurrent) {
+        PassphraseDialog(
+            title = "Current passphrase",
+            body = "Enter the current passphrase or recovery key.",
+            confirm = false,
+            busy = model.busy,
+            onDismiss = { model.cancelChangePassphrase() },
+        ) { phrase, _ -> model.confirmChangeCurrent(phrase) }
+    }
+    if (model.askChangeNew) {
+        PassphraseDialog(
+            title = "New passphrase",
+            body = "Choose a new passphrase to lock saved passwords. It is not stored. A new recovery key will be shown once. The old passphrase and recovery key will stop working.",
+            confirm = true,
+            busy = model.busy,
+            onDismiss = { model.cancelChangePassphrase() },
+        ) { phrase, again -> model.confirmChangeNew(phrase, again) }
+    }
     val offerCode = model.offerCode
     if (offerCode != null) {
         AlertDialog(
@@ -438,11 +456,22 @@ private fun SettingsPane(
     ) {
         Text("Settings", color = ink, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, fontSize = 24.sp)
         Text(
-            "Appearance and moving the vault stay here. Copied passwords clear from the clipboard after 30 seconds. The passphrase is not sent.",
+            "Appearance, passphrase change, and moving the vault stay here. Copied passwords clear from the clipboard after 30 seconds. The passphrase is not sent.",
             color = muted,
         )
         TextButton(onClick = { model.toggleDark() }) {
             Text(if (dark) "Dark    On" else "Dark    Off", color = if (dark) Green else muted)
+        }
+        Text(
+            "Change passphrase seals the vault under a new passphrase and shows a new recovery key once. The old passphrase and recovery key stop working.",
+            color = muted,
+            fontSize = 13.sp,
+        )
+        TextButton(
+            onClick = { model.requestChangePassphrase() },
+            enabled = !model.busy,
+        ) {
+            Text("Change passphrase", color = Green)
         }
         Text(
             "Send vault shares the encrypted file with another device on the same Wi-Fi. The passphrase stays here.",

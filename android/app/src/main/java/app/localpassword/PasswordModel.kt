@@ -37,6 +37,8 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     var revealed by mutableStateOf<String?>(null)
     var askNewPassphrase by mutableStateOf(false)
     var askUnlock by mutableStateOf(false)
+    var askChangeCurrent by mutableStateOf(false)
+    var askChangeNew by mutableStateOf(false)
     var recoveryKey by mutableStateOf<String?>(null)
     var error by mutableStateOf("")
     var dark by mutableStateOf(loadDark())
@@ -53,6 +55,7 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     private var opened: OpenVault? = null
     private var offer: VaultSync.Offer? = null
     private var incomingBlob: ByteArray? = null
+    private var changeItems: List<SavedPassword>? = null
     private var clipboardGeneration = 0
     private val words: List<String> by lazy { loadWords() }
 
@@ -202,6 +205,76 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (exc: VaultException) {
                 error = exc.message ?: "That passphrase or recovery key did not unlock the saved passwords."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    fun requestChangePassphrase() {
+        error = ""
+        if (!hasVault()) {
+            error = "Save a password first. There is no vault to re-lock yet."
+            return
+        }
+        askChangeCurrent = true
+    }
+
+    fun confirmChangeCurrent(secret: String) {
+        viewModelScope.launch {
+            busy = true
+            error = ""
+            try {
+                val blob = vaultFile().readBytes()
+                val fresh = withContext(Dispatchers.Default) { Vault.open(secret, blob) }
+                opened = fresh
+                saved = fresh.items
+                unlocked = true
+                changeItems = fresh.items
+                askChangeCurrent = false
+                askChangeNew = true
+            } catch (exc: VaultException) {
+                error = exc.message ?: "That passphrase or recovery key did not unlock the saved passwords."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    fun cancelChangePassphrase() {
+        askChangeCurrent = false
+        askChangeNew = false
+        changeItems = null
+    }
+
+    fun confirmChangeNew(passphrase: String, confirm: String) {
+        viewModelScope.launch {
+            busy = true
+            error = ""
+            try {
+                if (passphrase != confirm) {
+                    error = "Those passphrases do not match."
+                    return@launch
+                }
+                val items = changeItems ?: opened?.items
+                if (items == null) {
+                    error = "Unlock the vault before changing the passphrase."
+                    return@launch
+                }
+                val recovery = Generator.recoveryKey(words)
+                val (blob, fresh) = withContext(Dispatchers.Default) {
+                    Vault.create(passphrase, recovery, items)
+                }
+                writeAtomically(blob)
+                opened = fresh
+                saved = fresh.items
+                unlocked = true
+                askChangeNew = false
+                changeItems = null
+                recoveryKey = recovery
+                status = "Passphrase changed. The old passphrase and recovery key no longer open this vault."
+            } catch (exc: VaultException) {
+                error = exc.message ?: "Could not rewrite the vault with the new passphrase."
             } finally {
                 busy = false
             }
