@@ -420,6 +420,44 @@ class AppearanceTests(unittest.TestCase):
                 else:
                     os.environ["XDG_DATA_HOME"] = previous
 
+    def test_security_preferences_stay_private_on_this_computer(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            previous = os.environ.get("XDG_DATA_HOME")
+            os.environ["XDG_DATA_HOME"] = directory
+            try:
+                defaults = password_app.load_preferences()
+                self.assertEqual(defaults.clipboard_clear_seconds, 30)
+                self.assertEqual(defaults.auto_lock_seconds, 300)
+                password_app.store_preferences(
+                    password_app.Preferences(clipboard_clear_seconds=15, auto_lock_seconds=60)
+                )
+                path = password_app.preferences_path()
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+                loaded = password_app.load_preferences()
+                self.assertEqual(loaded.clipboard_clear_seconds, 15)
+                self.assertEqual(loaded.auto_lock_seconds, 60)
+                path.write_text(
+                    "clipboard_clear_seconds=999\nauto_lock_seconds=abc\n",
+                    encoding="utf-8",
+                )
+                repaired = password_app.load_preferences()
+                self.assertEqual(repaired.clipboard_clear_seconds, 30)
+                self.assertEqual(repaired.auto_lock_seconds, 300)
+                path.unlink()
+                path.symlink_to(path.with_name("other"))
+                with self.assertRaises(ValueError):
+                    password_app.store_preferences(password_app.Preferences())
+            finally:
+                if previous is None:
+                    os.environ.pop("XDG_DATA_HOME", None)
+                else:
+                    os.environ["XDG_DATA_HOME"] = previous
+
+    def test_vault_blob_helper_rejects_junk(self) -> None:
+        self.assertFalse(password_app.is_vault_blob(b"not-a-vault"))
+        self.assertFalse(password_app.is_vault_blob(b"LPV2" + b"\0" * 10))
+        self.assertTrue(password_app.is_vault_blob(b"LPV2" + b"\0" * 44))
+
     @unittest.skipUnless(os.environ.get("DISPLAY"), "needs a graphical session")
     def test_dark_switch_changes_the_window(self) -> None:
         import gi

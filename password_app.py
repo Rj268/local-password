@@ -19,6 +19,7 @@ import string
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -60,6 +61,20 @@ KNOWN_ENTRY_KEYS = frozenset(
         "created",
         "modified",
     }
+)
+DEFAULT_CLIPBOARD_CLEAR_SECONDS = 30
+DEFAULT_AUTO_LOCK_SECONDS = 300
+CLIPBOARD_CLEAR_OPTIONS = (
+    (0, "Off"),
+    (15, "15 seconds"),
+    (30, "30 seconds"),
+    (60, "1 minute"),
+)
+AUTO_LOCK_OPTIONS = (
+    (0, "Off"),
+    (60, "1 minute"),
+    (300, "5 minutes"),
+    (900, "15 minutes"),
 )
 
 STYLES = """
@@ -589,6 +604,93 @@ def store_appearance(dark: bool, path: Path | None = None) -> None:
     finally:
         os.close(descriptor)
     os.chmod(path, 0o600)
+
+
+@dataclass(frozen=True)
+class Preferences:
+    """Security choices that stay on this computer. They hold no passwords."""
+
+    clipboard_clear_seconds: int = DEFAULT_CLIPBOARD_CLEAR_SECONDS
+    auto_lock_seconds: int = DEFAULT_AUTO_LOCK_SECONDS
+
+
+def preferences_path() -> Path:
+    return data_directory() / "local-password" / "preferences"
+
+
+def _normalize_choice(value: int, options: tuple[tuple[int, str], ...], default: int) -> int:
+    allowed = {item[0] for item in options}
+    return value if value in allowed else default
+
+
+def load_preferences(path: Path | None = None) -> Preferences:
+    path = preferences_path() if path is None else path
+    if path.is_symlink() or not path.is_file():
+        return Preferences()
+    clipboard = DEFAULT_CLIPBOARD_CLEAR_SECONDS
+    auto_lock = DEFAULT_AUTO_LOCK_SECONDS
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, text = line.split("=", 1)
+        key = key.strip()
+        text = text.strip()
+        try:
+            number = int(text)
+        except ValueError:
+            continue
+        if key == "clipboard_clear_seconds":
+            clipboard = number
+        elif key == "auto_lock_seconds":
+            auto_lock = number
+    return Preferences(
+        clipboard_clear_seconds=_normalize_choice(
+            clipboard, CLIPBOARD_CLEAR_OPTIONS, DEFAULT_CLIPBOARD_CLEAR_SECONDS
+        ),
+        auto_lock_seconds=_normalize_choice(
+            auto_lock, AUTO_LOCK_OPTIONS, DEFAULT_AUTO_LOCK_SECONDS
+        ),
+    )
+
+
+def store_preferences(prefs: Preferences, path: Path | None = None) -> None:
+    """Remember clipboard and auto-lock choices. The file is readable only by this user."""
+    path = preferences_path() if path is None else path
+    if path.is_symlink():
+        raise ValueError("The preferences file is a link.")
+    directory = path.parent
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(directory, 0o700)
+    payload = (
+        f"clipboard_clear_seconds={prefs.clipboard_clear_seconds}\n"
+        f"auto_lock_seconds={prefs.auto_lock_seconds}\n"
+    ).encode("utf-8")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        os.write(descriptor, payload)
+    finally:
+        os.close(descriptor)
+    os.chmod(path, 0o600)
+
+
+def is_vault_blob(blob: bytes) -> bool:
+    return len(blob) >= 48 and blob.startswith((VAULT_MAGIC, VAULT_MAGIC_V2))
+
+
+def read_vault_blob(path: Path | None = None) -> bytes:
+    path = vault_path() if path is None else path
+    if path.is_symlink():
+        raise ValueError("The saved password file is a symbolic link.")
+    if not path.is_file():
+        raise ValueError("There is no vault on this computer yet.")
+    blob = path.read_bytes()
+    if not is_vault_blob(blob):
+        raise ValueError("The saved password file is damaged.")
+    return blob
 
 
 _PNG_1PX = base64.b64decode(
@@ -1440,7 +1542,13 @@ class PasswordWindow:
         self.window.add(root)
 
         self.dark = load_dark_mode()
+        self.preferences = load_preferences()
         self.revealed_names: set[str] = set()
+        self._clipboard_generation = 0
+        self._clipboard_value = ""
+        self._clipboard_clear_source = 0
+        self._last_activity = time.monotonic()
+        self._auto_lock_source = 0
 
         header = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=6)
         header.get_style_context().add_class("header-bar")
@@ -1530,6 +1638,9 @@ class PasswordWindow:
         self._build_settings(settings_inner)
         self.apply_dark()
         self._build_manager(saved_inner)
+        self.window.connect("key-press-event", self._note_activity)
+        self.window.connect("button-press-event", self._note_activity)
+        self._arm_auto_lock_timer()
 
         footer = gtk.Label(
             label=(
@@ -1550,6 +1661,183 @@ class PasswordWindow:
             store_appearance(self.dark)
         except OSError:
             pass
+
+    def _persist_preferences(self) -> None:
+        try:
+            store_preferences(self.preferences)
+        except OSError:
+            self._sync_note("Could not save that setting on this computer.")
+
+    def _on_clipboard_clear_changed(self, *_args) -> None:
+        active = self.clipboard_clear_combo.get_active_id()
+        if active is None:
+            return
+        seconds = _normalize_choice(
+            int(active), CLIPBOARD_CLEAR_OPTIONS, DEFAULT_CLIPBOARD_CLEAR_SECONDS
+        )
+        self.preferences = replace(self.preferences, clipboard_clear_seconds=seconds)
+        self._persist_preferences()
+
+    def _on_auto_lock_changed(self, *_args) -> None:
+        active = self.auto_lock_combo.get_active_id()
+        if active is None:
+            return
+        seconds = _normalize_choice(int(active), AUTO_LOCK_OPTIONS, DEFAULT_AUTO_LOCK_SECONDS)
+        self.preferences = replace(self.preferences, auto_lock_seconds=seconds)
+        self._persist_preferences()
+        self._note_activity()
+        self._arm_auto_lock_timer()
+
+    def _note_activity(self, *_args) -> bool:
+        self._last_activity = time.monotonic()
+        return False
+
+    def _arm_auto_lock_timer(self) -> None:
+        from gi.repository import GLib
+
+        if self._auto_lock_source:
+            GLib.source_remove(self._auto_lock_source)
+            self._auto_lock_source = 0
+        if self.preferences.auto_lock_seconds <= 0:
+            return
+        self._auto_lock_source = GLib.timeout_add_seconds(15, self._check_auto_lock)
+
+    def _check_auto_lock(self) -> bool:
+        seconds = self.preferences.auto_lock_seconds
+        if seconds <= 0 or self.vault_key is None:
+            return True
+        if time.monotonic() - self._last_activity >= seconds:
+            self._lock_saved()
+            self.status.set_text("Saved passwords locked after sitting idle.")
+        return True
+
+    def _schedule_clipboard_clear(self, text: str) -> None:
+        from gi.repository import GLib
+
+        seconds = self.preferences.clipboard_clear_seconds
+        if seconds <= 0 or not text:
+            return
+        self._clipboard_generation += 1
+        generation = self._clipboard_generation
+        self._clipboard_value = text
+        if self._clipboard_clear_source:
+            GLib.source_remove(self._clipboard_clear_source)
+        self._clipboard_clear_source = GLib.timeout_add_seconds(
+            seconds, self._clear_clipboard_if_unchanged, generation
+        )
+
+    def _clear_clipboard_if_unchanged(self, generation: int) -> bool:
+        self._clipboard_clear_source = 0
+        if generation != self._clipboard_generation:
+            return False
+        expected = self._clipboard_value
+        self._clipboard_value = ""
+        if not expected:
+            return False
+        try:
+            clipboard = self.gtk.Clipboard.get(self.gdk.SELECTION_CLIPBOARD)
+            current = clipboard.wait_for_text()
+            if current == expected:
+                clipboard.set_text("", 0)
+                clipboard.store()
+        except Exception:
+            pass
+        if shutil.which("xclip") is not None:
+            try:
+                subprocess.run(
+                    ["xclip", "-selection", "clipboard", "-in"],
+                    input=b"",
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except OSError:
+                pass
+        return False
+
+    def on_export_vault(self, *_args) -> None:
+        gtk = self.gtk
+        try:
+            blob = read_vault_blob()
+        except ValueError as exc:
+            self._sync_note(str(exc))
+            return
+        except OSError:
+            self._sync_note("Could not read the vault on this computer.")
+            return
+        dialog = gtk.FileChooserDialog(
+            title="Export vault",
+            transient_for=self.window,
+            action=gtk.FileChooserAction.SAVE,
+        )
+        dialog.add_button("Cancel", gtk.ResponseType.CANCEL)
+        dialog.add_button("Export", gtk.ResponseType.OK)
+        dialog.set_current_name("saved.vault")
+        dialog.set_do_overwrite_confirmation(True)
+        response = dialog.run()
+        target = dialog.get_filename()
+        dialog.destroy()
+        if response != gtk.ResponseType.OK or not target:
+            return
+        path = Path(target)
+        try:
+            path.write_bytes(blob)
+            if hasattr(os, "chmod"):
+                try:
+                    os.chmod(path, 0o600)
+                except OSError:
+                    pass
+        except OSError:
+            self._sync_note("Could not write that export file.")
+            return
+        self._sync_note(f"Exported the encrypted vault to {path.name}.")
+
+    def on_import_vault(self, *_args) -> None:
+        gtk = self.gtk
+        if vault_path().is_file():
+            confirm = gtk.MessageDialog(
+                transient_for=self.window,
+                modal=True,
+                message_type=gtk.MessageType.WARNING,
+                buttons=gtk.ButtonsType.OK_CANCEL,
+                text="Replace the vault on this computer?",
+            )
+            confirm.format_secondary_text(
+                "Import copies an encrypted vault file onto this computer and locks Saved. "
+                "The current vault file is replaced."
+            )
+            answer = confirm.run()
+            confirm.destroy()
+            if answer != gtk.ResponseType.OK:
+                return
+        dialog = gtk.FileChooserDialog(
+            title="Import vault",
+            transient_for=self.window,
+            action=gtk.FileChooserAction.OPEN,
+        )
+        dialog.add_button("Cancel", gtk.ResponseType.CANCEL)
+        dialog.add_button("Import", gtk.ResponseType.OK)
+        response = dialog.run()
+        source = dialog.get_filename()
+        dialog.destroy()
+        if response != gtk.ResponseType.OK or not source:
+            return
+        try:
+            blob = Path(source).read_bytes()
+        except OSError:
+            self._sync_note("Could not read that vault file.")
+            return
+        if not is_vault_blob(blob):
+            self._sync_note("That file is not a Local Password vault.")
+            return
+        try:
+            store_vault_blob(blob)
+        except (OSError, ValueError) as exc:
+            self._sync_note(str(exc) if isinstance(exc, ValueError) else "Could not import that vault.")
+            return
+        self._prepare_saved()
+        self.show_section("saved")
+        self._sync_note("Vault imported. Unlock with the same passphrase or recovery key.")
 
     def apply_dark(self) -> None:
         context = self.window.get_style_context()
@@ -1969,7 +2257,7 @@ class PasswordWindow:
         heading.get_style_context().add_class("section-title")
         page.pack_start(heading, False, False, 0)
         lede = gtk.Label(
-            label="Appearance and vault transfer. More security options arrive in a later stage.",
+            label="Appearance, clipboard and lock timing, and vault file transfer.",
             xalign=0,
         )
         lede.set_line_wrap(True)
@@ -1991,6 +2279,74 @@ class PasswordWindow:
         self.dark_button.set_halign(gtk.Align.START)
         self.dark_button.connect("clicked", self.on_toggle_dark)
         page.pack_start(self.dark_button, False, False, 0)
+
+        security = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=10)
+        security.get_style_context().add_class("settings-block")
+        security_label = gtk.Label(label="SECURITY", xalign=0)
+        security_label.get_style_context().add_class("eyebrow")
+        security.pack_start(security_label, False, False, 0)
+        security_hint = gtk.Label(
+            label=(
+                "Clear the clipboard after a copy so a password does not linger. "
+                "Auto-lock hides saved passwords after the window sits idle."
+            ),
+            xalign=0,
+        )
+        security_hint.set_line_wrap(True)
+        security_hint.get_style_context().add_class("hint")
+        security.pack_start(security_hint, False, False, 0)
+
+        clear_row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
+        clear_caption = gtk.Label(label="Clear clipboard", xalign=0)
+        clear_caption.set_hexpand(True)
+        clear_row.pack_start(clear_caption, True, True, 0)
+        self.clipboard_clear_combo = gtk.ComboBoxText()
+        for seconds, label in CLIPBOARD_CLEAR_OPTIONS:
+            self.clipboard_clear_combo.append(str(seconds), label)
+        self.clipboard_clear_combo.set_active_id(str(self.preferences.clipboard_clear_seconds))
+        self.clipboard_clear_combo.connect("changed", self._on_clipboard_clear_changed)
+        clear_row.pack_start(self.clipboard_clear_combo, False, False, 0)
+        security.pack_start(clear_row, False, False, 0)
+
+        lock_row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
+        lock_caption = gtk.Label(label="Auto-lock", xalign=0)
+        lock_caption.set_hexpand(True)
+        lock_row.pack_start(lock_caption, True, True, 0)
+        self.auto_lock_combo = gtk.ComboBoxText()
+        for seconds, label in AUTO_LOCK_OPTIONS:
+            self.auto_lock_combo.append(str(seconds), label)
+        self.auto_lock_combo.set_active_id(str(self.preferences.auto_lock_seconds))
+        self.auto_lock_combo.connect("changed", self._on_auto_lock_changed)
+        lock_row.pack_start(self.auto_lock_combo, False, False, 0)
+        security.pack_start(lock_row, False, False, 0)
+        page.pack_start(security, False, False, 0)
+
+        files = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=10)
+        files.get_style_context().add_class("settings-block")
+        files_label = gtk.Label(label="VAULT FILE", xalign=0)
+        files_label.get_style_context().add_class("eyebrow")
+        files.pack_start(files_label, False, False, 0)
+        files_hint = gtk.Label(
+            label=(
+                "Export copies the encrypted vault to a file you choose. "
+                "Import replaces the vault on this computer with that file. "
+                "The passphrase is not inside the export."
+            ),
+            xalign=0,
+        )
+        files_hint.set_line_wrap(True)
+        files_hint.get_style_context().add_class("hint")
+        files.pack_start(files_hint, False, False, 0)
+        file_row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
+        self.export_button = gtk.Button(label="Export vault")
+        self.import_button = gtk.Button(label="Import vault")
+        for button in (self.export_button, self.import_button):
+            button.get_style_context().add_class("secondary")
+            file_row.pack_start(button, True, True, 0)
+        self.export_button.connect("clicked", self.on_export_vault)
+        self.import_button.connect("clicked", self.on_import_vault)
+        files.pack_start(file_row, False, False, 0)
+        page.pack_start(files, False, False, 0)
 
         transfer = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=10)
         transfer.get_style_context().add_class("settings-block")
@@ -2184,6 +2540,7 @@ class PasswordWindow:
 
     def show_section(self, section: str) -> None:
         """Show Dashboard, Generate, Saved, or Settings. Hidden pages stay hidden after show_all."""
+        self._note_activity()
         if section == "create":
             section = "generate"
         if section not in ("dashboard", "generate", "saved", "settings"):
@@ -2441,20 +2798,7 @@ class PasswordWindow:
     def on_copy(self, _button) -> None:
         if not self.current:
             return
-        copied = False
-        try:
-            clipboard = self.gtk.Clipboard.get(self.gdk.SELECTION_CLIPBOARD)
-            clipboard.set_text(self.current, len(self.current))
-            clipboard.store()
-            copied = True
-        except Exception:
-            copied = False
-        if copy_with_xclip(self.current) or generator.copy_with_windows(self.current):
-            copied = True
-        if copied:
-            self.status.set_text("Copied.")
-        else:
-            self.status.set_text("Copy failed.")
+        self.on_copy_text(self.current)
 
     def _prepare_saved(self) -> None:
         """Leave saved passwords hidden until the passphrase unlocks them."""
@@ -3069,6 +3413,7 @@ class PasswordWindow:
     def on_copy_text(self, text: str) -> None:
         if not text:
             return
+        self._note_activity()
         copied = False
         try:
             clipboard = self.gtk.Clipboard.get(self.gdk.SELECTION_CLIPBOARD)
@@ -3079,11 +3424,21 @@ class PasswordWindow:
             copied = False
         if copy_with_xclip(text) or generator.copy_with_windows(text):
             copied = True
-        message = "Copied." if copied else "Copy failed."
+        if copied:
+            self._schedule_clipboard_clear(text)
+            seconds = self.preferences.clipboard_clear_seconds
+            if seconds:
+                message = f"Copied. Clipboard clears in {seconds} seconds."
+            else:
+                message = "Copied."
+        else:
+            message = "Copy failed."
         self.status.set_text(message)
         if self.section == "saved" and self.vault_key is not None:
             self.manager_message.set_text(message)
             self.manager_message.show()
+        if self.section == "settings":
+            self._sync_note(message)
 
     def on_save(self, _button) -> None:
         if not self.save_ready or not self.current or self.showing_saved:

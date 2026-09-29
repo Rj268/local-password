@@ -437,7 +437,10 @@ private fun SettingsPane(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text("Settings", color = ink, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, fontSize = 24.sp)
-        Text("Appearance and moving the vault stay here. The passphrase is not sent.", color = muted)
+        Text(
+            "Appearance and moving the vault stay here. Copied passwords clear from the clipboard after 30 seconds. The passphrase is not sent.",
+            color = muted,
+        )
         TextButton(onClick = { model.toggleDark() }) {
             Text(if (dark) "Dark    On" else "Dark    Off", color = if (dark) Green else muted)
         }

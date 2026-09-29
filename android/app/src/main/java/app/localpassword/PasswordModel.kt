@@ -53,6 +53,7 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     private var opened: OpenVault? = null
     private var offer: VaultSync.Offer? = null
     private var incomingBlob: ByteArray? = null
+    private var clipboardGeneration = 0
     private val words: List<String> by lazy { loadWords() }
 
     fun vaultFile(): File = File(getApplication<Application>().filesDir, "saved.vault")
@@ -107,7 +108,19 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     fun copy(text: String) {
         val clipboard = getApplication<Application>().getSystemService(ClipboardManager::class.java)
         clipboard.setPrimaryClip(ClipData.newPlainText("password", text))
-        status = "Copied."
+        status = "Copied. Clipboard clears in 30 seconds."
+        val generation = ++clipboardGeneration
+        viewModelScope.launch {
+            delay(30_000)
+            if (generation != clipboardGeneration) return@launch
+            val currentClip = clipboard.primaryClip
+            val stillOurs = currentClip != null &&
+                currentClip.itemCount > 0 &&
+                currentClip.getItemAt(0).coerceToText(getApplication()).toString() == text
+            if (stillOurs) {
+                clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
+            }
+        }
     }
 
     fun requestSave() {
