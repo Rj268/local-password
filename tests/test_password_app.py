@@ -29,7 +29,8 @@ class GenerateTests(unittest.TestCase):
                 words=6,
                 count=1,
                 digits=False,
-                letters=False,
+                uppercase=False,
+                lowercase=False,
                 symbols=False,
             )
 
@@ -44,29 +45,27 @@ class GenerateTests(unittest.TestCase):
                     words=6,
                     count=1,
                     digits=True,
-                    letters=True,
+                    uppercase=True,
+                    lowercase=True,
                     symbols=True,
                 )
                 self.assertEqual(list(Path(directory).iterdir()), [])
             finally:
                 os.chdir(previous)
-        self.assertEqual(result.label, "Strong")
+        self.assertEqual(result.label, "Very strong")
         self.assertEqual(len(result.text), 16)
         self.assertIn("bits", result.bits_label)
         self.assertEqual(result.note, "")
 
-    def test_five_words_are_weak(self) -> None:
+    def test_five_words_are_fair(self) -> None:
         result = password_app.generate(
             mode="passphrase",
             length=16,
             words=5,
             count=1,
-            digits=True,
-            letters=True,
-            symbols=True,
         )
         self.assertEqual(len(result.text.split()), 5)
-        self.assertEqual(result.label, "Weak")
+        self.assertEqual(result.label, "Fair")
         self.assertIn("75", result.note)
 
     def test_six_words_are_strong(self) -> None:
@@ -75,15 +74,53 @@ class GenerateTests(unittest.TestCase):
             length=16,
             words=6,
             count=2,
-            digits=True,
-            letters=True,
-            symbols=True,
         )
         lines = result.text.splitlines()
         self.assertEqual(len(lines), 2)
         self.assertTrue(all(len(line.split()) == 6 for line in lines))
         self.assertEqual(result.label, "Strong")
         self.assertIn("each", result.bits_label)
+
+    def test_exclude_ambiguous_drops_confusable_characters(self) -> None:
+        pool = password_app.character_pool(
+            digits=True,
+            uppercase=True,
+            lowercase=True,
+            symbols=False,
+            exclude_ambiguous=True,
+        )
+        for char in "0Ool1I|":
+            self.assertNotIn(char, pool)
+        result = password_app.generate(
+            mode="characters",
+            length=24,
+            words=6,
+            count=1,
+            digits=True,
+            uppercase=True,
+            lowercase=True,
+            symbols=False,
+            exclude_ambiguous=True,
+        )
+        for char in "0Ool1I|":
+            self.assertNotIn(char, result.text)
+
+    def test_uppercase_only_pool(self) -> None:
+        pool = password_app.character_pool(uppercase=True)
+        self.assertTrue(set(pool) <= set(string.ascii_uppercase))
+
+    def test_hyphen_passphrase_and_capitalize(self) -> None:
+        result = password_app.generate(
+            mode="passphrase",
+            length=16,
+            words=4,
+            count=1,
+            separator="-",
+            capitalize=True,
+        )
+        parts = result.text.split("-")
+        self.assertEqual(len(parts), 4)
+        self.assertTrue(all(part[:1].isupper() for part in parts))
 
     def test_chip_label_states_on_and_off(self) -> None:
         self.assertIn("On", password_app.chip_label("Digits", True))
@@ -261,7 +298,7 @@ class EnterpriseEntropyTests(unittest.TestCase):
             symbols=True,
         )
         self.assertEqual(result.fraction, 1.0)
-        self.assertEqual(result.label, "Strong")
+        self.assertEqual(result.label, "Very strong")
         self.assertEqual(len(result.text), 40)
 
     def test_twenty_words_reach_256_bits(self) -> None:
@@ -395,6 +432,9 @@ class CreatePageTests(unittest.TestCase):
         self.assertTrue(window.generate_button.get_visible())
         self.assertTrue(window.length.get_visible())
         self.assertTrue(window.digits.get_visible())
+        self.assertTrue(window.uppercase.get_visible())
+        self.assertTrue(window.lowercase.get_visible())
+        self.assertTrue(window.ambiguous.get_visible())
         self.assertTrue(window.single_box.get_visible())
         self.assertTrue(window.create_view.get_visible())
         self.assertFalse(window.settings_view.get_visible())

@@ -57,10 +57,10 @@ class GeneratePasswordTests(unittest.TestCase):
 class StrengthTests(unittest.TestCase):
     def test_short_mixed_password_is_below_the_strong_line(self) -> None:
         self.assertFalse(generator.is_strong_password("Abcdef1!"))
-        self.assertEqual(generator.strength_label("Abcdef1!"), "Weak Password")
+        self.assertEqual(generator.strength_label("Abcdef1!"), "Fair password")
         self.assertEqual(len("Abcdefghijk1!"), 13)
         self.assertTrue(generator.is_strong_password("Abcdefghijk1!"))
-        self.assertEqual(generator.strength_label("Abcdefghijk1!"), "Strong Password")
+        self.assertEqual(generator.strength_label("Abcdefghijk1!"), "Strong password")
 
     def test_can_be_strong_follows_entropy(self) -> None:
         pool = string.ascii_letters + string.digits + string.punctuation
@@ -78,7 +78,7 @@ class CommandLineTests(unittest.TestCase):
         password = stdout.getvalue().strip()
         self.assertEqual(len(password), 16)
         self.assertTrue(generator.is_strong_password(password))
-        self.assertIn("Strong Password", stderr.getvalue())
+        self.assertIn("Strong password", stderr.getvalue())
 
     def test_quiet_prints_only_the_password(self) -> None:
         stdout = StringIO()
@@ -129,7 +129,7 @@ class CommandLineTests(unittest.TestCase):
         self.assertIn("Welcome to the Password Generator", text)
         self.assertIn("Generated Password:", text)
         self.assertIn("Password was not copied.", text)
-        self.assertIn("Strong Password", text)
+        self.assertIn("Strong password", text)
 
     def test_interactive_exit_without_character_types(self) -> None:
         answers = iter(["no", "12", "4"])
@@ -223,14 +223,14 @@ class PoolAndEntropyTests(unittest.TestCase):
         words = stdout.getvalue().strip().split()
         self.assertEqual(len(words), 6)
         self.assertTrue(set(words) <= set(wordlist))
-        self.assertIn("Strong Password", stderr.getvalue())
+        self.assertIn("Strong password", stderr.getvalue())
         self.assertIn("bits", stderr.getvalue())
 
     def test_five_word_passphrase_is_under_the_strong_line(self) -> None:
         stderr = StringIO()
         with patch("sys.stdout", StringIO()), patch("sys.stderr", stderr):
             generator.main(["--words", "5"])
-        self.assertIn("Weak Password", stderr.getvalue())
+        self.assertIn("Fair password", stderr.getvalue())
 
     def test_passphrase_rejects_a_character_length(self) -> None:
         with patch("sys.stderr", StringIO()):
@@ -246,7 +246,7 @@ class PoolAndEntropyTests(unittest.TestCase):
         text = stdout.getvalue()
         phrase = text.split("Generated Passphrase:", 1)[1].splitlines()[0].strip()
         self.assertEqual(len(phrase.split()), 6)
-        self.assertIn("Strong Password", text)
+        self.assertIn("Strong password", text)
         self.assertIn("Password was not copied.", text)
 
     def test_entropy_matches_pool_size(self) -> None:

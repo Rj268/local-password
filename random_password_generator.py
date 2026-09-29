@@ -28,10 +28,16 @@ MAX_WORD_COUNT = 20
 DEFAULT_WORD_COUNT = 6
 # An 8-character mix is about 50 bits. Six words from the EFF list are about 78.
 STRONG_ENTROPY_BITS = 75
+VERY_WEAK_ENTROPY_BITS = 28
+WEAK_ENTROPY_BITS = 50
+VERY_STRONG_ENTROPY_BITS = 100
 # Characters that are easy to misread in many fonts: 0/O, 1/l/I, and a bar.
 AMBIGUOUS_CHARACTERS = "0Ool1I|"
 # Metacharacters that change meaning when pasted into a shell unquoted.
 SHELL_SENSITIVE_CHARACTERS = "!\"#$&'()*;<>?\\`|[]~{}"
+PASSPHRASE_SEPARATORS = (" ", "-", "_", ".")
+
+
 def app_root() -> Path:
     """Directory that holds this program and the wordlist.
 
@@ -119,13 +125,29 @@ def require_word_count(word_count: int) -> int:
     return word_count
 
 
-def generate_passphrase(word_count: int, *, wordlist: tuple[str, ...] | None = None) -> str:
-    """Build a passphrase of ``word_count`` words separated by spaces."""
+def require_separator(separator: str) -> str:
+    if separator not in PASSPHRASE_SEPARATORS:
+        raise ValueError("Choose a word separator: space, hyphen, underscore, or period.")
+    return separator
+
+
+def generate_passphrase(
+    word_count: int,
+    *,
+    wordlist: tuple[str, ...] | None = None,
+    separator: str = " ",
+    capitalize: bool = False,
+) -> str:
+    """Build a passphrase of ``word_count`` words with a fixed separator."""
     word_count = require_word_count(word_count)
+    separator = require_separator(separator)
     words = load_wordlist() if wordlist is None else wordlist
     if not words:
         raise ValueError("The passphrase word list is empty.")
-    return " ".join(secrets.choice(words) for _ in range(word_count))
+    chosen = [secrets.choice(words) for _ in range(word_count)]
+    if capitalize:
+        chosen = [word[:1].upper() + word[1:] if word else word for word in chosen]
+    return separator.join(chosen)
 
 
 def unique_characters(character_list: str) -> str:
@@ -227,15 +249,27 @@ def is_strong_password(
     return password_strength_bits(password, pool_size, entropy_bits) >= STRONG_ENTROPY_BITS
 
 
+def strength_tier(entropy_bits: float) -> str:
+    """Label search-space size. This is an estimate, not a guarantee."""
+    if entropy_bits < VERY_WEAK_ENTROPY_BITS:
+        return "Very weak"
+    if entropy_bits < WEAK_ENTROPY_BITS:
+        return "Weak"
+    if entropy_bits < STRONG_ENTROPY_BITS:
+        return "Fair"
+    if entropy_bits < VERY_STRONG_ENTROPY_BITS:
+        return "Strong"
+    return "Very strong"
+
+
 def strength_label(
     password: str,
     pool_size: int | None = None,
     *,
     entropy_bits: float | None = None,
 ) -> str:
-    if is_strong_password(password, pool_size, entropy_bits=entropy_bits):
-        return "Strong Password"
-    return "Weak Password"
+    bits = password_strength_bits(password, pool_size, entropy_bits=entropy_bits)
+    return f"{strength_tier(bits)} password"
 
 
 def describe_passwords(
@@ -247,12 +281,11 @@ def describe_passwords(
     """Summarize strength and the approximate size of the search space."""
     exact_bits = password_strength_bits(passwords[0], pool_size, entropy_bits)
     bits = round(exact_bits)
-    kind = "strong" if exact_bits >= STRONG_ENTROPY_BITS else "weak"
+    tier = strength_tier(exact_bits)
     if len(passwords) == 1:
-        title = "Strong Password" if kind == "strong" else "Weak Password"
-        return f"{title}; about {bits} bits"
+        return f"{tier} password; about {bits} bits"
     noun = "password" if len(passwords) == 1 else "passwords"
-    return f"About {bits} bits of entropy each.\n{len(passwords)} {kind} {noun}."
+    return f"About {bits} bits of entropy each.\n{len(passwords)} {tier.lower()} {noun}."
 
 
 def can_be_strong(length: int, character_list: str) -> bool:

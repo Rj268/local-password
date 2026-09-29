@@ -124,8 +124,9 @@ window.app {
 .pairing-code {
   font-size: 28px;
 }
-.strength.strong { color: #08775B; font-weight: 700; }
-.strength.weak { color: #A15C12; font-weight: 700; }
+.strength.strong, .strength.very-strong { color: #08775B; font-weight: 700; }
+.strength.fair { color: #8A6A12; font-weight: 700; }
+.strength.weak, .strength.very-weak { color: #A15C12; font-weight: 700; }
 .bits { font-size: 14px; color: #737B75; }
 .slab {
   background-color: #1A1F1D;
@@ -230,10 +231,15 @@ window.app.dark .vault-status {
 }
 window.app.dark .eyebrow,
 window.app.dark .strength.strong,
+window.app.dark .strength.very-strong,
 window.app.dark .vault-status.unlocked {
   color: #5FBF9A;
 }
+window.app.dark .strength.fair {
+  color: #D0B15A;
+}
 window.app.dark .strength.weak,
+window.app.dark .strength.very-weak,
 window.app.dark .danger,
 window.app.dark button.note-danger,
 window.app.dark .vault-status.locked {
@@ -345,21 +351,44 @@ def _count(count: object) -> int:
     return count
 
 
-def character_pool(*, digits: bool, letters: bool, symbols: bool) -> str:
-    """Build the alphabet. Symbols include quotes, backticks, and backslashes."""
+def character_pool(
+    *,
+    digits: bool = False,
+    uppercase: bool = False,
+    lowercase: bool = False,
+    symbols: bool = False,
+    exclude_ambiguous: bool = False,
+    letters: bool | None = None,
+) -> str:
+    """Build the alphabet. Symbols include quotes, backticks, and backslashes.
+
+    ``letters=True`` turns on both uppercase and lowercase for older callers.
+    """
     digits = _flag(digits, "Digits")
-    letters = _flag(letters, "Letters")
     symbols = _flag(symbols, "Symbols")
-    if not (digits or letters or symbols):
+    exclude_ambiguous = _flag(exclude_ambiguous, "Exclude ambiguous")
+    if letters is not None:
+        letters = _flag(letters, "Letters")
+        uppercase = letters
+        lowercase = letters
+    else:
+        uppercase = _flag(uppercase, "Uppercase")
+        lowercase = _flag(lowercase, "Lowercase")
+    if not (digits or uppercase or lowercase or symbols):
         raise ValueError("Choose at least one character type.")
     parts: list[str] = []
     if digits:
         parts.append(string.digits)
-    if letters:
-        parts.append(string.ascii_letters)
+    if uppercase:
+        parts.append(string.ascii_uppercase)
+    if lowercase:
+        parts.append(string.ascii_lowercase)
     if symbols:
         parts.append(generator.special_characters(all_special=True))
-    return "".join(parts)
+    return generator.prepare_character_list(
+        "".join(parts),
+        exclude_ambiguous=exclude_ambiguous,
+    )
 
 
 def generate(
@@ -368,40 +397,64 @@ def generate(
     length: int,
     words: int,
     count: int,
-    digits: bool,
-    letters: bool,
-    symbols: bool,
+    digits: bool = True,
+    uppercase: bool = True,
+    lowercase: bool = True,
+    symbols: bool = True,
+    exclude_ambiguous: bool = False,
+    letters: bool | None = None,
+    separator: str = " ",
+    capitalize: bool = False,
 ) -> Generated:
     """Generate passwords in memory. This function does not write a file."""
     count = _count(count)
     if mode == "passphrase":
         word_count = generator.require_word_count(words)
         wordlist = generator.load_wordlist()
+        separator = generator.require_separator(separator)
+        capitalize = _flag(capitalize, "Capitalize")
         passwords = [
-            generator.generate_passphrase(word_count, wordlist=wordlist) for _ in range(count)
+            generator.generate_passphrase(
+                word_count,
+                wordlist=wordlist,
+                separator=separator,
+                capitalize=capitalize,
+            )
+            for _ in range(count)
         ]
         exact = generator.passphrase_entropy_bits(word_count, len(wordlist))
-        note = ""
+        note = (
+            "Word passphrases are easier to type than random characters of similar strength. "
+            "Capital letters and a fixed separator do not add search-space bits."
+        )
         if exact < generator.STRONG_ENTROPY_BITS:
             note = (
                 f"These options stay under {generator.STRONG_ENTROPY_BITS} bits. "
                 "Add words to reach a strong passphrase."
             )
     elif mode == "characters":
-        pool = character_pool(digits=digits, letters=letters, symbols=symbols)
+        pool = character_pool(
+            digits=digits,
+            uppercase=uppercase,
+            lowercase=lowercase,
+            symbols=symbols,
+            exclude_ambiguous=exclude_ambiguous,
+            letters=letters,
+        )
         length = generator.require_password_length(length)
         passwords = [generator.generate_password(length, pool) for _ in range(count)]
         exact = generator.password_entropy_bits(length, len(generator.unique_characters(pool)))
         note = "" if generator.can_be_strong(length, pool) else generator.strong_line_message()
+        if exclude_ambiguous and note == "":
+            note = "Ambiguous characters (0, O, o, 1, l, I, |) are left out."
     else:
         raise ValueError("Mode must be characters or passphrase.")
 
     bits = round(exact)
-    strong = exact >= generator.STRONG_ENTROPY_BITS
     each = "" if count == 1 else " each"
     return Generated(
         text="\n".join(passwords),
-        label="Strong" if strong else "Weak",
+        label=generator.strength_tier(exact),
         bits_label=f"about {bits} bits{each}",
         fraction=min(exact / METER_CAP_BITS, 1.0),
         note=note,
@@ -1493,14 +1546,21 @@ class PasswordWindow:
 
         chips = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
         chips.set_homogeneous(True)
+        self.uppercase = self._chip("Uppercase", True)
+        self.lowercase = self._chip("Lowercase", True)
         self.digits = self._chip("Digits", True)
-        self.letters = self._chip("Letters", True)
         self.symbols = self._chip("Symbols", True)
-        for chip in (self.digits, self.letters, self.symbols):
+        for chip in (self.uppercase, self.lowercase, self.digits, self.symbols):
             chips.pack_start(chip, True, True, 0)
         self.character_box.pack_start(chips, False, False, 0)
+        self.ambiguous = self._chip("Exclude ambiguous", False)
+        self.ambiguous.set_halign(gtk.Align.START)
+        self.character_box.pack_start(self.ambiguous, False, False, 0)
         symbol_hint = gtk.Label(
-            label="Symbols include quotes, backticks, and backslashes.",
+            label=(
+                "Symbols include quotes, backticks, and backslashes. "
+                "Exclude ambiguous drops 0, O, o, 1, l, I, and |."
+            ),
             xalign=0,
         )
         symbol_hint.set_line_wrap(True)
@@ -1516,13 +1576,39 @@ class PasswordWindow:
         self.words.set_value(generator.DEFAULT_WORD_COUNT)
         self.words.set_numeric(True)
         self.word_box.pack_start(self._labeled("Words", self.words), False, False, 0)
+        sep_row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
+        sep_row.set_homogeneous(True)
+        self.separator_buttons: dict[str, object] = {}
+        for label, value in (
+            ("Space", " "),
+            ("Hyphen", "-"),
+            ("Underscore", "_"),
+            ("Period", "."),
+        ):
+            button = gtk.Button(label=label)
+            button.get_style_context().add_class("mode")
+            button.connect(
+                "clicked",
+                lambda *_args, chosen=value: self.set_separator(chosen),
+            )
+            sep_row.pack_start(button, True, True, 0)
+            self.separator_buttons[value] = button
+        self.separator = " "
+        self.word_box.pack_start(sep_row, False, False, 0)
+        self.capitalize = self._chip("Capitalize words", False)
+        self.capitalize.set_halign(gtk.Align.START)
+        self.word_box.pack_start(self.capitalize, False, False, 0)
         word_hint = gtk.Label(
-            label="Six words from the EFF list are about 78 bits. Five words fall short of the strong line.",
+            label=(
+                "Six EFF words are about 78 bits and easier to type than a long character string. "
+                "Five words stay under the strong line."
+            ),
             xalign=0,
         )
         word_hint.set_line_wrap(True)
         word_hint.get_style_context().add_class("hint")
         self.word_box.pack_start(word_hint, False, False, 0)
+        self._style_separator_buttons()
 
         self.count = gtk.SpinButton.new_with_range(1, generator.MAX_PASSWORD_COUNT, 1)
         self.count.set_value(1)
@@ -1558,7 +1644,10 @@ class PasswordWindow:
         self.meter.set_fraction(0)
         result.pack_start(self.meter, False, False, 0)
         caption = gtk.Label(
-            label="The bar fills toward 256 bits. Strong starts at 75.",
+            label=(
+                "Estimate of search-space size, not a guarantee. "
+                "The bar fills toward 256 bits. Strong starts at 75."
+            ),
             xalign=0,
         )
         caption.set_line_wrap(True)
@@ -1604,17 +1693,31 @@ class PasswordWindow:
 
         actions = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
         actions.set_homogeneous(True)
+        self.reveal_button = gtk.Button(label="Hide")
+        self.reveal_button.get_style_context().add_class("secondary")
+        self.reveal_button.set_sensitive(False)
+        self.reveal_button.connect("clicked", self.on_toggle_result_reveal)
         self.copy_button = gtk.Button(label="Copy")
         self.copy_button.get_style_context().add_class("primary")
         self.copy_button.set_sensitive(False)
         self.copy_button.connect("clicked", self.on_copy)
+        self.regenerate_button = gtk.Button(label="Regenerate")
+        self.regenerate_button.get_style_context().add_class("secondary")
+        self.regenerate_button.set_sensitive(False)
+        self.regenerate_button.connect("clicked", self.on_regenerate)
         self.save_button = gtk.Button(label="Save")
         self.save_button.get_style_context().add_class("secondary")
         self.save_button.set_sensitive(False)
         self.save_button.connect("clicked", self.on_save)
-        actions.pack_start(self.copy_button, True, True, 0)
-        actions.pack_start(self.save_button, True, True, 0)
+        for button in (
+            self.reveal_button,
+            self.copy_button,
+            self.regenerate_button,
+            self.save_button,
+        ):
+            actions.pack_start(button, True, True, 0)
 
+        self.result_revealed = True
         self.single_box = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=12)
         self.single_box.set_vexpand(True)
         self.single_box.pack_start(scroller, True, True, 0)
@@ -1795,6 +1898,20 @@ class PasswordWindow:
                 style.add_class("off")
                 style.remove_class("on")
 
+    def set_separator(self, separator: str) -> None:
+        self.separator = separator
+        self._style_separator_buttons()
+
+    def _style_separator_buttons(self) -> None:
+        for value, button in self.separator_buttons.items():
+            style = button.get_style_context()
+            if value == self.separator:
+                style.add_class("on")
+                style.remove_class("off")
+            else:
+                style.add_class("off")
+                style.remove_class("on")
+
     def set_mode(self, mode: str) -> None:
         self.mode = mode
         self.apply_mode()
@@ -1805,9 +1922,37 @@ class PasswordWindow:
         if words:
             self.word_box.set_no_show_all(False)
             self.word_box.show_all()
+            self._style_separator_buttons()
         else:
             self.word_box.hide()
         self._style_mode_buttons()
+
+    def _generate_kwargs(self) -> dict:
+        return {
+            "mode": self.mode,
+            "length": self.length.get_value_as_int(),
+            "words": self.words.get_value_as_int(),
+            "count": self.count.get_value_as_int(),
+            "digits": self.digits.get_active(),
+            "uppercase": self.uppercase.get_active(),
+            "lowercase": self.lowercase.get_active(),
+            "symbols": self.symbols.get_active(),
+            "exclude_ambiguous": self.ambiguous.get_active(),
+            "separator": self.separator,
+            "capitalize": self.capitalize.get_active(),
+        }
+
+    def _paint_strength(self, label: str) -> None:
+        strength_style = self.strength.get_style_context()
+        for name in ("very-weak", "weak", "fair", "strong", "very-strong"):
+            strength_style.remove_class(name)
+        key = label.casefold().replace(" ", "-")
+        strength_style.add_class(key)
+        meter_style = self.meter.get_style_context()
+        if label in ("Strong", "Very strong"):
+            meter_style.remove_class("weak")
+        else:
+            meter_style.add_class("weak")
 
     def show_section(self, section: str) -> None:
         """Show Dashboard, Generate, Saved, or Settings. Hidden pages stay hidden after show_all."""
@@ -1867,47 +2012,73 @@ class PasswordWindow:
 
     def on_generate(self, _button) -> None:
         try:
-            result = generate(
-                mode=self.mode,
-                length=self.length.get_value_as_int(),
-                words=self.words.get_value_as_int(),
-                count=self.count.get_value_as_int(),
-                digits=self.digits.get_active(),
-                letters=self.letters.get_active(),
-                symbols=self.symbols.get_active(),
-            )
+            result = generate(**self._generate_kwargs())
         except ValueError as exc:
             self.set_note(str(exc))
             return
+        self._apply_generated(result)
+
+    def on_regenerate(self, *_args) -> None:
+        if not self.current:
+            return
+        kwargs = self._generate_kwargs()
+        kwargs["count"] = 1
+        try:
+            result = generate(**kwargs)
+        except ValueError as exc:
+            self.set_note(str(exc))
+            return
+        if len(self.batch) > 1:
+            # Keep the batch list; replace only when single result is showing.
+            pass
+        self._apply_generated(result)
+
+    def _apply_generated(self, result: Generated) -> None:
         passwords = [line for line in result.text.splitlines() if line]
         self.batch = passwords
         self.current = result.text
         self.showing_saved = False
         self.save_ready = True
-        self.buffer.set_text(result.text)
+        self.result_revealed = True
+        self._refresh_result_display()
         if len(passwords) > 1:
             self._show_batch(passwords)
         else:
             self._show_single()
         self.strength.set_text(result.label)
-        strength_style = self.strength.get_style_context()
-        if result.label == "Strong":
-            strength_style.add_class("strong")
-            strength_style.remove_class("weak")
-            self.meter.get_style_context().remove_class("weak")
-        else:
-            strength_style.add_class("weak")
-            strength_style.remove_class("strong")
-            self.meter.get_style_context().add_class("weak")
+        self._paint_strength(result.label)
         self.bits.set_text(result.bits_label)
         self.meter.set_fraction(result.fraction)
         self.set_note(result.note)
         self.copy_button.set_sensitive(True)
         self.save_button.set_sensitive(True)
+        self.reveal_button.set_sensitive(True)
+        self.regenerate_button.set_sensitive(True)
         if len(passwords) > 1:
             self.status.set_text("Name the ones you want to keep. The rest are gone when you close.")
         else:
             self.status.set_text("Name it, then save it. Otherwise it is gone when you close.")
+
+    def _masked_text(self, text: str) -> str:
+        return "\n".join("•" * max(len(line), 8) for line in text.splitlines())
+
+    def _refresh_result_display(self) -> None:
+        if not self.current:
+            self.buffer.set_text("")
+            self.reveal_button.set_label("Hide")
+            return
+        if self.result_revealed:
+            self.buffer.set_text(self.current)
+            self.reveal_button.set_label("Hide")
+        else:
+            self.buffer.set_text(self._masked_text(self.current))
+            self.reveal_button.set_label("Show")
+
+    def on_toggle_result_reveal(self, *_args) -> None:
+        if not self.current:
+            return
+        self.result_revealed = not self.result_revealed
+        self._refresh_result_display()
 
     def _show_single(self) -> None:
         self.batch_scroll.hide()
@@ -1918,19 +2089,28 @@ class PasswordWindow:
     def _show_batch(self, passwords: list[str]) -> None:
         for child in list(self.batch_box.get_children()):
             self.batch_box.remove(child)
-        for password in passwords:
-            self.batch_box.pack_start(self._batch_row(password), False, False, 0)
+        for index, password in enumerate(passwords):
+            self.batch_box.pack_start(self._batch_row(index, password), False, False, 0)
         self.single_box.hide()
         self.single_box.set_no_show_all(True)
         self.batch_scroll.set_no_show_all(False)
         self.batch_scroll.show_all()
 
-    def _batch_row(self, password: str):
+    def _batch_row(self, index: int, password: str):
         gtk = self.gtk
         row = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=6)
-        secret = gtk.Label(label=password, xalign=0)
+        row.get_style_context().add_class("entry-card")
+        for setter in (
+            row.set_margin_top,
+            row.set_margin_bottom,
+            row.set_margin_start,
+            row.set_margin_end,
+        ):
+            setter(10)
+        state = {"revealed": False, "password": password}
+        secret = gtk.Label(label=self._masked_text(password), xalign=0)
         secret.set_line_wrap(True)
-        secret.set_selectable(True)
+        secret.set_selectable(False)
         secret.set_max_width_chars(42)
         secret.get_style_context().add_class("saved-name")
         name = gtk.Entry()
@@ -1940,21 +2120,63 @@ class PasswordWindow:
         note.set_line_wrap(True)
         note.get_style_context().add_class("hint")
         actions = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
+
+        def current_password() -> str:
+            return state["password"]
+
+        def paint_secret() -> None:
+            if state["revealed"]:
+                secret.set_text(state["password"])
+                secret.set_selectable(True)
+                show.set_label("Hide")
+            else:
+                secret.set_text(self._masked_text(state["password"]))
+                secret.set_selectable(False)
+                show.set_label("Show")
+
+        def toggle_show(*_args) -> None:
+            state["revealed"] = not state["revealed"]
+            paint_secret()
+
+        def regenerate_one(*_args) -> None:
+            kwargs = self._generate_kwargs()
+            kwargs["count"] = 1
+            try:
+                result = generate(**kwargs)
+            except ValueError as exc:
+                note.set_text(str(exc))
+                return
+            fresh = result.text.splitlines()[0] if result.text else ""
+            if not fresh:
+                return
+            state["password"] = fresh
+            self.batch[index] = fresh
+            self.current = "\n".join(self.batch)
+            paint_secret()
+            note.set_text("Regenerated.")
+            self.status.set_text("Regenerated one password. Name and save the ones you want.")
+
+        show = gtk.Button(label="Show")
+        show.get_style_context().add_class("secondary")
+        show.connect("clicked", toggle_show)
         copy = gtk.Button(label="Copy")
         copy.get_style_context().add_class("primary")
-        copy.connect("clicked", lambda *_args, text=password: self.on_copy_text(text))
+        copy.connect("clicked", lambda *_args: self.on_copy_text(current_password()))
+        again = gtk.Button(label="Regenerate")
+        again.get_style_context().add_class("secondary")
+        again.connect("clicked", regenerate_one)
         save = gtk.Button(label="Save")
         save.get_style_context().add_class("secondary")
         save.connect(
             "clicked",
-            lambda *_args, text=password, entry=name, status=note: self.on_save_one(text, entry, status),
+            lambda *_args: self.on_save_one(current_password(), name, note),
         )
         name.connect(
             "activate",
-            lambda *_args, text=password, entry=name, status=note: self.on_save_one(text, entry, status),
+            lambda *_args: self.on_save_one(current_password(), name, note),
         )
-        actions.pack_start(copy, True, True, 0)
-        actions.pack_start(save, True, True, 0)
+        for button in (show, copy, again, save):
+            actions.pack_start(button, True, True, 0)
         row.pack_start(secret, False, False, 0)
         row.pack_start(name, False, False, 0)
         row.pack_start(actions, False, False, 0)
