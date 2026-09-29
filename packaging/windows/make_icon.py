@@ -7,8 +7,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-GREEN = (0x0E, 0x6B, 0x52, 255)
-CREAM = (0xF7, 0xF3, 0xEC, 255)
+GREEN = (0x08, 0x77, 0x5B, 255)
+CREAM = (0xF5, 0xF4, 0xEF, 255)
 SIZES = (16, 24, 32, 48, 64, 128, 256)
 HERE = Path(__file__).resolve().parent
 

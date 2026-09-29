@@ -46,192 +46,273 @@ WRAP_LEN = 60
 
 STYLES = """
 window.app {
-  background-color: #ebe4d8;
-  color: #1c1915;
-  font-family: "DejaVu Sans", sans-serif;
+  background-color: #F5F4EF;
+  color: #202522;
+  font-family: "Source Sans 3", "DejaVu Sans", sans-serif;
+}
+.header-bar {
+  background-color: transparent;
+}
+.brand {
+  font-family: "Source Serif 4", "DejaVu Serif", Palatino, serif;
+  font-size: 22px;
+  font-weight: 700;
+  color: #202522;
+}
+.section-title {
+  font-family: "Source Serif 4", "DejaVu Serif", Palatino, serif;
+  font-size: 28px;
+  font-weight: 700;
+  color: #202522;
 }
 .card {
-  background-color: #f7f3ec;
+  background-color: #FFFFFF;
   background-image: none;
-  border: 1px solid #ddd4c6;
-  border-radius: 18px;
+  border: 1px solid #E2E4DF;
+  border-radius: 12px;
+}
+.entry-card {
+  background-color: #F8F8F5;
+  border: 1px solid #E2E4DF;
+  border-radius: 10px;
 }
 .eyebrow {
-  color: #0e6b52;
+  color: #08775B;
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 1.5px;
+  letter-spacing: 1.2px;
 }
 .title {
-  font-family: "DejaVu Serif", Palatino, serif;
-  font-size: 32px;
+  font-family: "Source Serif 4", "DejaVu Serif", Palatino, serif;
+  font-size: 28px;
   font-weight: 700;
 }
 .lede, .hint, .footer, .caption {
-  color: #5f584e;
+  color: #737B75;
+}
+.vault-status {
+  font-size: 13px;
+  font-weight: 600;
+  color: #737B75;
+}
+.vault-status.unlocked {
+  color: #08775B;
+}
+.vault-status.locked {
+  color: #A15C12;
+}
+.stat-value {
+  font-family: "Source Serif 4", "DejaVu Serif", Palatino, serif;
+  font-size: 32px;
+  font-weight: 700;
+  color: #202522;
+}
+.stat-label {
+  color: #737B75;
+  font-size: 13px;
 }
 .saved-name {
   font-weight: 700;
-  color: #1c1915;
+  color: #202522;
 }
 .recovery-key, .pairing-code {
-  font-family: "DejaVu Sans Mono", monospace;
+  font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace;
   font-size: 16px;
   font-weight: 700;
-  color: #1c1915;
+  color: #202522;
 }
 .pairing-code {
   font-size: 28px;
 }
-.strength.strong { color: #0e6b52; font-weight: 700; }
-.strength.weak { color: #8a4b08; font-weight: 700; }
-.bits { font-size: 15px; }
+.strength.strong { color: #08775B; font-weight: 700; }
+.strength.weak { color: #A15C12; font-weight: 700; }
+.bits { font-size: 14px; color: #737B75; }
 .slab {
-  background-color: #171512;
-  border-radius: 12px;
+  background-color: #1A1F1D;
+  border-radius: 10px;
 }
 .slab text {
-  color: #f6f1e7;
-  background-color: #171512;
-  font-family: "DejaVu Sans Mono", monospace;
+  color: #F5F4EF;
+  background-color: #1A1F1D;
+  font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace;
   font-size: 16px;
 }
-button.mode, button.chip, button.primary, button.secondary {
+button.mode, button.chip, button.primary, button.secondary, button.nav {
   background-image: none;
   box-shadow: none;
   text-shadow: none;
-  border-radius: 999px;
-  border: 1px solid #d9d0c3;
+  border-radius: 10px;
+  border: 1px solid #E2E4DF;
   padding: 8px 14px;
-  font-weight: 700;
+  font-weight: 600;
 }
-button.mode.off, button.chip.off, button.secondary {
-  background-color: #f3efe8;
-  color: #6d655c;
-  border-color: #d9d0c3;
+button.nav {
+  padding: 10px 12px;
 }
-button.mode.off label, button.chip.off label, button.secondary label {
-  color: #6d655c;
+button.mode.off, button.chip.off, button.secondary, button.nav.off {
+  background-color: #F8F8F5;
+  color: #737B75;
+  border-color: #E2E4DF;
 }
-button.mode.on, button.chip.on, button.primary {
-  background-color: #0e6b52;
+button.mode.off label, button.chip.off label, button.secondary label, button.nav.off label {
+  color: #737B75;
+}
+button.mode.on, button.chip.on, button.primary, button.nav.on {
+  background-color: #08775B;
   color: #ffffff;
-  border-color: #0e6b52;
+  border-color: #08775B;
 }
-button.mode.on label, button.chip.on label, button.primary label {
+button.mode.on:hover, button.chip.on:hover, button.primary:hover, button.nav.on:hover {
+  background-color: #065B46;
+  border-color: #065B46;
+}
+button.mode.on label, button.chip.on label, button.primary label, button.nav.on label {
   color: #ffffff;
 }
 button.note-danger {
-  color: #8d2c2c;
+  color: #9C3B3B;
 }
-.danger { color: #8d2c2c; }
+.danger { color: #9C3B3B; }
+.settings-block {
+  border-top: 1px solid #E2E4DF;
+  padding-top: 12px;
+  margin-top: 4px;
+}
 progressbar trough {
-  min-height: 10px;
-  background-color: #e4ddd2;
+  min-height: 8px;
+  background-color: #E2E4DF;
   border-radius: 999px;
   border: none;
 }
 progressbar progress {
   background-image: none;
-  background-color: #0e6b52;
+  background-color: #08775B;
   border-radius: 999px;
   border: none;
 }
 progressbar.weak progress {
-  background-color: #8a4b08;
+  background-color: #A15C12;
+}
+entry, spinbutton {
+  border-radius: 8px;
+  border-color: #E2E4DF;
+  min-height: 34px;
 }
 window.app.dark {
-  background-color: #141210;
-  color: #f3efe6;
+  background-color: #141816;
+  color: #E8EBE8;
 }
 window.app.dark .card {
-  background-color: #221f1b;
-  border-color: #3a342c;
+  background-color: #1E2321;
+  border-color: #2F3633;
 }
+window.app.dark .entry-card {
+  background-color: #191E1C;
+  border-color: #2F3633;
+}
+window.app.dark .brand,
+window.app.dark .section-title,
 window.app.dark .title,
 window.app.dark .saved-name,
 window.app.dark .recovery-key,
 window.app.dark .pairing-code,
+window.app.dark .stat-value,
 window.app.dark .bits {
-  color: #f3efe6;
+  color: #E8EBE8;
 }
 window.app.dark .lede,
 window.app.dark .hint,
 window.app.dark .footer,
-window.app.dark .caption {
-  color: #b7aea0;
+window.app.dark .caption,
+window.app.dark .stat-label,
+window.app.dark .vault-status {
+  color: #9AA39D;
 }
 window.app.dark .eyebrow,
-window.app.dark .strength.strong {
-  color: #7dcea0;
+window.app.dark .strength.strong,
+window.app.dark .vault-status.unlocked {
+  color: #5FBF9A;
 }
 window.app.dark .strength.weak,
 window.app.dark .danger,
-window.app.dark button.note-danger {
-  color: #f0a8a0;
+window.app.dark button.note-danger,
+window.app.dark .vault-status.locked {
+  color: #E0A070;
 }
 window.app.dark button.mode.off,
 window.app.dark button.chip.off,
-window.app.dark button.secondary {
-  background-color: #2c2823;
-  color: #b7aea0;
-  border-color: #3a342c;
+window.app.dark button.secondary,
+window.app.dark button.nav.off {
+  background-color: #252B28;
+  color: #9AA39D;
+  border-color: #2F3633;
 }
 window.app.dark button.mode.off label,
 window.app.dark button.chip.off label,
-window.app.dark button.secondary label {
-  color: #b7aea0;
+window.app.dark button.secondary label,
+window.app.dark button.nav.off label {
+  color: #9AA39D;
+}
+window.app.dark button.mode.on,
+window.app.dark button.chip.on,
+window.app.dark button.primary,
+window.app.dark button.nav.on {
+  background-color: #08775B;
+  border-color: #08775B;
+}
+window.app.dark .settings-block {
+  border-top-color: #2F3633;
 }
 window.app.dark entry {
-  background-color: #141210;
-  color: #f3efe6;
-  border-color: #3a342c;
+  background-color: #141816;
+  color: #E8EBE8;
+  border-color: #2F3633;
 }
 window.app.dark entry selection {
-  background-color: #0e6b52;
+  background-color: #08775B;
   color: #ffffff;
 }
 window.app.dark progressbar trough {
-  background-color: #3a342c;
+  background-color: #2F3633;
 }
 window.app.dark textview {
-  background-color: #141210;
-  color: #f3efe6;
+  background-color: #141816;
+  color: #E8EBE8;
 }
 window.app.dark textview text {
-  background-color: #141210;
-  color: #f3efe6;
+  background-color: #141816;
+  color: #E8EBE8;
 }
 window.app.dark .slab,
 window.app.dark .slab text {
-  background-color: #0c0b0a;
-  color: #f6f1e7;
+  background-color: #0C0F0E;
+  color: #E8EBE8;
 }
 window.app.dark spinbutton,
 window.app.dark spinbutton entry {
-  background-color: #141210;
-  color: #f3efe6;
+  background-color: #141816;
+  color: #E8EBE8;
 }
 window.app.dark spinbutton button {
   background-image: none;
-  background-color: #2c2823;
-  color: #f3efe6;
-  border-color: #3a342c;
+  background-color: #252B28;
+  color: #E8EBE8;
+  border-color: #2F3633;
 }
 window.app.dark spinbutton button label {
-  color: #f3efe6;
+  color: #E8EBE8;
 }
 window.app.dark scrollbar trough {
-  background-color: #1c1916;
+  background-color: #1A1F1D;
 }
 window.app.dark scrollbar slider {
-  background-color: #4a433a;
+  background-color: #3A433F;
 }
 window.app.dark checkbutton label {
-  color: #f3efe6;
+  color: #E8EBE8;
 }
 window.app.dark progressbar.weak progress {
-  background-color: #e0a15a;
+  background-color: #C9843A;
 }
 """
 
@@ -1073,8 +1154,8 @@ class PasswordWindow:
         self.current = ""
 
         self.window = gtk.Window(title="Local Password")
-        self.window.set_default_size(960, 680)
-        self.window.set_size_request(720, 560)
+        self.window.set_default_size(1040, 720)
+        self.window.set_size_request(760, 580)
         self.window.get_style_context().add_class("app")
         for icon in _icon_candidates():
             if icon.is_file():
@@ -1084,50 +1165,76 @@ class PasswordWindow:
                     pass
                 break
 
-        root = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=16)
-        root.set_margin_top(24)
-        root.set_margin_bottom(20)
-        root.set_margin_start(24)
-        root.set_margin_end(24)
+        root = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=14)
+        root.set_margin_top(20)
+        root.set_margin_bottom(16)
+        root.set_margin_start(20)
+        root.set_margin_end(20)
         self.window.add(root)
 
-        eyebrow = gtk.Label(label="ON THIS COMPUTER", xalign=0)
-        eyebrow.get_style_context().add_class("eyebrow")
-        title = gtk.Label(label="Local Password", xalign=0)
-        title.set_hexpand(True)
-        title.set_xalign(0)
-        title.get_style_context().add_class("title")
         self.dark = load_dark_mode()
-        heading = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=12)
-        heading.pack_start(title, True, True, 0)
-        lede = gtk.Label(
-            label=(
-                "Create a password here, or open Saved to use the ones you already kept. "
-                "Dark mode and sending the vault are in Settings. "
-                "A passphrase or a recovery key opens all of them."
-            ),
-            xalign=0,
-        )
-        lede.set_line_wrap(True)
-        lede.get_style_context().add_class("lede")
-        root.pack_start(eyebrow, False, False, 0)
-        root.pack_start(heading, False, False, 0)
-        root.pack_start(lede, False, False, 0)
+        self.revealed_names: set[str] = set()
 
-        nav = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
+        header = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=6)
+        header.get_style_context().add_class("header-bar")
+        top = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=12)
+        brand_row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=10)
+        logo = self._brand_logo()
+        if logo is not None:
+            brand_row.pack_start(logo, False, False, 0)
+        brand = gtk.Label(label="Local Password", xalign=0)
+        brand.get_style_context().add_class("brand")
+        brand_row.pack_start(brand, False, False, 0)
+        brand_row.set_hexpand(True)
+        top.pack_start(brand_row, True, True, 0)
+
+        status_box = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
+        self.vault_status = gtk.Label(label="No vault yet", xalign=1)
+        self.vault_status.get_style_context().add_class("vault-status")
+        self.header_lock_button = gtk.Button(label="Unlock")
+        self.header_lock_button.get_style_context().add_class("secondary")
+        self.header_lock_button.set_no_show_all(True)
+        self.header_lock_button.hide()
+        self.header_lock_button.connect("clicked", self.on_lock_toggle)
+        status_box.pack_start(self.vault_status, False, False, 0)
+        status_box.pack_start(self.header_lock_button, False, False, 0)
+        top.pack_start(status_box, False, False, 0)
+        header.pack_start(top, False, False, 0)
+
+        self.page_title = gtk.Label(label="Dashboard", xalign=0)
+        self.page_title.get_style_context().add_class("section-title")
+        header.pack_start(self.page_title, False, False, 0)
+        root.pack_start(header, False, False, 0)
+
+        nav = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=6)
         nav.set_homogeneous(True)
-        self.create_tab = gtk.Button(label="Create")
+        self.dashboard_tab = gtk.Button(label="Dashboard")
+        self.create_tab = gtk.Button(label="Generate")
         self.saved_tab = gtk.Button(label="Saved")
         self.settings_tab = gtk.Button(label="Settings")
-        for button in (self.create_tab, self.saved_tab, self.settings_tab):
-            button.get_style_context().add_class("mode")
+        for button in (
+            self.dashboard_tab,
+            self.create_tab,
+            self.saved_tab,
+            self.settings_tab,
+        ):
+            button.get_style_context().add_class("nav")
             nav.pack_start(button, True, True, 0)
-        self.create_tab.connect("clicked", lambda *_args: self.show_section("create"))
+        self.dashboard_tab.connect("clicked", lambda *_args: self.show_section("dashboard"))
+        self.create_tab.connect("clicked", lambda *_args: self.show_section("generate"))
         self.saved_tab.connect("clicked", lambda *_args: self.show_section("saved"))
         self.settings_tab.connect("clicked", lambda *_args: self.show_section("settings"))
         root.pack_start(nav, False, False, 0)
 
-        columns = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=16)
+        dashboard_frame, dashboard_inner = self._card()
+        self.dashboard_view = dashboard_frame
+        self.dashboard_view.set_vexpand(True)
+        self.dashboard_view.set_no_show_all(True)
+        self.dashboard_view.hide()
+        root.pack_start(self.dashboard_view, True, True, 0)
+        self._build_dashboard(dashboard_inner)
+
+        columns = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=14)
         columns.set_vexpand(True)
         self.create_view = columns
         root.pack_start(self.create_view, True, True, 0)
@@ -1207,9 +1314,160 @@ class PasswordWindow:
             inner.set_margin_start,
             inner.set_margin_end,
         ):
-            setter(16)
+            setter(18)
         outer.pack_start(inner, True, True, 0)
         return outer, inner
+
+    def _brand_logo(self):
+        gtk = self.gtk
+        try:
+            from gi.repository import GdkPixbuf
+        except Exception:
+            return None
+        for path in _icon_candidates():
+            if not path.is_file() or path.suffix.lower() != ".png":
+                continue
+            try:
+                pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(str(path), 28, 28, True)
+            except Exception:
+                continue
+            return gtk.Image.new_from_pixbuf(pixbuf)
+        return None
+
+    def _build_dashboard(self, page) -> None:
+        gtk = self.gtk
+        eyebrow = gtk.Label(label="ON THIS COMPUTER", xalign=0)
+        eyebrow.get_style_context().add_class("eyebrow")
+        page.pack_start(eyebrow, False, False, 0)
+
+        self.dashboard_welcome = gtk.Label(label="Welcome to Local Password", xalign=0)
+        self.dashboard_welcome.get_style_context().add_class("section-title")
+        page.pack_start(self.dashboard_welcome, False, False, 0)
+
+        self.dashboard_lede = gtk.Label(
+            label=(
+                "Generate a strong password, save it under a name, and keep the vault locked "
+                "when you step away. Everything stays on this computer."
+            ),
+            xalign=0,
+        )
+        self.dashboard_lede.set_line_wrap(True)
+        self.dashboard_lede.get_style_context().add_class("lede")
+        page.pack_start(self.dashboard_lede, False, False, 0)
+
+        stats = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=12)
+        stats.set_homogeneous(True)
+        saved_card, saved_inner = self._card()
+        saved_card.get_style_context().remove_class("card")
+        saved_card.get_style_context().add_class("entry-card")
+        self.dashboard_count = gtk.Label(label="0", xalign=0)
+        self.dashboard_count.get_style_context().add_class("stat-value")
+        saved_caption = gtk.Label(label="Saved passwords", xalign=0)
+        saved_caption.get_style_context().add_class("stat-label")
+        saved_inner.pack_start(self.dashboard_count, False, False, 0)
+        saved_inner.pack_start(saved_caption, False, False, 0)
+        stats.pack_start(saved_card, True, True, 0)
+
+        status_card, status_inner = self._card()
+        status_card.get_style_context().remove_class("card")
+        status_card.get_style_context().add_class("entry-card")
+        self.dashboard_lock_value = gtk.Label(label="No vault", xalign=0)
+        self.dashboard_lock_value.get_style_context().add_class("stat-value")
+        lock_caption = gtk.Label(label="Vault status", xalign=0)
+        lock_caption.get_style_context().add_class("stat-label")
+        status_inner.pack_start(self.dashboard_lock_value, False, False, 0)
+        status_inner.pack_start(lock_caption, False, False, 0)
+        stats.pack_start(status_card, True, True, 0)
+        page.pack_start(stats, False, False, 0)
+
+        actions = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
+        self.dashboard_generate = gtk.Button(label="Generate password")
+        self.dashboard_generate.get_style_context().add_class("primary")
+        self.dashboard_generate.connect("clicked", lambda *_: self.show_section("generate"))
+        self.dashboard_open_saved = gtk.Button(label="Open vault")
+        self.dashboard_open_saved.get_style_context().add_class("secondary")
+        self.dashboard_open_saved.connect("clicked", lambda *_: self.show_section("saved"))
+        actions.pack_start(self.dashboard_generate, False, False, 0)
+        actions.pack_start(self.dashboard_open_saved, False, False, 0)
+        page.pack_start(actions, False, False, 0)
+
+        recent_label = gtk.Label(label="Recently saved", xalign=0)
+        recent_label.get_style_context().add_class("eyebrow")
+        page.pack_start(recent_label, False, False, 0)
+        self.dashboard_recent = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=8)
+        page.pack_start(self.dashboard_recent, False, False, 0)
+        self.dashboard_empty = gtk.Label(
+            label=(
+                "No passwords are saved yet. Open Generate, create one, give it a name, "
+                "then Save. A passphrase will lock the vault."
+            ),
+            xalign=0,
+        )
+        self.dashboard_empty.set_line_wrap(True)
+        self.dashboard_empty.get_style_context().add_class("hint")
+        page.pack_start(self.dashboard_empty, False, False, 0)
+
+    def _refresh_dashboard(self) -> None:
+        gtk = self.gtk
+        for child in list(self.dashboard_recent.get_children()):
+            self.dashboard_recent.remove(child)
+        if self.locked and self.vault_key is None:
+            self.dashboard_welcome.set_text("Your vault is locked")
+            self.dashboard_lede.set_text(
+                "Enter your passphrase or recovery key to open saved passwords. "
+                "Generate still works while the vault stays locked."
+            )
+            self.dashboard_count.set_text("—")
+            self.dashboard_lock_value.set_text("Locked")
+            self.dashboard_empty.set_text(
+                "Unlock from the header, or open Saved, to see the names you have kept."
+            )
+            self.dashboard_empty.show()
+            self.dashboard_recent.hide()
+            return
+        count = len(self.saved)
+        self.dashboard_count.set_text(str(count))
+        if count == 0:
+            self.dashboard_welcome.set_text("Welcome to Local Password")
+            self.dashboard_lede.set_text(
+                "Generate a strong password, save it under a name, and keep the vault locked "
+                "when you step away. Everything stays on this computer."
+            )
+            self.dashboard_lock_value.set_text("No vault" if not vault_path().is_file() else "Empty")
+            self.dashboard_empty.set_text(
+                "No passwords are saved yet. Open Generate, create one, give it a name, "
+                "then Save. A passphrase will lock the vault."
+            )
+            self.dashboard_empty.show()
+            self.dashboard_recent.hide()
+            return
+        self.dashboard_welcome.set_text("Ready when you are")
+        self.dashboard_lede.set_text(
+            "Open Saved to copy a password, or Generate to make another. "
+            "Passwords stay masked here."
+        )
+        self.dashboard_lock_value.set_text("Unlocked")
+        self.dashboard_empty.hide()
+        self.dashboard_recent.show()
+        for item in self.saved[-5:][::-1]:
+            row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
+            row.get_style_context().add_class("entry-card")
+            for setter in (
+                row.set_margin_top,
+                row.set_margin_bottom,
+                row.set_margin_start,
+                row.set_margin_end,
+            ):
+                setter(10)
+            name = gtk.Label(label=item.name, xalign=0)
+            name.set_hexpand(True)
+            name.get_style_context().add_class("saved-name")
+            masked = gtk.Label(label="••••••••", xalign=1)
+            masked.get_style_context().add_class("hint")
+            row.pack_start(name, True, True, 0)
+            row.pack_start(masked, False, False, 0)
+            self.dashboard_recent.pack_start(row, False, False, 0)
+        self.dashboard_recent.show_all()
 
     def _build_controls(self, controls) -> None:
         gtk = self.gtk
@@ -1391,22 +1649,48 @@ class PasswordWindow:
     def _build_settings(self, page) -> None:
         gtk = self.gtk
         heading = gtk.Label(label="Settings", xalign=0)
-        heading.get_style_context().add_class("eyebrow")
+        heading.get_style_context().add_class("section-title")
         page.pack_start(heading, False, False, 0)
         lede = gtk.Label(
-            label="Appearance and moving the vault stay here. The passphrase is not sent.",
+            label="Appearance and vault transfer. More security options arrive in a later stage.",
             xalign=0,
         )
         lede.set_line_wrap(True)
         lede.get_style_context().add_class("hint")
         page.pack_start(lede, False, False, 0)
 
+        appearance = gtk.Label(label="APPEARANCE", xalign=0)
+        appearance.get_style_context().add_class("eyebrow")
+        page.pack_start(appearance, False, False, 0)
+        appearance_hint = gtk.Label(
+            label="Dark mode softens the window. The choice stays on this computer.",
+            xalign=0,
+        )
+        appearance_hint.set_line_wrap(True)
+        appearance_hint.get_style_context().add_class("hint")
+        page.pack_start(appearance_hint, False, False, 0)
         self.dark_button = gtk.Button(label=chip_label("Dark", self.dark))
         self.dark_button.get_style_context().add_class("chip")
         self.dark_button.set_halign(gtk.Align.START)
         self.dark_button.connect("clicked", self.on_toggle_dark)
         page.pack_start(self.dark_button, False, False, 0)
 
+        transfer = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=10)
+        transfer.get_style_context().add_class("settings-block")
+        transfer_label = gtk.Label(label="VAULT TRANSFER", xalign=0)
+        transfer_label.get_style_context().add_class("eyebrow")
+        transfer.pack_start(transfer_label, False, False, 0)
+        sync_hint = gtk.Label(
+            label=(
+                "Send vault shares the encrypted file with another device on the same Wi-Fi. "
+                "The passphrase stays here. Being on the same network does not by itself "
+                "make the transfer private to you alone."
+            ),
+            xalign=0,
+        )
+        sync_hint.set_line_wrap(True)
+        sync_hint.get_style_context().add_class("hint")
+        transfer.pack_start(sync_hint, False, False, 0)
         sync_row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
         self.send_button = gtk.Button(label="Send vault")
         self.receive_button = gtk.Button(label="Receive vault")
@@ -1415,30 +1699,28 @@ class PasswordWindow:
             sync_row.pack_start(button, True, True, 0)
         self.send_button.connect("clicked", self.on_send_vault)
         self.receive_button.connect("clicked", self.on_receive_vault)
-        page.pack_start(sync_row, False, False, 0)
-        sync_hint = gtk.Label(
-            label=(
-                "Send vault shares the encrypted file with another device on the same Wi-Fi. "
-                "The passphrase stays here."
-            ),
-            xalign=0,
-        )
-        sync_hint.set_line_wrap(True)
-        sync_hint.get_style_context().add_class("hint")
-        page.pack_start(sync_hint, False, False, 0)
+        transfer.pack_start(sync_row, False, False, 0)
         self.sync_status = gtk.Label(label="", xalign=0)
         self.sync_status.set_line_wrap(True)
         self.sync_status.get_style_context().add_class("hint")
-        page.pack_start(self.sync_status, False, False, 0)
+        transfer.pack_start(self.sync_status, False, False, 0)
+        page.pack_start(transfer, False, False, 0)
 
     def _build_manager(self, page) -> None:
         gtk = self.gtk
         self.saved_heading = gtk.Label(label="Saved", xalign=0)
-        self.saved_heading.get_style_context().add_class("eyebrow")
+        self.saved_heading.get_style_context().add_class("section-title")
         page.pack_start(self.saved_heading, False, False, 0)
+        saved_lede = gtk.Label(
+            label="Passwords stay masked until you show one. Copy when you need it, then hide it again.",
+            xalign=0,
+        )
+        saved_lede.set_line_wrap(True)
+        saved_lede.get_style_context().add_class("hint")
+        page.pack_start(saved_lede, False, False, 0)
 
         self.find_entry = gtk.Entry()
-        self.find_entry.set_placeholder_text("Find by name")
+        self.find_entry.set_placeholder_text("Search by name")
         self.find_entry.connect("changed", lambda *_args: self._refresh_saved_rows())
         page.pack_start(self.find_entry, False, False, 0)
 
@@ -1467,9 +1749,9 @@ class PasswordWindow:
         self.save_ready = False
         self.locked = False
         self.vault_key: VaultKey | None = None
-        self.section = "create"
+        self.section = "dashboard"
         self._prepare_saved()
-        self.show_section("saved" if self.locked else "create")
+        self.show_section("dashboard")
 
     def _labeled(self, caption: str, control):
         row = self.gtk.Box(orientation=self.gtk.Orientation.VERTICAL, spacing=4)
@@ -1528,14 +1810,23 @@ class PasswordWindow:
         self._style_mode_buttons()
 
     def show_section(self, section: str) -> None:
-        """Show Create, Saved, or Settings. Hidden pages stay hidden after show_all."""
-        if section not in ("saved", "settings"):
-            section = "create"
+        """Show Dashboard, Generate, Saved, or Settings. Hidden pages stay hidden after show_all."""
+        if section == "create":
+            section = "generate"
+        if section not in ("dashboard", "generate", "saved", "settings"):
+            section = "dashboard"
         self.section = section
         views = {
-            "create": self.create_view,
+            "dashboard": self.dashboard_view,
+            "generate": self.create_view,
             "saved": self.saved_view,
             "settings": self.settings_view,
+        }
+        titles = {
+            "dashboard": "Dashboard",
+            "generate": "Generate",
+            "saved": "Saved",
+            "settings": "Settings",
         }
         for name, view in views.items():
             if name == section:
@@ -1544,13 +1835,18 @@ class PasswordWindow:
             else:
                 view.set_no_show_all(True)
                 view.hide()
+        self.page_title.set_text(titles[section])
         if section == "saved":
             self._refresh_saved_rows()
             self._update_lock_button()
-        elif section == "create":
+        elif section == "generate":
             self.apply_mode()
+        elif section == "dashboard":
+            self._refresh_dashboard()
+            self._update_lock_button()
         for button, name in (
-            (self.create_tab, "create"),
+            (self.dashboard_tab, "dashboard"),
+            (self.create_tab, "generate"),
             (self.saved_tab, "saved"),
             (self.settings_tab, "settings"),
         ):
@@ -1751,7 +2047,7 @@ class PasswordWindow:
             self.saved_heading.set_text("Saved")
             self.saved_heading.show()
             self.manager_message.set_text(
-                "Nothing saved yet. Create a password, name it, and save it."
+                "Nothing saved yet. Open Generate, create a password, name it, and save it."
             )
             self.manager_message.show()
             return
@@ -1777,19 +2073,32 @@ class PasswordWindow:
 
     def _saved_row(self, item: SavedPassword):
         gtk = self.gtk
+        shell = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=0)
+        shell.get_style_context().add_class("entry-card")
         row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
+        for setter in (
+            row.set_margin_top,
+            row.set_margin_bottom,
+            row.set_margin_start,
+            row.set_margin_end,
+        ):
+            setter(10)
         text = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=2)
         name = gtk.Label(label=item.name, xalign=0)
         name.set_halign(gtk.Align.START)
         name.get_style_context().add_class("saved-name")
-        secret = gtk.Label(label=item.password, xalign=0)
+        shown = item.name in self.revealed_names
+        secret = gtk.Label(label=item.password if shown else "••••••••••••", xalign=0)
         secret.set_line_wrap(True)
-        secret.set_selectable(True)
+        secret.set_selectable(shown)
         secret.set_halign(gtk.Align.START)
         secret.get_style_context().add_class("hint")
         text.pack_start(name, False, False, 0)
         text.pack_start(secret, False, False, 0)
         text.set_hexpand(True)
+        show = gtk.Button(label="Hide" if shown else "Show")
+        show.get_style_context().add_class("secondary")
+        show.connect("clicked", lambda *_args, label=item.name: self.on_toggle_reveal(label))
         copy = gtk.Button(label="Copy")
         copy.get_style_context().add_class("primary")
         copy.connect("clicked", lambda *_args, password=item.password: self.on_copy_text(password))
@@ -1797,25 +2106,52 @@ class PasswordWindow:
         remove.get_style_context().add_class("secondary")
         remove.connect("clicked", lambda *_args, label=item.name: self.on_remove(label))
         row.pack_start(text, True, True, 0)
+        row.pack_start(show, False, False, 0)
         row.pack_start(copy, False, False, 0)
         row.pack_start(remove, False, False, 0)
-        return row
+        shell.pack_start(row, False, False, 0)
+        return shell
+
+    def on_toggle_reveal(self, name: str) -> None:
+        if name in self.revealed_names:
+            self.revealed_names.remove(name)
+        else:
+            self.revealed_names.add(name)
+        self._refresh_saved_rows()
 
     def _update_lock_button(self) -> None:
         style = self.lock_button.get_style_context()
+        header = self.header_lock_button.get_style_context()
+        status = self.vault_status.get_style_context()
+        status.remove_class("locked")
+        status.remove_class("unlocked")
         if self.vault_key is not None:
             self.lock_button.set_label("Lock")
             style.remove_class("primary")
             style.add_class("secondary")
             self.lock_button.show()
+            self.header_lock_button.set_label("Lock")
+            header.remove_class("primary")
+            header.add_class("secondary")
+            self.header_lock_button.show()
+            self.vault_status.set_text("Vault unlocked")
+            status.add_class("unlocked")
             return
         if self.locked:
             self.lock_button.set_label("Unlock")
             style.add_class("primary")
             style.remove_class("secondary")
             self.lock_button.show()
+            self.header_lock_button.set_label("Unlock")
+            header.add_class("primary")
+            header.remove_class("secondary")
+            self.header_lock_button.show()
+            self.vault_status.set_text("Vault locked")
+            status.add_class("locked")
             return
         self.lock_button.hide()
+        self.header_lock_button.hide()
+        self.vault_status.set_text("No vault yet")
 
     def _sync_note(self, text: str) -> bool:
         self.sync_status.set_text(text)
@@ -2200,11 +2536,17 @@ class PasswordWindow:
         if not self._ensure_vault_key():
             self._update_lock_button()
             return
-        self.show_section("saved")
+        self.revealed_names.clear()
+        self._update_lock_button()
+        if self.section == "dashboard":
+            self._refresh_dashboard()
+        else:
+            self.show_section("saved")
 
     def _lock_saved(self) -> None:
         self.vault_key = None
         self.saved = []
+        self.revealed_names.clear()
         self.locked = vault_path().exists() or saved_passwords_path().exists()
         self._refresh_saved_rows()
         if self.showing_saved:
@@ -2219,6 +2561,8 @@ class PasswordWindow:
             self.save_button.set_sensitive(False)
         self.status.set_text("Saved passwords are locked.")
         self._update_lock_button()
+        if self.section == "dashboard":
+            self._refresh_dashboard()
 
     def on_copy_text(self, text: str) -> None:
         if not text:
@@ -2282,9 +2626,12 @@ class PasswordWindow:
             self.status.set_text("Could not remove the saved password.")
             return
         self.saved = updated
+        self.revealed_names.discard(name)
         self.showing_saved = False
         self._refresh_saved_rows()
         self.status.set_text("Removed from this computer.")
+        if self.section == "dashboard":
+            self._refresh_dashboard()
 
 
 if __name__ == "__main__":
