@@ -7,8 +7,14 @@ import kotlin.math.roundToInt
 
 object Generator {
     const val STRONG_ENTROPY_BITS = 75.0
+    const val VERY_WEAK_ENTROPY_BITS = 28.0
+    const val WEAK_ENTROPY_BITS = 50.0
+    const val VERY_STRONG_ENTROPY_BITS = 100.0
     const val METER_CAP_BITS = 256.0
     private const val PUNCTUATION = "!\"#\$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+    private const val DIGITS = "0123456789"
+    private const val LOWER = "abcdefghijklmnopqrstuvwxyz"
+    private const val UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     private val random = SecureRandom()
 
     fun characterPool(digits: Boolean, letters: Boolean, symbols: Boolean): String {
@@ -62,6 +68,31 @@ object Generator {
     fun bitsLabel(bits: Double): String = "about ${bits.roundToInt()} bits"
 
     fun isStrong(bits: Double): Boolean = bits >= STRONG_ENTROPY_BITS
+
+    fun estimatedPoolSize(password: String): Int {
+        var size = 0
+        if (password.any { it in LOWER }) size += LOWER.length
+        if (password.any { it in UPPER }) size += UPPER.length
+        if (password.any { it in DIGITS }) size += DIGITS.length
+        if (password.any { it in PUNCTUATION }) size += PUNCTUATION.length
+        val extras = password.filter {
+            it !in LOWER && it !in UPPER && it !in DIGITS && it !in PUNCTUATION
+        }.toSet()
+        return size + extras.size
+    }
+
+    fun passwordStrengthBits(password: String): Double =
+        entropy(password.length, estimatedPoolSize(password))
+
+    fun strengthTier(entropyBits: Double): String = when {
+        entropyBits < VERY_WEAK_ENTROPY_BITS -> "Very weak"
+        entropyBits < WEAK_ENTROPY_BITS -> "Weak"
+        entropyBits < STRONG_ENTROPY_BITS -> "Fair"
+        entropyBits < VERY_STRONG_ENTROPY_BITS -> "Strong"
+        else -> "Very strong"
+    }
+
+    fun isWeakPassword(password: String): Boolean = !isStrong(passwordStrengthBits(password))
 
     private fun unique(value: String): String {
         val seen = LinkedHashSet<Char>()

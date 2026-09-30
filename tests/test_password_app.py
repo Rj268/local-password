@@ -303,6 +303,27 @@ class VaultTests(unittest.TestCase):
         self.assertIsNone(password_app.browseable_url("javascript:alert(1)"))
         self.assertIsNone(password_app.browseable_url("file:///tmp/x"))
 
+    def test_password_health_flags_weak_and_reused(self) -> None:
+        weak = password_app.SavedPassword("Old", "abc123")
+        strong = password_app.SavedPassword("Bank", "correct-horse-battery-staple-extra")
+        reused_a = password_app.SavedPassword("Email", "shared-secret-value")
+        reused_b = password_app.SavedPassword("Shop", "shared-secret-value")
+        items = [weak, strong, reused_a, reused_b]
+        self.assertTrue(password_app.entry_is_weak(weak.password))
+        self.assertFalse(password_app.entry_is_weak(strong.password))
+        self.assertEqual(password_app.weak_password_names(items), ["Old"])
+        warning = password_app.strength_warning_for(weak)
+        self.assertTrue(warning.endswith("bits)."))
+        self.assertIn("password", warning)
+        self.assertEqual(password_app.strength_warning_for(strong), "")
+        self.assertTrue(password_app.entry_needs_attention(weak, items))
+        self.assertFalse(password_app.entry_needs_attention(strong, items))
+        self.assertTrue(password_app.entry_needs_attention(reused_a, items))
+        weak_count, reuse_count, attention_count = password_app.password_health_summary(items)
+        self.assertEqual(weak_count, 1)
+        self.assertEqual(reuse_count, 1)
+        self.assertEqual(attention_count, 3)
+
     def test_change_vault_credentials_keeps_items_and_retires_old_secrets(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "saved.vault"

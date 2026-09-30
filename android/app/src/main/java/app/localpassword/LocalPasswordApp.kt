@@ -296,12 +296,16 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
         } else if (model.saved.isEmpty()) {
             Text("The vault is empty.", color = muted)
         } else {
-            val reuseCount = model.reusedPasswordCount()
+            val (weakCount, reuseCount, _) = model.passwordHealthSummary()
+            val healthBits = buildList {
+                if (weakCount > 0) add("$weakCount weak")
+                if (reuseCount > 0) add("$reuseCount reused")
+            }
             Text(
-                if (reuseCount > 0) {
-                    "Passwords stay masked until you show one. Copy username and Open URL when those fields are set. $reuseCount password${if (reuseCount == 1) " is" else "s are"} reused."
+                if (healthBits.isNotEmpty()) {
+                    "Passwords stay masked until you show one. Weak or reused passwords are called out. ${healthBits.joinToString(" · ")}."
                 } else {
-                    "Passwords stay masked until you show one. Copy username and Open URL when those fields are set."
+                    "Passwords stay masked until you show one. Weak or reused passwords are called out. Needs attention filters those rows."
                 },
                 color = muted,
                 fontSize = 13.sp,
@@ -316,6 +320,12 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { model.favoritesOnly = !model.favoritesOnly }) {
                     Text(if (model.favoritesOnly) "Favorites On" else "Favorites", color = if (model.favoritesOnly) Green else muted)
+                }
+                TextButton(onClick = { model.needsAttentionOnly = !model.needsAttentionOnly }) {
+                    Text(
+                        if (model.needsAttentionOnly) "Needs attention On" else "Needs attention",
+                        color = if (model.needsAttentionOnly) Green else muted,
+                    )
                 }
                 TextButton(onClick = { model.categoryFilter = "all" }) {
                     Text(if (model.categoryFilter == "all") "All categories" else "Clear category", color = muted)
@@ -341,6 +351,10 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
                         val meta = listOf(item.username, item.category, item.url).filter { it.isNotEmpty() }
                         if (meta.isNotEmpty()) {
                             Text(meta.joinToString(" · "), color = muted, fontSize = 13.sp)
+                        }
+                        val strength = model.strengthWarning(item)
+                        if (strength.isNotEmpty()) {
+                            Text(strength, color = Danger, fontSize = 13.sp)
                         }
                         val warning = model.reuseWarning(item)
                         if (warning.isNotEmpty()) {

@@ -59,6 +59,27 @@ class VaultTest {
     }
 
     @Test
+    fun weakPasswordHealthAndNeedsAttention() {
+        val weak = SavedPassword("Old", "abc123")
+        val strong = SavedPassword("Bank", "correct-horse-battery-staple-extra")
+        val reusedA = SavedPassword("Email", "shared-secret-value")
+        val reusedB = SavedPassword("Shop", "shared-secret-value")
+        val items = listOf(weak, strong, reusedA, reusedB)
+        assert(Generator.isWeakPassword(weak.password))
+        assert(!Generator.isWeakPassword(strong.password))
+        assertEquals(listOf("Old"), Vault.weakPasswordNames(items))
+        assert(Vault.strengthWarningFor(weak).startsWith("Very weak") || Vault.strengthWarningFor(weak).startsWith("Weak") || Vault.strengthWarningFor(weak).startsWith("Fair"))
+        assertEquals("", Vault.strengthWarningFor(strong))
+        assert(Vault.entryNeedsAttention(weak, items))
+        assert(!Vault.entryNeedsAttention(strong, items))
+        assert(Vault.entryNeedsAttention(reusedA, items))
+        val (weakCount, reuseCount, attentionCount) = Vault.passwordHealthSummary(items)
+        assertEquals(1, weakCount)
+        assertEquals(1, reuseCount)
+        assertEquals(3, attentionCount)
+    }
+
+    @Test
     fun changingPassphraseKeepsItemsAndRetiresOldSecrets() {
         val oldRecovery = "alpha bravo charlie delta echo foxtrot golf hotel"
         val (oldBlob, opened) = Vault.create(

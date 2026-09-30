@@ -603,6 +603,43 @@ def open_entry_url(url: str) -> bool:
     return bool(webbrowser.open(target))
 
 
+def entry_strength_bits(password: str) -> float:
+    """Estimate search-space bits for a saved password from its character classes."""
+    return generator.password_strength_bits(password)
+
+
+def entry_is_weak(password: str) -> bool:
+    """True when the estimate stays under the strong line (about 75 bits)."""
+    return not generator.is_strong_password(password)
+
+
+def strength_warning_for(item: SavedPassword) -> str:
+    """Short note when this entry's password is under the strong line."""
+    if not entry_is_weak(item.password):
+        return ""
+    bits = entry_strength_bits(item.password)
+    tier = generator.strength_tier(bits)
+    return f"{tier} password (about {round(bits)} bits)."
+
+
+def weak_password_names(items: list[SavedPassword]) -> list[str]:
+    """Names of entries whose passwords stay under the strong line."""
+    return [item.name for item in items if entry_is_weak(item.password)]
+
+
+def entry_needs_attention(item: SavedPassword, items: list[SavedPassword]) -> bool:
+    """True when the password is weak or reused across other entries."""
+    return entry_is_weak(item.password) or bool(reuse_warning_for(item, items))
+
+
+def password_health_summary(items: list[SavedPassword]) -> tuple[int, int, int]:
+    """Return (weak_count, reuse_count, attention_count) for unlocked vault items."""
+    weak_count = len(weak_password_names(items))
+    reuse_count = len(reused_password_groups(items))
+    attention_count = sum(1 for item in items if entry_needs_attention(item, items))
+    return weak_count, reuse_count, attention_count
+
+
 def data_directory() -> Path:
     """Per-user folder for saved passwords. Windows uses Local AppData."""
     data_home = os.environ.get("XDG_DATA_HOME")
@@ -2116,17 +2153,27 @@ class PasswordWindow:
             self.dashboard_empty.show()
             self.dashboard_recent.hide()
             return
-        reuse_count = len(reused_password_groups(self.saved))
+        weak_count, reuse_count, attention_count = password_health_summary(self.saved)
         self.dashboard_welcome.set_text("Ready when you are")
-        if reuse_count:
+        if attention_count:
+            parts = []
+            if weak_count:
+                parts.append(
+                    f"{weak_count} weak password{'s' if weak_count != 1 else ''}"
+                )
+            if reuse_count:
+                parts.append(
+                    f"{reuse_count} reused password{'s' if reuse_count != 1 else ''}"
+                )
+            detail = " and ".join(parts) if parts else f"{attention_count} needing attention"
+            verb = "needs" if attention_count == 1 else "need"
             self.dashboard_lede.set_text(
-                f"Open Saved to copy a password or username. "
-                f"{reuse_count} password{'s are' if reuse_count != 1 else ' is'} reused across entries."
+                f"Open Saved to review health. {detail} {verb} attention."
             )
         else:
             self.dashboard_lede.set_text(
                 "Open Saved to copy a password or username, or Generate to make another. "
-                "Passwords stay masked here."
+                "Saved passwords look strong and unique."
             )
         self.dashboard_lock_value.set_text("Unlocked")
         self.dashboard_empty.hide()
@@ -2144,10 +2191,17 @@ class PasswordWindow:
             name = gtk.Label(label=item.name, xalign=0)
             name.set_hexpand(True)
             name.get_style_context().add_class("saved-name")
-            masked = gtk.Label(label="••••••••", xalign=1)
-            masked.get_style_context().add_class("hint")
+            if entry_is_weak(item.password):
+                badge = gtk.Label(label="Weak", xalign=1)
+                badge.get_style_context().add_class("danger")
+            elif reuse_warning_for(item, self.saved):
+                badge = gtk.Label(label="Reused", xalign=1)
+                badge.get_style_context().add_class("danger")
+            else:
+                badge = gtk.Label(label="••••••••", xalign=1)
+                badge.get_style_context().add_class("hint")
             row.pack_start(name, True, True, 0)
-            row.pack_start(masked, False, False, 0)
+            row.pack_start(badge, False, False, 0)
             self.dashboard_recent.pack_start(row, False, False, 0)
         self.dashboard_recent.show_all()
 
@@ -2520,8 +2574,8 @@ class PasswordWindow:
         page.pack_start(self.saved_heading, False, False, 0)
         saved_lede = gtk.Label(
             label=(
-                "Passwords stay masked until you show one. Copy username and Open URL when those "
-                "fields are set. A reused password is called out on the entry."
+                "Passwords stay masked until you show one. Weak or reused passwords are called "
+                "out on the entry. Needs attention filters those rows."
             ),
             xalign=0,
         )
@@ -2538,6 +2592,9 @@ class PasswordWindow:
         self.favorites_only = self._chip("Favorites", False)
         self.favorites_only.connect("toggled", lambda *_args: self._refresh_saved_rows())
         filter_row.pack_start(self.favorites_only, False, False, 0)
+        self.needs_attention_only = self._chip("Needs attention", False)
+        self.needs_attention_only.connect("toggled", lambda *_args: self._refresh_saved_rows())
+        filter_row.pack_start(self.needs_attention_only, False, False, 0)
         self.category_combo = gtk.ComboBoxText()
         self.category_combo.append("all", "All categories")
         self.category_combo.set_active_id("all")
@@ -3011,24 +3068,37 @@ class PasswordWindow:
         self._refresh_category_filter()
         category = self.category_combo.get_active_id() or "all"
         favorites_only = self.favorites_only.get_active()
+        attention_only = self.needs_attention_only.get_active()
         matches = [
             item
             for item in self.saved
             if entry_matches(item, query)
             and (not favorites_only or item.favorite)
+            and (not attention_only or entry_needs_attention(item, self.saved))
             and (category == "all" or item.category == category)
         ]
-        matches.sort(key=lambda item: (not item.favorite, item.name.casefold()))
+        matches.sort(
+            key=lambda item: (
+                not entry_needs_attention(item, self.saved),
+                not item.favorite,
+                item.name.casefold(),
+            )
+        )
         count = len(self.saved)
-        reuse_count = len(reused_password_groups(self.saved))
+        weak_count, reuse_count, _attention = password_health_summary(self.saved)
         heading = "1 saved" if count == 1 else f"{count} saved"
+        if weak_count:
+            heading += f" · {weak_count} weak"
         if reuse_count:
             heading += f" · {reuse_count} reused"
         self.saved_heading.set_text(heading)
         self.saved_heading.show()
         if not matches:
             self.saved_scroll.hide()
-            self.manager_message.set_text("No saved password matches that search.")
+            if attention_only:
+                self.manager_message.set_text("No saved password needs attention for that filter.")
+            else:
+                self.manager_message.set_text("No saved password matches that search.")
             self.manager_message.show()
             return
         self.manager_message.set_text("")
@@ -3065,8 +3135,12 @@ class PasswordWindow:
             text.pack_start(meta, False, False, 0)
         else:
             text.pack_start(name, False, False, 0)
-        warning = reuse_warning_for(item, self.saved)
-        if warning:
+        for warning in (
+            strength_warning_for(item),
+            reuse_warning_for(item, self.saved),
+        ):
+            if not warning:
+                continue
             warn = gtk.Label(label=warning, xalign=0)
             warn.set_line_wrap(True)
             warn.set_halign(gtk.Align.START)

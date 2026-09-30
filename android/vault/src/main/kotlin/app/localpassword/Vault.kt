@@ -10,6 +10,7 @@ import java.util.Locale
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
+import kotlin.math.roundToInt
 
 /**
  * The same saved.vault file the computer app writes.
@@ -213,6 +214,26 @@ object Vault {
         // Reject other schemes (javascript:, file:, data:). Allow host:port.
         if (Regex("^[a-z][a-z0-9+.-]*:(?!\\d)").containsMatchIn(lowered)) return null
         return "https://$text"
+    }
+
+    fun strengthWarningFor(item: SavedPassword): String {
+        if (!Generator.isWeakPassword(item.password)) return ""
+        val bits = Generator.passwordStrengthBits(item.password)
+        val tier = Generator.strengthTier(bits)
+        return "$tier password (about ${bits.roundToInt()} bits)."
+    }
+
+    fun weakPasswordNames(items: List<SavedPassword>): List<String> =
+        items.filter { Generator.isWeakPassword(it.password) }.map { it.name }
+
+    fun entryNeedsAttention(item: SavedPassword, items: List<SavedPassword>): Boolean =
+        Generator.isWeakPassword(item.password) || reuseWarningFor(item, items).isNotEmpty()
+
+    fun passwordHealthSummary(items: List<SavedPassword>): Triple<Int, Int, Int> {
+        val weakCount = weakPasswordNames(items).size
+        val reuseCount = reusedPasswordGroups(items).size
+        val attentionCount = items.count { entryNeedsAttention(it, items) }
+        return Triple(weakCount, reuseCount, attentionCount)
     }
 
     fun normalizeEntry(item: SavedPassword): SavedPassword {

@@ -48,6 +48,7 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     var askIncomingPassphrase by mutableStateOf(false)
     var savedQuery by mutableStateOf("")
     var favoritesOnly by mutableStateOf(false)
+    var needsAttentionOnly by mutableStateOf(false)
     var categoryFilter by mutableStateOf("all")
     var pendingRemove by mutableStateOf<SavedPassword?>(null)
     var editing by mutableStateOf<SavedPassword?>(null)
@@ -349,15 +350,28 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
                     item.name, item.username, item.url, item.notes, item.category,
                 ).any { it.lowercase(Locale.getDefault()).contains(needle) }
                 val matchesFavorite = !favoritesOnly || item.favorite
+                val matchesAttention = !needsAttentionOnly || Vault.entryNeedsAttention(item, saved)
                 val matchesCategory = categoryFilter == "all" || item.category == categoryFilter
-                matchesQuery && matchesFavorite && matchesCategory
+                matchesQuery && matchesFavorite && matchesAttention && matchesCategory
             }
-            .sortedWith(compareBy({ !it.favorite }, { it.name.lowercase(Locale.getDefault()) }))
+            .sortedWith(
+                compareBy(
+                    { !Vault.entryNeedsAttention(it, saved) },
+                    { !it.favorite },
+                    { it.name.lowercase(Locale.getDefault()) },
+                ),
+            )
     }
 
     fun reuseWarning(item: SavedPassword): String = Vault.reuseWarningFor(item, saved)
 
+    fun strengthWarning(item: SavedPassword): String = Vault.strengthWarningFor(item)
+
     fun reusedPasswordCount(): Int = Vault.reusedPasswordGroups(saved).size
+
+    fun weakPasswordCount(): Int = Vault.weakPasswordNames(saved).size
+
+    fun passwordHealthSummary(): Triple<Int, Int, Int> = Vault.passwordHealthSummary(saved)
 
     fun openUrl(url: String) {
         val target = Vault.browseableUrl(url) ?: run {
