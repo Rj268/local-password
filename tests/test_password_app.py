@@ -350,6 +350,36 @@ class VaultTests(unittest.TestCase):
         self.assertTrue(updated[0].modified)
         self.assertNotEqual(updated[0].modified, item.modified)
 
+    def test_parse_password_csv_and_merge_imported(self) -> None:
+        text = (
+            "name,username,password,url,notes,category\n"
+            "Email,me@example.com,secret-one,https://mail.example,work mail,web\n"
+            "Bank,,abc123,https://bank.example,,finance\n"
+            '"Quoted, Name",user,"pass,word",https://q.example,,\n'
+        )
+        items = password_app.parse_password_csv(text)
+        self.assertEqual(len(items), 3)
+        self.assertEqual(items[0].name, "Email")
+        self.assertEqual(items[0].username, "me@example.com")
+        self.assertEqual(items[0].password, "secret-one")
+        self.assertEqual(items[0].url, "https://mail.example")
+        self.assertEqual(items[0].notes, "work mail")
+        self.assertEqual(items[0].category, "web")
+        self.assertEqual(items[2].name, "Quoted, Name")
+        self.assertEqual(items[2].password, "pass,word")
+        local = [password_app.SavedPassword("Email", "different-secret")]
+        merged, splits = password_app.merge_entries(local, items, conflict_suffix=" (imported)")
+        self.assertEqual(splits, 1)
+        names = {item.name for item in merged}
+        self.assertIn("Email", names)
+        self.assertIn("Email (imported)", names)
+        self.assertIn("Bank", names)
+        chrome = "name,url,username,password\nSite,https://site.example,u,p\n"
+        chrome_items = password_app.parse_password_csv(chrome)
+        self.assertEqual(chrome_items[0].name, "Site")
+        with self.assertRaises(ValueError):
+            password_app.parse_password_csv("title,login\nA,B\n")
+
     def test_change_vault_credentials_keeps_items_and_retires_old_secrets(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "saved.vault"

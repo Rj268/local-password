@@ -108,6 +108,14 @@ object Vault {
     }
 
     fun mergeSaved(local: List<SavedPassword>, incoming: List<SavedPassword>): Pair<List<SavedPassword>, Int> {
+        return mergeEntries(local, incoming, conflictSuffix = " (other device)")
+    }
+
+    fun mergeEntries(
+        local: List<SavedPassword>,
+        incoming: List<SavedPassword>,
+        conflictSuffix: String = " (imported)",
+    ): Pair<List<SavedPassword>, Int> {
         val merged = mutableListOf<SavedPassword>()
         val taken = mutableMapOf<String, Int>()
         var splits = 0
@@ -127,7 +135,7 @@ object Vault {
                 continue
             }
             splits += 1
-            val name = otherDeviceName(item.name, taken)
+            val name = uniqueEntryName(item.name, taken, conflictSuffix)
             taken[name] = merged.size
             merged.add(item.copy(name = name))
         }
@@ -156,8 +164,7 @@ object Vault {
         )
     }
 
-    private fun otherDeviceName(name: String, taken: Map<String, Int>): String {
-        val suffix = " (other device)"
+    private fun uniqueEntryName(name: String, taken: Map<String, Int>, suffix: String): String {
         val limit = 80
         var room = limit - suffix.length
         val base = if (name.length + suffix.length > limit) name.take(room).trimEnd() else name
@@ -171,6 +178,124 @@ object Vault {
         }
         return candidate
     }
+
+    fun parsePasswordCsv(text: String): List<SavedPassword> {
+        val raw = text.trimStart('\uFEFF')
+        if (raw.isBlank()) throw VaultException("That CSV file is empty.")
+        val rows = readCsv(raw)
+        if (rows.isEmpty()) throw VaultException("That CSV file has no header row.")
+        val headers = rows.first().map { it.trim().lowercase(Locale.ROOT) }
+        if (headers.none { it in CSV_PASSWORD_KEYS }) {
+            throw VaultException("That CSV file needs a password column.")
+        }
+        val now = utcNow()
+        val items = mutableListOf<SavedPassword>()
+        val used = linkedMapOf<String, Int>()
+        var unnamed = 0
+        for (cells in rows.drop(1)) {
+            val row = linkedMapOf<String, String>()
+            for (index in headers.indices) {
+                val key = headers[index]
+                if (key.isEmpty()) continue
+                row[key] = cells.getOrElse(index) { "" }
+            }
+            val password = csvCell(row, CSV_PASSWORD_KEYS)
+            if (password.isEmpty() || '\n' in password || '\r' in password) continue
+            var name = csvCell(row, CSV_NAME_KEYS)
+            if (name.isEmpty()) {
+                val url = csvCell(row, CSV_URL_KEYS)
+                unnamed += 1
+                name = url.ifEmpty { "Imported $unnamed" }
+            }
+            val label = try {
+                cleanName(name)
+            } catch (_: VaultException) {
+                unnamed += 1
+                cleanName("Imported $unnamed")
+            }
+            val finalName = if (label in used) uniqueEntryName(label, used, " (imported)") else label
+            used[finalName] = 0
+            try {
+                items.add(
+                    normalizeEntry(
+                        SavedPassword(
+                            name = finalName,
+                            password = password,
+                            username = csvCell(row, CSV_USERNAME_KEYS),
+                            url = csvCell(row, CSV_URL_KEYS),
+                            notes = csvCell(row, CSV_NOTES_KEYS),
+                            category = csvCell(row, CSV_CATEGORY_KEYS),
+                            created = now,
+                            modified = now,
+                        ),
+                    ),
+                )
+            } catch (_: VaultException) {
+                continue
+            }
+        }
+        if (items.isEmpty()) throw VaultException("No password rows were found in that CSV file.")
+        return items
+    }
+
+    private fun csvCell(row: Map<String, String>, keys: Set<String>): String {
+        for (key in keys) {
+            val value = row[key]?.trim().orEmpty()
+            if (value.isNotEmpty()) return value
+        }
+        return ""
+    }
+
+    private fun readCsv(text: String): List<List<String>> {
+        val rows = mutableListOf<List<String>>()
+        val field = StringBuilder()
+        val row = mutableListOf<String>()
+        var inQuotes = false
+        var index = 0
+        while (index < text.length) {
+            val ch = text[index]
+            when {
+                inQuotes && ch == '"' -> {
+                    if (index + 1 < text.length && text[index + 1] == '"') {
+                        field.append('"')
+                        index += 1
+                    } else {
+                        inQuotes = false
+                    }
+                }
+                !inQuotes && ch == '"' -> inQuotes = true
+                !inQuotes && ch == ',' -> {
+                    row.add(field.toString())
+                    field.clear()
+                }
+                !inQuotes && (ch == '\n' || ch == '\r') -> {
+                    row.add(field.toString())
+                    field.clear()
+                    if (row.any { it.isNotEmpty() } || rows.isEmpty()) {
+                        rows.add(row.toList())
+                    }
+                    row.clear()
+                    if (ch == '\r' && index + 1 < text.length && text[index + 1] == '\n') {
+                        index += 1
+                    }
+                }
+                else -> field.append(ch)
+            }
+            index += 1
+        }
+        if (field.isNotEmpty() || row.isNotEmpty()) {
+            row.add(field.toString())
+            rows.add(row.toList())
+        }
+        return rows
+    }
+
+    private val CSV_NAME_KEYS = setOf("name", "title", "account", "entry")
+    private val CSV_USERNAME_KEYS = setOf("username", "user", "login", "login_username", "email")
+    private val CSV_PASSWORD_KEYS = setOf("password", "pass", "passwd", "login_password")
+    private val CSV_URL_KEYS = setOf("url", "website", "web site", "login_uri", "uri", "href")
+    private val CSV_NOTES_KEYS = setOf("notes", "note", "comments", "extra")
+    private val CSV_CATEGORY_KEYS = setOf("category", "folder", "group", "grouping")
 
     fun seal(opened: OpenVault, items: List<SavedPassword>): ByteArray {
         val checked = items.map { normalizeEntry(it) }

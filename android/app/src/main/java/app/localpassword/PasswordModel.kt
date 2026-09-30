@@ -443,6 +443,42 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
         error = ""
     }
 
+    fun importCsv(text: String) {
+        val currentOpen = opened
+        if (currentOpen == null || !unlocked) {
+            error = "Unlock the vault before importing a CSV."
+            askUnlock = true
+            return
+        }
+        viewModelScope.launch {
+            busy = true
+            error = ""
+            try {
+                val incoming = withContext(Dispatchers.Default) { Vault.parsePasswordCsv(text) }
+                val before = currentOpen.items.size
+                val (next, splits) = withContext(Dispatchers.Default) {
+                    Vault.mergeEntries(currentOpen.items, incoming, conflictSuffix = " (imported)")
+                }
+                val blob = withContext(Dispatchers.Default) { Vault.seal(currentOpen, next) }
+                writeAtomically(blob)
+                opened = currentOpen.copy(items = next)
+                saved = next
+                unlocked = true
+                section = "saved"
+                val added = next.size - before
+                status = if (splits > 0) {
+                    "Imported $added new entr${if (added == 1) "y" else "ies"} ($splits renamed to avoid clashes)."
+                } else {
+                    "Imported $added new entr${if (added == 1) "y" else "ies"} from the CSV."
+                }
+            } catch (exc: VaultException) {
+                error = exc.message ?: "Could not import that CSV file."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
     fun sendVault() {
         if (busy || offerCode != null) return
         if (!hasVault()) {

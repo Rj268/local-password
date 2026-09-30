@@ -10,6 +10,8 @@ the encrypted file. The passphrase is not sent.
 from __future__ import annotations
 
 import base64
+import csv
+import io
 import json
 import math
 import os
@@ -1404,6 +1406,16 @@ def merge_saved(
     local: list[SavedPassword], incoming: list[SavedPassword]
 ) -> tuple[list[SavedPassword], int]:
     """Keep every name. A different password for the same name is stored beside it."""
+    return merge_entries(local, incoming, conflict_suffix=" (other device)")
+
+
+def merge_entries(
+    local: list[SavedPassword],
+    incoming: list[SavedPassword],
+    *,
+    conflict_suffix: str = " (imported)",
+) -> tuple[list[SavedPassword], int]:
+    """Merge incoming entries. Same password fills empty fields; a clash gets a new name."""
     merged: list[SavedPassword] = []
     taken: dict[str, int] = {}
     splits = 0
@@ -1420,14 +1432,13 @@ def merge_saved(
             merged[slot] = _merge_matching_entry(merged[slot], item)
             continue
         splits += 1
-        name = _other_device_name(item.name, taken)
+        name = _unique_entry_name(item.name, taken, conflict_suffix)
         taken[name] = len(merged)
         merged.append(replace(item, name=name))
     return merged, splits
 
 
-def _other_device_name(name: str, taken: dict[str, int]) -> str:
-    suffix = " (other device)"
+def _unique_entry_name(name: str, taken: dict[str, int], suffix: str) -> str:
     room = MAX_NAME_LENGTH - len(suffix)
     base = name[:room].rstrip() if len(name) + len(suffix) > MAX_NAME_LENGTH else name
     candidate = f"{base}{suffix}"
@@ -1439,6 +1450,90 @@ def _other_device_name(name: str, taken: dict[str, int]) -> str:
         candidate = f"{base}{suffix}{extra}"
         number += 1
     return candidate
+
+
+def _other_device_name(name: str, taken: dict[str, int]) -> str:
+    return _unique_entry_name(name, taken, " (other device)")
+
+
+CSV_NAME_KEYS = ("name", "title", "account", "entry")
+CSV_USERNAME_KEYS = ("username", "user", "login", "login_username", "email")
+CSV_PASSWORD_KEYS = ("password", "pass", "passwd", "login_password")
+CSV_URL_KEYS = ("url", "website", "web site", "login_uri", "uri", "href")
+CSV_NOTES_KEYS = ("notes", "note", "comments", "extra")
+CSV_CATEGORY_KEYS = ("category", "folder", "group", "grouping")
+
+
+def _csv_cell(row: dict[str, str], keys: tuple[str, ...]) -> str:
+    lowered = {str(key).strip().casefold(): value for key, value in row.items() if key is not None}
+    for key in keys:
+        value = lowered.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def parse_password_csv(text: str) -> list[SavedPassword]:
+    """Read common password-manager CSV exports into vault entries."""
+    raw = text.lstrip("\ufeff")
+    if not raw.strip():
+        raise ValueError("That CSV file is empty.")
+    reader = csv.DictReader(io.StringIO(raw))
+    if reader.fieldnames is None:
+        raise ValueError("That CSV file has no header row.")
+    headers = {str(name).strip().casefold() for name in reader.fieldnames if name}
+    if not headers:
+        raise ValueError("That CSV file has no header row.")
+    if not any(key in headers for key in CSV_PASSWORD_KEYS):
+        raise ValueError("That CSV file needs a password column.")
+    now = utc_now()
+    items: list[SavedPassword] = []
+    used: set[str] = set()
+    unnamed = 0
+    for row in reader:
+        if row is None:
+            continue
+        password = _csv_cell(row, CSV_PASSWORD_KEYS)
+        if not password:
+            continue
+        try:
+            secret = _password_line(password)
+        except ValueError:
+            continue
+        name = _csv_cell(row, CSV_NAME_KEYS)
+        if not name:
+            url = _csv_cell(row, CSV_URL_KEYS)
+            unnamed += 1
+            name = url if url else f"Imported {unnamed}"
+        try:
+            label = clean_name(name)
+        except ValueError:
+            unnamed += 1
+            label = clean_name(f"Imported {unnamed}")
+        if label in used:
+            label = _unique_entry_name(label, {label: 0, **{n: 0 for n in used}}, " (imported)")
+        used.add(label)
+        try:
+            items.append(
+                SavedPassword(
+                    label,
+                    secret,
+                    username=clean_username(_csv_cell(row, CSV_USERNAME_KEYS)),
+                    url=clean_url(_csv_cell(row, CSV_URL_KEYS)),
+                    notes=clean_notes(_csv_cell(row, CSV_NOTES_KEYS)),
+                    category=clean_category(_csv_cell(row, CSV_CATEGORY_KEYS)),
+                    created=now,
+                    modified=now,
+                )
+            )
+        except ValueError:
+            continue
+    if not items:
+        raise ValueError("No password rows were found in that CSV file.")
+    return items
 
 
 def store_vault_blob(blob: bytes, path: Path | None = None) -> Path:
@@ -2022,6 +2117,65 @@ class PasswordWindow:
         self.show_section("saved")
         self._sync_note("Vault imported. Unlock with the same passphrase or recovery key.")
 
+    def on_import_csv(self, *_args) -> None:
+        gtk = self.gtk
+        if self.vault_key is None:
+            if not self._ensure_vault_key():
+                self._sync_note("Unlock the vault before importing a CSV.")
+                return
+        dialog = gtk.FileChooserDialog(
+            title="Import CSV",
+            transient_for=self.window,
+            action=gtk.FileChooserAction.OPEN,
+        )
+        dialog.add_button("Cancel", gtk.ResponseType.CANCEL)
+        dialog.add_button("Import", gtk.ResponseType.OK)
+        filt = gtk.FileFilter()
+        filt.set_name("CSV files")
+        filt.add_pattern("*.csv")
+        filt.add_pattern("*.txt")
+        dialog.add_filter(filt)
+        response = dialog.run()
+        source = dialog.get_filename()
+        dialog.destroy()
+        if response != gtk.ResponseType.OK or not source:
+            return
+        try:
+            text = Path(source).read_text(encoding="utf-8-sig")
+        except UnicodeDecodeError:
+            try:
+                text = Path(source).read_text(encoding="latin-1")
+            except OSError:
+                self._sync_note("Could not read that CSV file.")
+                return
+        except OSError:
+            self._sync_note("Could not read that CSV file.")
+            return
+        try:
+            incoming = parse_password_csv(text)
+            before = len(self.saved)
+            updated, splits = merge_entries(self.saved, incoming, conflict_suffix=" (imported)")
+            write_vault(self.vault_key, updated)
+        except ValueError as exc:
+            self._sync_note(str(exc))
+            return
+        except OSError:
+            self._sync_note("Could not save the imported passwords.")
+            return
+        self.saved = updated
+        self.locked = False
+        added = len(updated) - before
+        self._refresh_saved_rows()
+        self._refresh_dashboard()
+        self.show_section("saved")
+        if splits:
+            note = f"Imported {added} new entr{'y' if added == 1 else 'ies'} ({splits} renamed to avoid clashes)."
+        else:
+            note = f"Imported {added} new entr{'y' if added == 1 else 'ies'} from the CSV."
+        self._sync_note(note)
+        self.manager_message.set_text(note)
+        self.manager_message.show()
+
     def apply_dark(self) -> None:
         context = self.window.get_style_context()
         button = self.dark_button.get_style_context()
@@ -2543,7 +2697,8 @@ class PasswordWindow:
         files_hint = gtk.Label(
             label=(
                 "Export copies the encrypted vault to a file you choose. "
-                "Import replaces the vault on this computer with that file. "
+                "Import vault replaces the vault on this computer with that file. "
+                "Import CSV adds password rows from another manager into the unlocked vault. "
                 "The passphrase is not inside the export."
             ),
             xalign=0,
@@ -2560,6 +2715,12 @@ class PasswordWindow:
         self.export_button.connect("clicked", self.on_export_vault)
         self.import_button.connect("clicked", self.on_import_vault)
         files.pack_start(file_row, False, False, 0)
+        csv_row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
+        self.import_csv_button = gtk.Button(label="Import CSV")
+        self.import_csv_button.get_style_context().add_class("secondary")
+        self.import_csv_button.connect("clicked", self.on_import_csv)
+        csv_row.pack_start(self.import_csv_button, True, True, 0)
+        files.pack_start(csv_row, False, False, 0)
         page.pack_start(files, False, False, 0)
 
         transfer = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=10)
@@ -3270,7 +3431,14 @@ class PasswordWindow:
         if self.section == "dashboard":
             self._refresh_dashboard()
         self.on_copy_text(fresh)
-        message = f"Replaced the password for {item.name} and copied it."
+        seconds = self.preferences.clipboard_clear_seconds
+        if seconds:
+            message = (
+                f"Replaced the password for {item.name} and copied it. "
+                f"Clipboard clears in {seconds} seconds."
+            )
+        else:
+            message = f"Replaced the password for {item.name} and copied it."
         self.status.set_text(message)
         if self.section == "saved":
             self.manager_message.set_text(message)

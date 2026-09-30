@@ -65,6 +65,13 @@ fun LocalPasswordApp(model: PasswordModel = viewModel()) {
         val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@rememberLauncherForActivityResult
         model.import(bytes)
     }
+    val importCsv = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val text = context.contentResolver.openInputStream(uri)?.use { stream ->
+            stream.bufferedReader().readText()
+        } ?: return@rememberLauncherForActivityResult
+        model.importCsv(text)
+    }
     val exportVault = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         val bytes = model.exportBytes() ?: return@rememberLauncherForActivityResult
@@ -106,6 +113,7 @@ fun LocalPasswordApp(model: PasswordModel = viewModel()) {
                         muted,
                         dark,
                         onImport = { importVault.launch(arrayOf("*/*")) },
+                        onImportCsv = { importCsv.launch(arrayOf("text/*", "text/csv", "*/*")) },
                         onExport = { exportVault.launch("saved.vault") },
                     )
                 }
@@ -505,6 +513,7 @@ private fun SettingsPane(
     muted: Color,
     dark: Boolean,
     onImport: () -> Unit,
+    onImportCsv: () -> Unit,
     onExport: () -> Unit,
 ) {
     Column(
@@ -555,6 +564,14 @@ private fun SettingsPane(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = onImport) { Text("Import vault", color = Green) }
             TextButton(onClick = onExport) { Text("Export vault", color = Green) }
+        }
+        Text(
+            "Import CSV adds password rows from another manager into the unlocked vault.",
+            color = muted,
+            fontSize = 13.sp,
+        )
+        TextButton(onClick = onImportCsv, enabled = !model.busy) {
+            Text("Import CSV", color = Green)
         }
     }
 }

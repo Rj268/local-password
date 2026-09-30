@@ -108,6 +108,29 @@ class VaultTest {
     }
 
     @Test
+    fun parsePasswordCsvAndMergeImported() {
+        val text = """
+            name,username,password,url,notes,category
+            Email,me@example.com,secret-one,https://mail.example,work mail,web
+            Bank,,abc123,https://bank.example,,finance
+            "Quoted, Name",user,"pass,word",https://q.example,,
+        """.trimIndent()
+        val items = Vault.parsePasswordCsv(text)
+        assertEquals(3, items.size)
+        assertEquals("Email", items[0].name)
+        assertEquals("me@example.com", items[0].username)
+        assertEquals("secret-one", items[0].password)
+        assertEquals("Quoted, Name", items[2].name)
+        assertEquals("pass,word", items[2].password)
+        val local = listOf(SavedPassword("Email", "different-secret"))
+        val (merged, splits) = Vault.mergeEntries(local, items, conflictSuffix = " (imported)")
+        assertEquals(1, splits)
+        val names = merged.map { it.name }.toSet()
+        assertEquals(setOf("Email", "Email (imported)", "Bank", "Quoted, Name"), names)
+        assertThrows<VaultException> { Vault.parsePasswordCsv("title,login\nA,B\n") }
+    }
+
+    @Test
     fun changingPassphraseKeepsItemsAndRetiresOldSecrets() {
         val oldRecovery = "alpha bravo charlie delta echo foxtrot golf hotel"
         val (oldBlob, opened) = Vault.create(
