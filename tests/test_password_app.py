@@ -324,6 +324,32 @@ class VaultTests(unittest.TestCase):
         self.assertEqual(reuse_count, 1)
         self.assertEqual(attention_count, 3)
 
+    def test_replace_entry_password_keeps_fields_and_is_strong(self) -> None:
+        item = password_app.SavedPassword(
+            "Old",
+            "abc123",
+            username="me",
+            url="https://old.example",
+            notes="keep",
+            category="web",
+            favorite=True,
+            created="2024-01-01T00:00:00Z",
+        )
+        fresh = password_app.strong_replacement_password()
+        self.assertFalse(password_app.entry_is_weak(fresh))
+        updated = password_app.replace_entry_password([item], item, fresh)
+        self.assertEqual(len(updated), 1)
+        self.assertEqual(updated[0].name, "Old")
+        self.assertEqual(updated[0].password, fresh)
+        self.assertEqual(updated[0].username, "me")
+        self.assertEqual(updated[0].url, "https://old.example")
+        self.assertEqual(updated[0].notes, "keep")
+        self.assertEqual(updated[0].category, "web")
+        self.assertTrue(updated[0].favorite)
+        self.assertEqual(updated[0].created, "2024-01-01T00:00:00Z")
+        self.assertTrue(updated[0].modified)
+        self.assertNotEqual(updated[0].modified, item.modified)
+
     def test_change_vault_credentials_keeps_items_and_retires_old_secrets(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "saved.vault"

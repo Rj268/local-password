@@ -94,6 +94,14 @@ object Generator {
 
     fun isWeakPassword(password: String): Boolean = !isStrong(passwordStrengthBits(password))
 
+    fun strongReplacementPassword(): String {
+        val pool = characterPool(digits = true, letters = true, symbols = true)
+        val unique = unique(pool)
+        val needed = kotlin.math.ceil(STRONG_ENTROPY_BITS / log2(unique.length.toDouble())).toInt()
+        val length = min(1024, maxOf(16, needed))
+        return password(length, pool)
+    }
+
     private fun unique(value: String): String {
         val seen = LinkedHashSet<Char>()
         value.forEach { seen.add(it) }

@@ -80,6 +80,34 @@ class VaultTest {
     }
 
     @Test
+    fun replaceEntryPasswordKeepsFieldsAndIsStrong() {
+        val item = SavedPassword(
+            name = "Old",
+            password = "abc123",
+            username = "me",
+            url = "https://old.example",
+            notes = "keep",
+            category = "web",
+            favorite = true,
+            created = "2024-01-01T00:00:00Z",
+        )
+        val fresh = Generator.strongReplacementPassword()
+        assert(Generator.isStrong(Generator.passwordStrengthBits(fresh)))
+        val next = Vault.replaceEntryPassword(listOf(item), item, fresh)
+        assertEquals(1, next.size)
+        assertEquals("Old", next[0].name)
+        assertEquals(fresh, next[0].password)
+        assertEquals("me", next[0].username)
+        assertEquals("https://old.example", next[0].url)
+        assertEquals("keep", next[0].notes)
+        assertEquals("web", next[0].category)
+        assert(next[0].favorite)
+        assertEquals("2024-01-01T00:00:00Z", next[0].created)
+        assert(next[0].modified.isNotEmpty())
+        assert(!Generator.isWeakPassword(next[0].password))
+    }
+
+    @Test
     fun changingPassphraseKeepsItemsAndRetiresOldSecrets() {
         val oldRecovery = "alpha bravo charlie delta echo foxtrot golf hotel"
         val (oldBlob, opened) = Vault.create(

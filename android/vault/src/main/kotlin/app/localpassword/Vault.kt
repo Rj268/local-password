@@ -236,6 +236,17 @@ object Vault {
         return Triple(weakCount, reuseCount, attentionCount)
     }
 
+    fun replaceEntryPassword(items: List<SavedPassword>, item: SavedPassword, newPassword: String): List<SavedPassword> {
+        val now = utcNow()
+        val stamped = normalizeEntry(
+            item.copy(
+                password = newPassword,
+                modified = now,
+            ),
+        )
+        return listOf(stamped) + items.filter { it.name != item.name }
+    }
+
     fun normalizeEntry(item: SavedPassword): SavedPassword {
         return item.copy(
             name = cleanName(item.name),

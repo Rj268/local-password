@@ -640,6 +640,32 @@ def password_health_summary(items: list[SavedPassword]) -> tuple[int, int, int]:
     return weak_count, reuse_count, attention_count
 
 
+def strong_replacement_password() -> str:
+    """One strong character password for replacing a saved entry."""
+    pool = character_pool(digits=True, uppercase=True, lowercase=True, symbols=True)
+    unique = generator.unique_characters(pool)
+    length = max(
+        16,
+        math.ceil(generator.STRONG_ENTROPY_BITS / math.log2(len(unique))),
+    )
+    length = min(length, generator.MAX_PASSWORD_LENGTH)
+    return generator.generate_password(length, pool)
+
+
+def replace_entry_password(
+    existing: list[SavedPassword],
+    item: SavedPassword,
+    new_password: str,
+) -> list[SavedPassword]:
+    """Keep the entry fields and swap only the password."""
+    stamped = replace(
+        item,
+        password=_password_line(new_password),
+        modified=utc_now(),
+    )
+    return upsert_entry(existing, stamped, previous_name=item.name)
+
+
 def data_directory() -> Path:
     """Per-user folder for saved passwords. Windows uses Local AppData."""
     data_home = os.environ.get("XDG_DATA_HOME")
@@ -2575,7 +2601,8 @@ class PasswordWindow:
         saved_lede = gtk.Label(
             label=(
                 "Passwords stay masked until you show one. Weak or reused passwords are called "
-                "out on the entry. Needs attention filters those rows."
+                "out. Needs attention filters those rows. Replace password generates a strong "
+                "one, saves it, and copies it."
             ),
             xalign=0,
         )
@@ -3182,6 +3209,13 @@ class PasswordWindow:
             open_url.get_style_context().add_class("secondary")
             open_url.connect("clicked", lambda *_args, entry=item: self.on_open_url(entry))
             actions.pack_start(open_url, False, False, 0)
+        replace_btn = gtk.Button(label="Replace password")
+        if entry_needs_attention(item, self.saved):
+            replace_btn.get_style_context().add_class("primary")
+        else:
+            replace_btn.get_style_context().add_class("secondary")
+        replace_btn.connect("clicked", lambda *_args, entry=item: self.on_replace_password(entry))
+        actions.pack_start(replace_btn, False, False, 0)
         edit = gtk.Button(label="Edit")
         edit.get_style_context().add_class("secondary")
         edit.connect("clicked", lambda *_args, entry=item: self.on_edit_entry(entry))
@@ -3205,6 +3239,82 @@ class PasswordWindow:
         if self.section == "saved":
             self.manager_message.set_text(message)
             self.manager_message.show()
+
+    def on_replace_password(self, item: SavedPassword) -> None:
+        self._note_activity()
+        if self.vault_key is None:
+            self.status.set_text("Saved passwords are locked.")
+            return
+        if not self._confirm_replace_password(item):
+            return
+        fresh = strong_replacement_password()
+        try:
+            updated = replace_entry_password(self.saved, item, fresh)
+            write_vault(self.vault_key, updated)
+        except ValueError as exc:
+            self.status.set_text(str(exc))
+            if self.section == "saved":
+                self.manager_message.set_text(str(exc))
+                self.manager_message.show()
+            return
+        except OSError:
+            message = "Could not save the new password."
+            self.status.set_text(message)
+            if self.section == "saved":
+                self.manager_message.set_text(message)
+                self.manager_message.show()
+            return
+        self.saved = updated
+        self.revealed_names.add(item.name)
+        self._refresh_saved_rows()
+        if self.section == "dashboard":
+            self._refresh_dashboard()
+        self.on_copy_text(fresh)
+        message = f"Replaced the password for {item.name} and copied it."
+        self.status.set_text(message)
+        if self.section == "saved":
+            self.manager_message.set_text(message)
+            self.manager_message.show()
+
+    def _confirm_replace_password(self, item: SavedPassword) -> bool:
+        gtk = self.gtk
+        dialog = gtk.Dialog(title="Replace password", transient_for=self.window, modal=True)
+        self._match_dialog(dialog)
+        dialog.add_button("Cancel", gtk.ResponseType.CANCEL)
+        replace = dialog.add_button("Replace", gtk.ResponseType.OK)
+        replace.get_style_context().add_class("primary")
+        content = dialog.get_content_area()
+        content.set_spacing(8)
+        for setter in (
+            content.set_margin_top,
+            content.set_margin_bottom,
+            content.set_margin_start,
+            content.set_margin_end,
+        ):
+            setter(16)
+        reason = ""
+        strength = strength_warning_for(item)
+        reuse = reuse_warning_for(item, self.saved)
+        if strength and reuse:
+            reason = f" {strength} {reuse}"
+        elif strength:
+            reason = f" {strength}"
+        elif reuse:
+            reason = f" {reuse}"
+        label = gtk.Label(
+            label=(
+                f'Replace the password for "{item.name}" with a new strong password?'
+                f"{reason} The new password is saved and copied. Update the site next."
+            ),
+            xalign=0,
+        )
+        label.set_line_wrap(True)
+        label.set_max_width_chars(42)
+        content.pack_start(label, False, False, 0)
+        dialog.show_all()
+        response = dialog.run()
+        dialog.destroy()
+        return response == gtk.ResponseType.OK
 
     def on_toggle_reveal(self, name: str) -> None:
         if name in self.revealed_names:

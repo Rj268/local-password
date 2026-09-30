@@ -379,6 +379,9 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
                             if (Vault.browseableUrl(item.url) != null) {
                                 TextButton(onClick = { model.openUrl(item.url) }) { Text("Open URL", color = Green) }
                             }
+                            TextButton(onClick = { model.requestReplace(item) }) {
+                                Text("Replace password", color = Green)
+                            }
                             TextButton(onClick = { model.beginEdit(item) }) { Text("Edit", color = Green) }
                             TextButton(onClick = { model.requestRemove(item) }) { Text("Remove", color = Danger) }
                         }
@@ -397,6 +400,30 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
             },
             dismissButton = {
                 TextButton(onClick = { model.cancelRemove() }) { Text("Cancel") }
+            },
+        )
+    }
+    model.pendingReplace?.let { item ->
+        val strength = model.strengthWarning(item)
+        val reuse = model.reuseWarning(item)
+        val reason = listOf(strength, reuse).filter { it.isNotEmpty() }.joinToString(" ")
+        AlertDialog(
+            onDismissRequest = { model.cancelReplace() },
+            title = { Text("Replace password") },
+            text = {
+                Text(
+                    "Replace the password for \"${item.name}\" with a new strong password?" +
+                        (if (reason.isNotEmpty()) " $reason" else "") +
+                        " The new password is saved and copied. Update the site next.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { model.confirmReplace() }, enabled = !model.busy) {
+                    Text("Replace", color = Green)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { model.cancelReplace() }) { Text("Cancel") }
             },
         )
     }

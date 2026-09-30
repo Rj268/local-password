@@ -51,6 +51,7 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     var needsAttentionOnly by mutableStateOf(false)
     var categoryFilter by mutableStateOf("all")
     var pendingRemove by mutableStateOf<SavedPassword?>(null)
+    var pendingReplace by mutableStateOf<SavedPassword?>(null)
     var editing by mutableStateOf<SavedPassword?>(null)
 
     private var opened: OpenVault? = null
@@ -296,6 +297,40 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
 
     fun cancelRemove() {
         pendingRemove = null
+    }
+
+    fun requestReplace(item: SavedPassword) {
+        pendingReplace = item
+    }
+
+    fun cancelReplace() {
+        pendingReplace = null
+    }
+
+    fun confirmReplace() {
+        val item = pendingReplace ?: return
+        val currentOpen = opened ?: return
+        pendingReplace = null
+        viewModelScope.launch {
+            busy = true
+            error = ""
+            try {
+                val fresh = withContext(Dispatchers.Default) { Generator.strongReplacementPassword() }
+                val next = Vault.replaceEntryPassword(currentOpen.items, item, fresh)
+                val blob = withContext(Dispatchers.Default) { Vault.seal(currentOpen, next) }
+                writeAtomically(blob)
+                opened = currentOpen.copy(items = next)
+                saved = next
+                unlocked = true
+                revealed = item.name
+                copy(fresh)
+                status = "Replaced the password for ${item.name} and copied it."
+            } catch (exc: VaultException) {
+                error = exc.message ?: "Could not save the new password."
+            } finally {
+                busy = false
+            }
+        }
     }
 
     fun beginEdit(item: SavedPassword) {
