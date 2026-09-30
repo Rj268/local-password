@@ -355,6 +355,26 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
             .sortedWith(compareBy({ !it.favorite }, { it.name.lowercase(Locale.getDefault()) }))
     }
 
+    fun reuseWarning(item: SavedPassword): String = Vault.reuseWarningFor(item, saved)
+
+    fun reusedPasswordCount(): Int = Vault.reusedPasswordGroups(saved).size
+
+    fun openUrl(url: String) {
+        val target = Vault.browseableUrl(url) ?: run {
+            error = "That URL could not be opened."
+            return
+        }
+        try {
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(target))
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            getApplication<Application>().startActivity(intent)
+            status = "Opening $target."
+            error = ""
+        } catch (_: Exception) {
+            error = "That URL could not be opened."
+        }
+    }
+
     fun categories(): List<String> =
         saved.map { it.category }.filter { it.isNotEmpty() }.distinct().sortedBy { it.lowercase(Locale.getDefault()) }
 

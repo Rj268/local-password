@@ -280,6 +280,29 @@ class VaultTests(unittest.TestCase):
                 password_app.open_vault("another-secret", path)
             self.assertIn("did not unlock", str(caught.exception))
 
+    def test_reused_password_groups_and_warning(self) -> None:
+        items = [
+            password_app.SavedPassword("Email", "shared"),
+            password_app.SavedPassword("Bank", "shared"),
+            password_app.SavedPassword("Unique", "solo"),
+        ]
+        groups = password_app.reused_password_groups(items)
+        self.assertEqual(set(groups), {"shared"})
+        self.assertEqual(groups["shared"], ["Email", "Bank"])
+        self.assertEqual(
+            password_app.reuse_warning_for(items[0], items),
+            "Same password as Bank.",
+        )
+        self.assertEqual(password_app.reuse_warning_for(items[2], items), "")
+
+    def test_browseable_url_accepts_http_and_adds_https(self) -> None:
+        self.assertEqual(password_app.browseable_url("https://mail.example"), "https://mail.example")
+        self.assertEqual(password_app.browseable_url("mail.example"), "https://mail.example")
+        self.assertEqual(password_app.browseable_url("localhost:8080"), "https://localhost:8080")
+        self.assertIsNone(password_app.browseable_url(""))
+        self.assertIsNone(password_app.browseable_url("javascript:alert(1)"))
+        self.assertIsNone(password_app.browseable_url("file:///tmp/x"))
+
     def test_change_vault_credentials_keeps_items_and_retires_old_secrets(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "saved.vault"

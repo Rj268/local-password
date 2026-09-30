@@ -13,6 +13,7 @@ import base64
 import json
 import math
 import os
+import re
 import secrets
 import shutil
 import string
@@ -20,6 +21,7 @@ import subprocess
 import sys
 import threading
 import time
+import webbrowser
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -554,6 +556,51 @@ def entry_matches(item: SavedPassword, query: str) -> bool:
         item.category,
     )
     return any(needle in value.casefold() for value in haystacks if value)
+
+
+def reused_password_groups(items: list[SavedPassword]) -> dict[str, list[str]]:
+    """Map a password to the entry names that share it, only when reused."""
+    groups: dict[str, list[str]] = {}
+    for item in items:
+        groups.setdefault(item.password, []).append(item.name)
+    return {password: names for password, names in groups.items() if len(names) > 1}
+
+
+def reuse_warning_for(item: SavedPassword, items: list[SavedPassword]) -> str:
+    """Short note when this entry's password is also used elsewhere."""
+    names = reused_password_groups(items).get(item.password)
+    if not names:
+        return ""
+    others = [name for name in names if name != item.name]
+    if not others:
+        return ""
+    if len(others) == 1:
+        return f"Same password as {others[0]}."
+    if len(others) == 2:
+        return f"Same password as {others[0]} and {others[1]}."
+    return f"Same password as {len(others)} other saved entries."
+
+
+def browseable_url(url: str) -> str | None:
+    """Return an http(s) URL to open, or None when the value is empty or unsafe."""
+    text = url.strip()
+    if not text:
+        return None
+    lowered = text.casefold()
+    if lowered.startswith("https://") or lowered.startswith("http://"):
+        return text
+    # Reject other schemes (javascript:, file:, data:). Allow host:port.
+    if re.match(r"^[a-z][a-z0-9+.-]*:(?!\d)", lowered):
+        return None
+    return "https://" + text
+
+
+def open_entry_url(url: str) -> bool:
+    """Open a saved entry URL in the default browser."""
+    target = browseable_url(url)
+    if target is None:
+        return False
+    return bool(webbrowser.open(target))
 
 
 def data_directory() -> Path:
@@ -2069,11 +2116,18 @@ class PasswordWindow:
             self.dashboard_empty.show()
             self.dashboard_recent.hide()
             return
+        reuse_count = len(reused_password_groups(self.saved))
         self.dashboard_welcome.set_text("Ready when you are")
-        self.dashboard_lede.set_text(
-            "Open Saved to copy a password, or Generate to make another. "
-            "Passwords stay masked here."
-        )
+        if reuse_count:
+            self.dashboard_lede.set_text(
+                f"Open Saved to copy a password or username. "
+                f"{reuse_count} password{'s are' if reuse_count != 1 else ' is'} reused across entries."
+            )
+        else:
+            self.dashboard_lede.set_text(
+                "Open Saved to copy a password or username, or Generate to make another. "
+                "Passwords stay masked here."
+            )
         self.dashboard_lock_value.set_text("Unlocked")
         self.dashboard_empty.hide()
         self.dashboard_recent.show()
@@ -2465,7 +2519,10 @@ class PasswordWindow:
         self.saved_heading.get_style_context().add_class("section-title")
         page.pack_start(self.saved_heading, False, False, 0)
         saved_lede = gtk.Label(
-            label="Passwords stay masked until you show one. Edit adds username, URL, notes, and a category.",
+            label=(
+                "Passwords stay masked until you show one. Copy username and Open URL when those "
+                "fields are set. A reused password is called out on the entry."
+            ),
             xalign=0,
         )
         saved_lede.set_line_wrap(True)
@@ -2963,7 +3020,11 @@ class PasswordWindow:
         ]
         matches.sort(key=lambda item: (not item.favorite, item.name.casefold()))
         count = len(self.saved)
-        self.saved_heading.set_text("1 saved" if count == 1 else f"{count} saved")
+        reuse_count = len(reused_password_groups(self.saved))
+        heading = "1 saved" if count == 1 else f"{count} saved"
+        if reuse_count:
+            heading += f" · {reuse_count} reused"
+        self.saved_heading.set_text(heading)
         self.saved_heading.show()
         if not matches:
             self.saved_scroll.hide()
@@ -3004,6 +3065,13 @@ class PasswordWindow:
             text.pack_start(meta, False, False, 0)
         else:
             text.pack_start(name, False, False, 0)
+        warning = reuse_warning_for(item, self.saved)
+        if warning:
+            warn = gtk.Label(label=warning, xalign=0)
+            warn.set_line_wrap(True)
+            warn.set_halign(gtk.Align.START)
+            warn.get_style_context().add_class("danger")
+            text.pack_start(warn, False, False, 0)
         shown = item.name in self.revealed_names
         secret = gtk.Label(label=item.password if shown else "••••••••••••", xalign=0)
         secret.set_line_wrap(True)
@@ -3022,21 +3090,47 @@ class PasswordWindow:
         show = gtk.Button(label="Hide" if shown else "Show")
         show.get_style_context().add_class("secondary")
         show.connect("clicked", lambda *_args, label=item.name: self.on_toggle_reveal(label))
-        copy = gtk.Button(label="Copy")
+        copy = gtk.Button(label="Copy password")
         copy.get_style_context().add_class("primary")
         copy.connect("clicked", lambda *_args, password=item.password: self.on_copy_text(password))
+        actions.pack_start(show, False, False, 0)
+        actions.pack_start(copy, False, False, 0)
+        if item.username:
+            copy_user = gtk.Button(label="Copy username")
+            copy_user.get_style_context().add_class("secondary")
+            copy_user.connect(
+                "clicked",
+                lambda *_args, username=item.username: self.on_copy_text(username),
+            )
+            actions.pack_start(copy_user, False, False, 0)
+        if browseable_url(item.url):
+            open_url = gtk.Button(label="Open URL")
+            open_url.get_style_context().add_class("secondary")
+            open_url.connect("clicked", lambda *_args, entry=item: self.on_open_url(entry))
+            actions.pack_start(open_url, False, False, 0)
         edit = gtk.Button(label="Edit")
         edit.get_style_context().add_class("secondary")
         edit.connect("clicked", lambda *_args, entry=item: self.on_edit_entry(entry))
         remove = gtk.Button(label="Remove")
         remove.get_style_context().add_class("secondary")
         remove.connect("clicked", lambda *_args, label=item.name: self.on_remove(label))
-        for button in (show, copy, edit, remove):
-            actions.pack_start(button, False, False, 0)
+        actions.pack_start(edit, False, False, 0)
+        actions.pack_start(remove, False, False, 0)
         row.pack_start(text, True, True, 0)
         row.pack_start(actions, False, False, 0)
         shell.pack_start(row, False, False, 0)
         return shell
+
+    def on_open_url(self, item: SavedPassword) -> None:
+        self._note_activity()
+        if open_entry_url(item.url):
+            message = f"Opening {item.url.strip()}."
+        else:
+            message = "That URL could not be opened."
+        self.status.set_text(message)
+        if self.section == "saved":
+            self.manager_message.set_text(message)
+            self.manager_message.show()
 
     def on_toggle_reveal(self, name: str) -> None:
         if name in self.revealed_names:

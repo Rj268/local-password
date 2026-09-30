@@ -186,6 +186,35 @@ object Vault {
 
     fun utcNow(): String = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString()
 
+    fun reusedPasswordGroups(items: List<SavedPassword>): Map<String, List<String>> {
+        val groups = linkedMapOf<String, MutableList<String>>()
+        for (item in items) {
+            groups.getOrPut(item.password) { mutableListOf() }.add(item.name)
+        }
+        return groups.filterValues { it.size > 1 }
+    }
+
+    fun reuseWarningFor(item: SavedPassword, items: List<SavedPassword>): String {
+        val names = reusedPasswordGroups(items)[item.password] ?: return ""
+        val others = names.filter { it != item.name }
+        return when {
+            others.isEmpty() -> ""
+            others.size == 1 -> "Same password as ${others[0]}."
+            others.size == 2 -> "Same password as ${others[0]} and ${others[1]}."
+            else -> "Same password as ${others.size} other saved entries."
+        }
+    }
+
+    fun browseableUrl(url: String): String? {
+        val text = url.trim()
+        if (text.isEmpty()) return null
+        val lowered = text.lowercase(Locale.ROOT)
+        if (lowered.startsWith("https://") || lowered.startsWith("http://")) return text
+        // Reject other schemes (javascript:, file:, data:). Allow host:port.
+        if (Regex("^[a-z][a-z0-9+.-]*:(?!\\d)").containsMatchIn(lowered)) return null
+        return "https://$text"
+    }
+
     fun normalizeEntry(item: SavedPassword): SavedPassword {
         return item.copy(
             name = cleanName(item.name),

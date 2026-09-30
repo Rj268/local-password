@@ -296,7 +296,16 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
         } else if (model.saved.isEmpty()) {
             Text("The vault is empty.", color = muted)
         } else {
-            Text("Passwords stay masked until you show one. Edit adds username, URL, notes, and a category.", color = muted, fontSize = 13.sp)
+            val reuseCount = model.reusedPasswordCount()
+            Text(
+                if (reuseCount > 0) {
+                    "Passwords stay masked until you show one. Copy username and Open URL when those fields are set. $reuseCount password${if (reuseCount == 1) " is" else "s are"} reused."
+                } else {
+                    "Passwords stay masked until you show one. Copy username and Open URL when those fields are set."
+                },
+                color = muted,
+                fontSize = 13.sp,
+            )
             OutlinedTextField(
                 value = model.savedQuery,
                 onValueChange = { model.savedQuery = it },
@@ -333,6 +342,10 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
                         if (meta.isNotEmpty()) {
                             Text(meta.joinToString(" · "), color = muted, fontSize = 13.sp)
                         }
+                        val warning = model.reuseWarning(item)
+                        if (warning.isNotEmpty()) {
+                            Text(warning, color = Danger, fontSize = 13.sp)
+                        }
                         if (model.revealed == item.name) {
                             Text(item.password, color = ink, fontFamily = FontFamily.Monospace)
                             if (item.notes.isNotEmpty()) {
@@ -345,7 +358,13 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
                             TextButton(onClick = { model.revealed = if (model.revealed == item.name) null else item.name }) {
                                 Text(if (model.revealed == item.name) "Hide" else "Show", color = Green)
                             }
-                            TextButton(onClick = { model.copy(item.password) }) { Text("Copy", color = Green) }
+                            TextButton(onClick = { model.copy(item.password) }) { Text("Copy password", color = Green) }
+                            if (item.username.isNotEmpty()) {
+                                TextButton(onClick = { model.copy(item.username) }) { Text("Copy username", color = Green) }
+                            }
+                            if (Vault.browseableUrl(item.url) != null) {
+                                TextButton(onClick = { model.openUrl(item.url) }) { Text("Open URL", color = Green) }
+                            }
                             TextButton(onClick = { model.beginEdit(item) }) { Text("Edit", color = Green) }
                             TextButton(onClick = { model.requestRemove(item) }) { Text("Remove", color = Danger) }
                         }

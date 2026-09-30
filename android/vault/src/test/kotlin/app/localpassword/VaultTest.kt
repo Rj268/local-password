@@ -40,6 +40,25 @@ class VaultTest {
     }
 
     @Test
+    fun reusedPasswordGroupsAndBrowseableUrl() {
+        val items = listOf(
+            SavedPassword("Email", "shared"),
+            SavedPassword("Bank", "shared"),
+            SavedPassword("Unique", "solo"),
+        )
+        val groups = Vault.reusedPasswordGroups(items)
+        assertEquals(setOf("shared"), groups.keys)
+        assertEquals(listOf("Email", "Bank"), groups["shared"])
+        assertEquals("Same password as Bank.", Vault.reuseWarningFor(items[0], items))
+        assertEquals("", Vault.reuseWarningFor(items[2], items))
+        assertEquals("https://mail.example", Vault.browseableUrl("mail.example"))
+        assertEquals("https://mail.example", Vault.browseableUrl("https://mail.example"))
+        assertEquals("https://localhost:8080", Vault.browseableUrl("localhost:8080"))
+        assertEquals(null, Vault.browseableUrl("javascript:alert(1)"))
+        assertEquals(null, Vault.browseableUrl("file:///tmp/x"))
+    }
+
+    @Test
     fun changingPassphraseKeepsItemsAndRetiresOldSecrets() {
         val oldRecovery = "alpha bravo charlie delta echo foxtrot golf hotel"
         val (oldBlob, opened) = Vault.create(
