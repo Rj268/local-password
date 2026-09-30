@@ -320,9 +320,9 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
             }
             Text(
                 if (healthBits.isNotEmpty()) {
-                    "Passwords stay masked until you show one. Weak or reused passwords are called out. ${healthBits.joinToString(" · ")}."
+                    "Passwords stay masked until you show one. Weak or reused passwords are called out. ${healthBits.joinToString(" · ")}. Sort by Name, Recent, or Changed. Copying a saved password marks it Recent."
                 } else {
-                    "Passwords stay masked until you show one. Weak or reused passwords are called out. Needs attention filters those rows."
+                    "Passwords stay masked until you show one. Weak or reused passwords are called out. Needs attention filters those rows. Sort by Name, Recent, or Changed. Copying a saved password marks it Recent."
                 },
                 color = muted,
                 fontSize = 13.sp,
@@ -346,6 +346,18 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
                 }
                 TextButton(onClick = { model.categoryFilter = "all" }) {
                     Text(if (model.categoryFilter == "all") "All categories" else "Clear category", color = muted)
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Sort", color = muted, fontSize = 13.sp)
+                listOf(
+                    Vault.SAVED_SORT_NAME to "Name",
+                    Vault.SAVED_SORT_RECENT to "Recent",
+                    Vault.SAVED_SORT_CHANGED to "Changed",
+                ).forEach { (mode, label) ->
+                    TextButton(onClick = { model.savedSortMode = mode }) {
+                        Text(label, color = if (model.savedSortMode == mode) Green else muted)
+                    }
                 }
             }
             val categories = model.categories()
@@ -389,9 +401,13 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
                             TextButton(onClick = { model.revealed = if (model.revealed == item.name) null else item.name }) {
                                 Text(if (model.revealed == item.name) "Hide" else "Show", color = Green)
                             }
-                            TextButton(onClick = { model.copy(item.password) }) { Text("Copy password", color = Green) }
+                            TextButton(onClick = { model.copySavedSecret(item, item.password) }) {
+                                Text("Copy password", color = Green)
+                            }
                             if (item.username.isNotEmpty()) {
-                                TextButton(onClick = { model.copy(item.username) }) { Text("Copy username", color = Green) }
+                                TextButton(onClick = { model.copySavedSecret(item, item.username) }) {
+                                    Text("Copy username", color = Green)
+                                }
                             }
                             if (Vault.browseableUrl(item.url) != null) {
                                 TextButton(onClick = { model.openUrl(item.url) }) { Text("Open URL", color = Green) }

@@ -50,6 +50,7 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     var favoritesOnly by mutableStateOf(false)
     var needsAttentionOnly by mutableStateOf(false)
     var categoryFilter by mutableStateOf("all")
+    var savedSortMode by mutableStateOf(Vault.SAVED_SORT_NAME)
     var pendingRemove by mutableStateOf<SavedPassword?>(null)
     var pendingReplace by mutableStateOf<SavedPassword?>(null)
     var historyFor by mutableStateOf<SavedPassword?>(null)
@@ -125,6 +126,27 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
                 currentClip.getItemAt(0).coerceToText(getApplication()).toString() == text
             if (stillOurs) {
                 clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
+            }
+        }
+    }
+
+    fun copySavedSecret(item: SavedPassword, text: String) {
+        copy(text)
+        if (text.isEmpty()) return
+        val currentOpen = opened ?: return
+        val current = currentOpen.items.firstOrNull { it.name == item.name } ?: return
+        viewModelScope.launch {
+            try {
+                val next = withContext(Dispatchers.Default) {
+                    Vault.touchLastUsed(currentOpen.items, current)
+                }
+                val blob = withContext(Dispatchers.Default) { Vault.seal(currentOpen, next) }
+                writeAtomically(blob)
+                opened = currentOpen.copy(items = next)
+                saved = next
+                unlocked = true
+            } catch (_: VaultException) {
+                // Copy already succeeded; leave last-used alone if sealing fails.
             }
         }
     }
@@ -405,6 +427,7 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
                     category = updated.category,
                     favorite = updated.favorite,
                     created = previous.created.ifEmpty { now },
+                    lastUsed = previous.lastUsed,
                     extras = previous.extras,
                     history = previous.history,
                 )
@@ -436,23 +459,16 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
 
     fun filteredSaved(): List<SavedPassword> {
         val needle = savedQuery.trim().lowercase(Locale.getDefault())
-        return saved
-            .filter { item ->
-                val matchesQuery = needle.isEmpty() || listOf(
-                    item.name, item.username, item.url, item.notes, item.category,
-                ).any { it.lowercase(Locale.getDefault()).contains(needle) }
-                val matchesFavorite = !favoritesOnly || item.favorite
-                val matchesAttention = !needsAttentionOnly || Vault.entryNeedsAttention(item, saved)
-                val matchesCategory = categoryFilter == "all" || item.category == categoryFilter
-                matchesQuery && matchesFavorite && matchesAttention && matchesCategory
-            }
-            .sortedWith(
-                compareBy(
-                    { !Vault.entryNeedsAttention(it, saved) },
-                    { !it.favorite },
-                    { it.name.lowercase(Locale.getDefault()) },
-                ),
-            )
+        val matches = saved.filter { item ->
+            val matchesQuery = needle.isEmpty() || listOf(
+                item.name, item.username, item.url, item.notes, item.category,
+            ).any { it.lowercase(Locale.getDefault()).contains(needle) }
+            val matchesFavorite = !favoritesOnly || item.favorite
+            val matchesAttention = !needsAttentionOnly || Vault.entryNeedsAttention(item, saved)
+            val matchesCategory = categoryFilter == "all" || item.category == categoryFilter
+            matchesQuery && matchesFavorite && matchesAttention && matchesCategory
+        }
+        return Vault.sortedSavedEntries(matches, savedSortMode, allItems = saved)
     }
 
     fun reuseWarning(item: SavedPassword): String = Vault.reuseWarningFor(item, saved)

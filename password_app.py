@@ -65,9 +65,14 @@ KNOWN_ENTRY_KEYS = frozenset(
         "created",
         "modified",
         "history",
+        "last_used",
     }
 )
 MAX_PASSWORD_HISTORY = 5
+SAVED_SORT_NAME = "name"
+SAVED_SORT_RECENT = "recent"
+SAVED_SORT_CHANGED = "changed"
+SAVED_SORT_MODES = (SAVED_SORT_NAME, SAVED_SORT_RECENT, SAVED_SORT_CHANGED)
 DEFAULT_CLIPBOARD_CLEAR_SECONDS = 30
 DEFAULT_AUTO_LOCK_SECONDS = 300
 CLIPBOARD_CLEAR_OPTIONS = (
@@ -519,6 +524,7 @@ class SavedPassword:
     favorite: bool = False
     created: str = ""
     modified: str = ""
+    last_used: str = ""
     history: tuple[PasswordRevision, ...] = ()
     extras: dict[str, object] = field(default_factory=dict)
 
@@ -569,6 +575,49 @@ def entry_matches(item: SavedPassword, query: str) -> bool:
         item.category,
     )
     return any(needle in value.casefold() for value in haystacks if value)
+
+
+def sorted_saved_entries(
+    items: list[SavedPassword],
+    mode: str,
+    *,
+    all_items: list[SavedPassword] | None = None,
+) -> list[SavedPassword]:
+    """Order Saved rows by name, last used, or last changed."""
+    pool = all_items if all_items is not None else items
+    sort_mode = mode if mode in SAVED_SORT_MODES else SAVED_SORT_NAME
+    if sort_mode == SAVED_SORT_RECENT:
+        used = [item for item in items if item.last_used]
+        unused = [item for item in items if not item.last_used]
+        used.sort(key=lambda item: (item.last_used, item.name.casefold()), reverse=True)
+        unused.sort(key=lambda item: item.name.casefold())
+        return used + unused
+    if sort_mode == SAVED_SORT_CHANGED:
+        stamped = [item for item in items if item.modified]
+        plain = [item for item in items if not item.modified]
+        stamped.sort(key=lambda item: (item.modified, item.name.casefold()), reverse=True)
+        plain.sort(key=lambda item: item.name.casefold())
+        return stamped + plain
+    return sorted(
+        items,
+        key=lambda item: (
+            not entry_needs_attention(item, pool),
+            not item.favorite,
+            item.name.casefold(),
+        ),
+    )
+
+
+def touch_last_used(
+    existing: list[SavedPassword],
+    item: SavedPassword,
+    *,
+    when: str | None = None,
+) -> list[SavedPassword]:
+    """Stamp last_used without changing the password or modified time."""
+    stamp = when or utc_now()
+    updated = replace(item, last_used=stamp)
+    return [updated if entry.name == item.name else entry for entry in existing]
 
 
 def reused_password_groups(items: list[SavedPassword]) -> dict[str, list[str]]:
@@ -1056,6 +1105,7 @@ def remember_named(
             favorite=previous.favorite,
             created=previous.created if previous.created else now,
             modified=now,
+            last_used=previous.last_used,
             history=previous.history,
             extras=dict(previous.extras),
         )
@@ -1097,6 +1147,7 @@ def upsert_entry(existing: list[SavedPassword], item: SavedPassword, *, previous
         category=clean_category(item.category),
         created=prior.created if prior and prior.created else (item.created or now),
         modified=now,
+        last_used=item.last_used or (prior.last_used if prior else ""),
         history=tuple(item.history),
         extras=dict(item.extras),
     )
@@ -1249,6 +1300,8 @@ def _entry_to_json(item: SavedPassword) -> dict[str, object]:
         payload["created"] = item.created
     if item.modified:
         payload["modified"] = item.modified
+    if item.last_used:
+        payload["last_used"] = item.last_used
     if item.history:
         payload["history"] = [
             (
@@ -1303,6 +1356,7 @@ def _entry_from_json(entry: dict) -> SavedPassword:
     favorite = entry.get("favorite", False)
     created = entry.get("created", "")
     modified = entry.get("modified", "")
+    last_used = entry.get("last_used", "")
     if username is None:
         username = ""
     if url is None:
@@ -1315,9 +1369,13 @@ def _entry_from_json(entry: dict) -> SavedPassword:
         created = ""
     if modified is None:
         modified = ""
+    if last_used is None:
+        last_used = ""
     if not isinstance(username, str) or not isinstance(url, str) or not isinstance(notes, str):
         raise ValueError("The saved password file is damaged.")
     if not isinstance(category, str) or not isinstance(created, str) or not isinstance(modified, str):
+        raise ValueError("The saved password file is damaged.")
+    if not isinstance(last_used, str):
         raise ValueError("The saved password file is damaged.")
     if not isinstance(favorite, bool):
         raise ValueError("The saved password file is damaged.")
@@ -1337,6 +1395,7 @@ def _entry_from_json(entry: dict) -> SavedPassword:
         favorite=favorite,
         created=created.strip(),
         modified=modified.strip(),
+        last_used=last_used.strip(),
         history=history,
         extras=extras,
     )
@@ -1406,6 +1465,9 @@ def _merge_matching_entry(local: SavedPassword, incoming: SavedPassword) -> Save
     modified = max(local.modified, incoming.modified) if local.modified and incoming.modified else (
         local.modified or incoming.modified
     )
+    last_used = max(local.last_used, incoming.last_used) if local.last_used and incoming.last_used else (
+        local.last_used or incoming.last_used
+    )
     return SavedPassword(
         local.name,
         local.password,
@@ -1416,6 +1478,7 @@ def _merge_matching_entry(local: SavedPassword, incoming: SavedPassword) -> Save
         favorite=favorites,
         created=created,
         modified=modified,
+        last_used=last_used,
         history=_merge_histories(local.history, incoming.history, current_password=local.password),
         extras=extras,
     )
@@ -2982,7 +3045,8 @@ class PasswordWindow:
             label=(
                 "Passwords stay masked until you show one. Weak or reused passwords are called "
                 "out. Needs attention filters those rows. Replace password generates a strong "
-                "one, saves it, and copies it. Previous keeps the last few passwords for that entry."
+                "one, saves it, and copies it. Previous keeps the last few passwords for that entry. "
+                "Sort by Name, Recent, or Changed. Copying a saved password marks it Recent."
             ),
             xalign=0,
         )
@@ -3011,6 +3075,26 @@ class PasswordWindow:
         filter_row.pack_start(self.category_combo, True, True, 0)
         page.pack_start(filter_row, False, False, 0)
         self.filter_row = filter_row
+
+        sort_row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
+        sort_label = gtk.Label(label="Sort", xalign=0)
+        sort_label.get_style_context().add_class("hint")
+        sort_row.pack_start(sort_label, False, False, 0)
+        self.sort_name = self._chip("Name", True)
+        self.sort_recent = self._chip("Recent", False)
+        self.sort_changed = self._chip("Changed", False)
+        self._sort_chips = {
+            SAVED_SORT_NAME: self.sort_name,
+            SAVED_SORT_RECENT: self.sort_recent,
+            SAVED_SORT_CHANGED: self.sort_changed,
+        }
+        self.saved_sort_mode = SAVED_SORT_NAME
+        self._suppress_sort_change = False
+        for mode, chip in self._sort_chips.items():
+            chip.connect("toggled", self._on_sort_chip_toggled, mode)
+            sort_row.pack_start(chip, False, False, 0)
+        page.pack_start(sort_row, False, False, 0)
+        self.sort_row = sort_row
 
         self.manager_message = gtk.Label(label="", xalign=0)
         self.manager_message.set_line_wrap(True)
@@ -3426,6 +3510,27 @@ class PasswordWindow:
             return
         self._refresh_saved_rows()
 
+    def _on_sort_chip_toggled(self, button, mode: str) -> None:
+        if self._suppress_sort_change:
+            return
+        if not button.get_active():
+            # Keep one sort mode on at all times.
+            if mode == self.saved_sort_mode:
+                self._suppress_sort_change = True
+                try:
+                    button.set_active(True)
+                finally:
+                    self._suppress_sort_change = False
+            return
+        self.saved_sort_mode = mode
+        self._suppress_sort_change = True
+        try:
+            for key, chip in self._sort_chips.items():
+                chip.set_active(key == mode)
+        finally:
+            self._suppress_sort_change = False
+        self._refresh_saved_rows()
+
     def _refresh_category_filter(self) -> None:
         current = self.category_combo.get_active_id() or "all"
         categories = sorted(
@@ -3452,6 +3557,7 @@ class PasswordWindow:
         if self.locked and self.vault_key is None:
             self.find_entry.hide()
             self.filter_row.hide()
+            self.sort_row.hide()
             self.saved_scroll.hide()
             self.saved_heading.set_text("Saved")
             self.saved_heading.show()
@@ -3463,6 +3569,7 @@ class PasswordWindow:
             return
         self.find_entry.show()
         self.filter_row.show()
+        self.sort_row.show()
         if not self.saved:
             self.saved_scroll.hide()
             self.saved_heading.set_text("Saved")
@@ -3484,13 +3591,7 @@ class PasswordWindow:
             and (not attention_only or entry_needs_attention(item, self.saved))
             and (category == "all" or item.category == category)
         ]
-        matches.sort(
-            key=lambda item: (
-                not entry_needs_attention(item, self.saved),
-                not item.favorite,
-                item.name.casefold(),
-            )
-        )
+        matches = sorted_saved_entries(matches, self.saved_sort_mode, all_items=self.saved)
         count = len(self.saved)
         weak_count, reuse_count, _attention = password_health_summary(self.saved)
         heading = "1 saved" if count == 1 else f"{count} saved"
@@ -3573,7 +3674,10 @@ class PasswordWindow:
         show.connect("clicked", lambda *_args, label=item.name: self.on_toggle_reveal(label))
         copy = gtk.Button(label="Copy password")
         copy.get_style_context().add_class("primary")
-        copy.connect("clicked", lambda *_args, password=item.password: self.on_copy_text(password))
+        copy.connect(
+            "clicked",
+            lambda *_args, entry=item: self.on_copy_saved_secret(entry, entry.password),
+        )
         actions.pack_start(show, False, False, 0)
         actions.pack_start(copy, False, False, 0)
         if item.username:
@@ -3581,7 +3685,7 @@ class PasswordWindow:
             copy_user.get_style_context().add_class("secondary")
             copy_user.connect(
                 "clicked",
-                lambda *_args, username=item.username: self.on_copy_text(username),
+                lambda *_args, entry=item: self.on_copy_saved_secret(entry, entry.username),
             )
             actions.pack_start(copy_user, False, False, 0)
         if browseable_url(item.url):
@@ -4308,6 +4412,25 @@ class PasswordWindow:
         if self.section == "settings":
             self._sync_note(message)
 
+    def on_copy_saved_secret(self, item: SavedPassword, text: str) -> None:
+        """Copy a field from a saved entry and mark that entry as recently used."""
+        self.on_copy_text(text)
+        if self.vault_key is None or not text:
+            return
+        current = next((entry for entry in self.saved if entry.name == item.name), None)
+        if current is None:
+            return
+        try:
+            updated = touch_last_used(self.saved, current)
+            write_vault(self.vault_key, updated)
+        except (OSError, ValueError):
+            return
+        self.saved = updated
+        if self.saved_sort_mode == SAVED_SORT_RECENT:
+            self._refresh_saved_rows()
+        elif self.section == "dashboard":
+            self._refresh_dashboard()
+
     def on_save(self, _button) -> None:
         if not self.save_ready or not self.current or self.showing_saved:
             self.status.set_text("Generate a password. Name it, then save it.")
@@ -4405,6 +4528,7 @@ class PasswordWindow:
                     notes=edited.notes,
                     category=edited.category,
                     favorite=edited.favorite,
+                    last_used=edited.last_used,
                     extras=dict(edited.extras),
                 ),
                 edited.password,
@@ -4503,6 +4627,7 @@ class PasswordWindow:
                     favorite=favorite.get_active(),
                     created=item.created,
                     modified=item.modified,
+                    last_used=item.last_used,
                     history=item.history,
                     extras=dict(item.extras),
                 )

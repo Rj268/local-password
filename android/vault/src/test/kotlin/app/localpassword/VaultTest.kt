@@ -110,6 +110,49 @@ class VaultTest {
     }
 
     @Test
+    fun sortedSavedEntriesAndTouchLastUsed() {
+        val alpha = SavedPassword(
+            name = "Alpha",
+            password = "secret-alpha-value",
+            favorite = true,
+            modified = "2024-01-02T00:00:00Z",
+        )
+        val beta = SavedPassword(
+            name = "Beta",
+            password = "secret-beta-value",
+            modified = "2024-03-01T00:00:00Z",
+            lastUsed = "2024-02-01T00:00:00Z",
+        )
+        val gamma = SavedPassword(
+            name = "Gamma",
+            password = "secret-gamma-value",
+            modified = "2024-01-01T00:00:00Z",
+            lastUsed = "2024-04-01T00:00:00Z",
+        )
+        val items = listOf(alpha, beta, gamma)
+        assertEquals(
+            listOf("Alpha", "Beta", "Gamma"),
+            Vault.sortedSavedEntries(items, Vault.SAVED_SORT_NAME).map { it.name },
+        )
+        assertEquals(
+            listOf("Gamma", "Beta", "Alpha"),
+            Vault.sortedSavedEntries(items, Vault.SAVED_SORT_RECENT).map { it.name },
+        )
+        assertEquals(
+            listOf("Beta", "Alpha", "Gamma"),
+            Vault.sortedSavedEntries(items, Vault.SAVED_SORT_CHANGED).map { it.name },
+        )
+        val stamped = Vault.touchLastUsed(items, alpha, whenStamp = "2024-05-01T00:00:00Z")
+        assertEquals("2024-05-01T00:00:00Z", stamped[0].lastUsed)
+        assertEquals(alpha.modified, stamped[0].modified)
+        assertEquals(alpha.password, stamped[0].password)
+        val recovery = "alpha bravo charlie delta echo foxtrot golf hotel"
+        val (blob, _) = Vault.create("passphrase-here", recovery, stamped)
+        val loaded = Vault.open("passphrase-here", blob).items
+        assertEquals("2024-05-01T00:00:00Z", loaded.first { it.name == "Alpha" }.lastUsed)
+    }
+
+    @Test
     fun passwordHistoryRestoreAndCap() {
         var items = listOf(SavedPassword("Site", "one"))
         for (secret in listOf("two", "three", "four", "five", "six", "seven")) {

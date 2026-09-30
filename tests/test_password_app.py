@@ -352,6 +352,44 @@ class VaultTests(unittest.TestCase):
         self.assertEqual(len(updated[0].history), 1)
         self.assertEqual(updated[0].history[0].password, "abc123")
 
+    def test_sorted_saved_entries_and_touch_last_used(self) -> None:
+        alpha = password_app.SavedPassword(
+            "Alpha",
+            "secret-alpha-value",
+            favorite=True,
+            modified="2024-01-02T00:00:00Z",
+        )
+        beta = password_app.SavedPassword(
+            "Beta",
+            "secret-beta-value",
+            modified="2024-03-01T00:00:00Z",
+            last_used="2024-02-01T00:00:00Z",
+        )
+        gamma = password_app.SavedPassword(
+            "Gamma",
+            "secret-gamma-value",
+            modified="2024-01-01T00:00:00Z",
+            last_used="2024-04-01T00:00:00Z",
+        )
+        items = [alpha, beta, gamma]
+        by_name = password_app.sorted_saved_entries(items, password_app.SAVED_SORT_NAME)
+        self.assertEqual([item.name for item in by_name], ["Alpha", "Beta", "Gamma"])
+        by_recent = password_app.sorted_saved_entries(items, password_app.SAVED_SORT_RECENT)
+        self.assertEqual([item.name for item in by_recent], ["Gamma", "Beta", "Alpha"])
+        by_changed = password_app.sorted_saved_entries(items, password_app.SAVED_SORT_CHANGED)
+        self.assertEqual([item.name for item in by_changed], ["Beta", "Alpha", "Gamma"])
+        stamped = password_app.touch_last_used(items, alpha, when="2024-05-01T00:00:00Z")
+        self.assertEqual(stamped[0].last_used, "2024-05-01T00:00:00Z")
+        self.assertEqual(stamped[0].modified, alpha.modified)
+        self.assertEqual(stamped[0].password, alpha.password)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "saved.vault"
+            material = password_app.new_vault_key("passphrase-here", password_app.new_recovery_key(), n=2**14)
+            password_app.write_vault(material, stamped, path)
+            _key, loaded = password_app.open_vault("passphrase-here", path)
+            loaded_alpha = next(item for item in loaded if item.name == "Alpha")
+            self.assertEqual(loaded_alpha.last_used, "2024-05-01T00:00:00Z")
+
     def test_password_history_restore_and_cap(self) -> None:
         item = password_app.SavedPassword("Site", "one")
         items = [item]

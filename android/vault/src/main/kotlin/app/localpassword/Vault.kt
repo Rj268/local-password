@@ -33,6 +33,7 @@ data class SavedPassword(
     val favorite: Boolean = false,
     val created: String = "",
     val modified: String = "",
+    val lastUsed: String = "",
     val history: List<PasswordRevision> = emptyList(),
     val extras: Map<String, Any?> = emptyMap(),
 )
@@ -53,6 +54,9 @@ object Vault {
     const val MIN_PASSPHRASE_LENGTH = 8
     const val RECOVERY_WORD_COUNT = 8
     const val MAX_PASSWORD_HISTORY = 5
+    const val SAVED_SORT_NAME = "name"
+    const val SAVED_SORT_RECENT = "recent"
+    const val SAVED_SORT_CHANGED = "changed"
     const val SCRYPT_N = 1 shl 15
     const val SCRYPT_R = 8
     const val SCRYPT_P = 1
@@ -167,9 +171,50 @@ object Vault {
             favorite = local.favorite || incoming.favorite,
             created = local.created.ifEmpty { incoming.created },
             modified = modified,
+            lastUsed = when {
+                local.lastUsed.isNotEmpty() && incoming.lastUsed.isNotEmpty() ->
+                    maxOf(local.lastUsed, incoming.lastUsed)
+                else -> local.lastUsed.ifEmpty { incoming.lastUsed }
+            },
             history = mergeHistories(local.history, incoming.history, local.password),
             extras = extras,
         )
+    }
+
+    fun sortedSavedEntries(
+        items: List<SavedPassword>,
+        mode: String,
+        allItems: List<SavedPassword> = items,
+    ): List<SavedPassword> {
+        return when (mode) {
+            SAVED_SORT_RECENT -> {
+                val used = items.filter { it.lastUsed.isNotEmpty() }
+                    .sortedWith(compareByDescending<SavedPassword> { it.lastUsed }.thenBy { it.name.lowercase(Locale.ROOT) })
+                val unused = items.filter { it.lastUsed.isEmpty() }
+                    .sortedBy { it.name.lowercase(Locale.ROOT) }
+                used + unused
+            }
+            SAVED_SORT_CHANGED -> {
+                val stamped = items.filter { it.modified.isNotEmpty() }
+                    .sortedWith(compareByDescending<SavedPassword> { it.modified }.thenBy { it.name.lowercase(Locale.ROOT) })
+                val plain = items.filter { it.modified.isEmpty() }
+                    .sortedBy { it.name.lowercase(Locale.ROOT) }
+                stamped + plain
+            }
+            else -> items.sortedWith(
+                compareBy(
+                    { !entryNeedsAttention(it, allItems) },
+                    { !it.favorite },
+                    { it.name.lowercase(Locale.ROOT) },
+                ),
+            )
+        }
+    }
+
+    fun touchLastUsed(items: List<SavedPassword>, item: SavedPassword, whenStamp: String = utcNow()): List<SavedPassword> {
+        return items.map { entry ->
+            if (entry.name == item.name) entry.copy(lastUsed = whenStamp) else entry
+        }
     }
 
     private fun mergeHistories(
@@ -485,6 +530,7 @@ object Vault {
             category = cleanCategory(item.category),
             created = item.created.trim(),
             modified = item.modified.trim(),
+            lastUsed = item.lastUsed.trim(),
             history = item.history.mapNotNull { revision ->
                 try {
                     PasswordRevision(passwordLine(revision.password), revision.replacedAt.trim())
@@ -708,6 +754,7 @@ object Vault {
         if (item.favorite) obj.put("favorite", true)
         if (item.created.isNotEmpty()) obj.put("created", item.created)
         if (item.modified.isNotEmpty()) obj.put("modified", item.modified)
+        if (item.lastUsed.isNotEmpty()) obj.put("last_used", item.lastUsed)
         if (item.history.isNotEmpty()) {
             val history = JSONArray()
             for (revision in item.history) {
@@ -777,6 +824,7 @@ object Vault {
                 favorite = obj.optBoolean("favorite", false),
                 created = obj.optString("created", ""),
                 modified = obj.optString("modified", ""),
+                lastUsed = obj.optString("last_used", ""),
                 history = historyFromJson(obj.optJSONArray("history")),
                 extras = extras,
             ),
@@ -803,7 +851,7 @@ object Vault {
     }
 
     private val KNOWN_ENTRY_KEYS = setOf(
-        "name", "password", "username", "url", "notes", "category", "favorite", "created", "modified", "history",
+        "name", "password", "username", "url", "notes", "category", "favorite", "created", "modified", "history", "last_used",
     )
 }
 
