@@ -52,6 +52,7 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     var categoryFilter by mutableStateOf("all")
     var pendingRemove by mutableStateOf<SavedPassword?>(null)
     var pendingReplace by mutableStateOf<SavedPassword?>(null)
+    var historyFor by mutableStateOf<SavedPassword?>(null)
     var editing by mutableStateOf<SavedPassword?>(null)
 
     private var opened: OpenVault? = null
@@ -324,9 +325,56 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
                 unlocked = true
                 revealed = item.name
                 copy(fresh)
-                status = "Replaced the password for ${item.name} and copied it."
+                status = "Replaced the password for ${item.name} and copied it. The old one is under Previous."
             } catch (exc: VaultException) {
                 error = exc.message ?: "Could not save the new password."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    fun showHistory(item: SavedPassword) {
+        historyFor = item
+    }
+
+    fun cancelHistory() {
+        historyFor = null
+    }
+
+    fun copyPrevious(secret: String) {
+        historyFor = null
+        copy(secret)
+        status = "Copied a previous password."
+    }
+
+    fun restorePrevious(index: Int) {
+        val item = historyFor ?: return
+        val currentOpen = opened ?: return
+        val current = currentOpen.items.firstOrNull { it.name == item.name } ?: run {
+            error = "That saved password is gone."
+            historyFor = null
+            return
+        }
+        historyFor = null
+        viewModelScope.launch {
+            busy = true
+            error = ""
+            try {
+                val next = withContext(Dispatchers.Default) {
+                    Vault.restoreEntryPassword(currentOpen.items, current, index)
+                }
+                val blob = withContext(Dispatchers.Default) { Vault.seal(currentOpen, next) }
+                writeAtomically(blob)
+                opened = currentOpen.copy(items = next)
+                saved = next
+                unlocked = true
+                val restored = next.first { it.name == current.name }
+                revealed = restored.name
+                copy(restored.password)
+                status = "Restored the previous password for ${restored.name} and copied it."
+            } catch (exc: VaultException) {
+                error = exc.message ?: "Could not restore that password."
             } finally {
                 busy = false
             }
@@ -349,13 +397,22 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
             error = ""
             try {
                 val now = Vault.utcNow()
-                val stamped = Vault.normalizeEntry(
-                    updated.copy(
-                        created = previous.created.ifEmpty { now },
-                        modified = now,
-                        extras = previous.extras,
-                    ),
+                val base = previous.copy(
+                    name = updated.name,
+                    username = updated.username,
+                    url = updated.url,
+                    notes = updated.notes,
+                    category = updated.category,
+                    favorite = updated.favorite,
+                    created = previous.created.ifEmpty { now },
+                    extras = previous.extras,
+                    history = previous.history,
                 )
+                val stamped = if (updated.password != previous.password) {
+                    Vault.withChangedPassword(base, updated.password)
+                } else {
+                    Vault.normalizeEntry(base.copy(password = previous.password, modified = now))
+                }
                 if (stamped.name != previous.name && currentOpen.items.any { it.name == stamped.name }) {
                     error = "Another saved password already uses that name."
                     return@launch
@@ -701,18 +758,29 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
         val now = Vault.utcNow()
         val label = Vault.cleanName(name)
         val previous = currentOpen.items.firstOrNull { it.name == label }
-        val item = SavedPassword(
-            name = label,
-            password = current,
-            username = previous?.username.orEmpty(),
-            url = previous?.url.orEmpty(),
-            notes = previous?.notes.orEmpty(),
-            category = previous?.category.orEmpty(),
-            favorite = previous?.favorite == true,
-            created = previous?.created?.ifEmpty { now } ?: now,
-            modified = now,
-            extras = previous?.extras.orEmpty(),
-        )
+        val item = if (previous == null) {
+            SavedPassword(
+                name = label,
+                password = current,
+                created = now,
+                modified = now,
+            )
+        } else if (previous.password == current) {
+            previous.copy(modified = now)
+        } else {
+            Vault.withChangedPassword(
+                previous.copy(
+                    username = previous.username,
+                    url = previous.url,
+                    notes = previous.notes,
+                    category = previous.category,
+                    favorite = previous.favorite,
+                    created = previous.created.ifEmpty { now },
+                    extras = previous.extras,
+                ),
+                current,
+            )
+        }
         replace(currentOpen, currentOpen.items.filter { it.name != item.name } + item, "Saved.")
     }
 

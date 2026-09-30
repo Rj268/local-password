@@ -64,8 +64,10 @@ KNOWN_ENTRY_KEYS = frozenset(
         "favorite",
         "created",
         "modified",
+        "history",
     }
 )
+MAX_PASSWORD_HISTORY = 5
 DEFAULT_CLIPBOARD_CLEAR_SECONDS = 30
 DEFAULT_AUTO_LOCK_SECONDS = 300
 CLIPBOARD_CLEAR_OPTIONS = (
@@ -499,6 +501,14 @@ def generate(
 
 
 @dataclass(frozen=True)
+class PasswordRevision:
+    """One previous password kept after a replace or edit."""
+
+    password: str
+    replaced_at: str = ""
+
+
+@dataclass(frozen=True)
 class SavedPassword:
     name: str
     password: str
@@ -509,6 +519,7 @@ class SavedPassword:
     favorite: bool = False
     created: str = ""
     modified: str = ""
+    history: tuple[PasswordRevision, ...] = ()
     extras: dict[str, object] = field(default_factory=dict)
 
 
@@ -654,17 +665,73 @@ def strong_replacement_password() -> str:
     return generator.generate_password(length, pool)
 
 
+def _history_after_change(
+    old_password: str,
+    history: tuple[PasswordRevision, ...],
+    *,
+    replaced_at: str | None = None,
+) -> tuple[PasswordRevision, ...]:
+    """Push the old password onto history, newest first, capped."""
+    secret = _password_line(old_password)
+    when = replaced_at or utc_now()
+    revisions: list[PasswordRevision] = [PasswordRevision(secret, when)]
+    for item in history:
+        try:
+            previous = _password_line(item.password)
+        except ValueError:
+            continue
+        if previous == secret:
+            continue
+        if any(previous == kept.password for kept in revisions):
+            continue
+        revisions.append(PasswordRevision(previous, item.replaced_at))
+        if len(revisions) >= MAX_PASSWORD_HISTORY:
+            break
+    return tuple(revisions[:MAX_PASSWORD_HISTORY])
+
+
+def with_changed_password(item: SavedPassword, new_password: str) -> SavedPassword:
+    """Swap the password and keep the old one in history."""
+    secret = _password_line(new_password)
+    if secret == item.password:
+        return item
+    return replace(
+        item,
+        password=secret,
+        modified=utc_now(),
+        history=_history_after_change(item.password, item.history),
+    )
+
+
 def replace_entry_password(
     existing: list[SavedPassword],
     item: SavedPassword,
     new_password: str,
 ) -> list[SavedPassword]:
-    """Keep the entry fields and swap only the password."""
-    stamped = replace(
-        item,
-        password=_password_line(new_password),
-        modified=utc_now(),
+    """Keep the entry fields, swap the password, and remember the previous one."""
+    return upsert_entry(existing, with_changed_password(item, new_password), previous_name=item.name)
+
+
+def restore_entry_password(
+    existing: list[SavedPassword],
+    item: SavedPassword,
+    index: int,
+) -> list[SavedPassword]:
+    """Put a previous password back and keep the current one in history."""
+    if index < 0 or index >= len(item.history):
+        raise ValueError("That previous password is gone.")
+    revision = item.history[index]
+    secret = _password_line(revision.password)
+    if secret == item.password:
+        raise ValueError("That is already the current password.")
+    stamped = with_changed_password(item, secret)
+    # Drop the restored revision from history so it is not listed twice.
+    trimmed = tuple(
+        entry
+        for entry in stamped.history
+        if entry.password != secret
     )
+    stamped = replace(stamped, history=trimmed)
     return upsert_entry(existing, stamped, previous_name=item.name)
 
 
@@ -976,18 +1043,25 @@ def remember_named(
 
     def _fresh(entry_name: str, password: str) -> SavedPassword:
         previous = by_name.get(entry_name)
-        return SavedPassword(
+        secret = _password_line(password)
+        if previous is None:
+            return SavedPassword(entry_name, secret, created=now, modified=now)
+        base = SavedPassword(
             entry_name,
-            _password_line(password),
-            username=previous.username if previous else "",
-            url=previous.url if previous else "",
-            notes=previous.notes if previous else "",
-            category=previous.category if previous else "",
-            favorite=previous.favorite if previous else False,
-            created=previous.created if previous and previous.created else now,
+            previous.password,
+            username=previous.username,
+            url=previous.url,
+            notes=previous.notes,
+            category=previous.category,
+            favorite=previous.favorite,
+            created=previous.created if previous.created else now,
             modified=now,
-            extras=dict(previous.extras) if previous else {},
+            history=previous.history,
+            extras=dict(previous.extras),
         )
+        if secret == previous.password:
+            return base
+        return with_changed_password(base, secret)
 
     if len(passwords) == 1:
         fresh = [_fresh(label, passwords[0])]
@@ -1023,6 +1097,7 @@ def upsert_entry(existing: list[SavedPassword], item: SavedPassword, *, previous
         category=clean_category(item.category),
         created=prior.created if prior and prior.created else (item.created or now),
         modified=now,
+        history=tuple(item.history),
         extras=dict(item.extras),
     )
     kept = [entry for entry in existing if entry.name not in drop]
@@ -1174,10 +1249,48 @@ def _entry_to_json(item: SavedPassword) -> dict[str, object]:
         payload["created"] = item.created
     if item.modified:
         payload["modified"] = item.modified
+    if item.history:
+        payload["history"] = [
+            (
+                {"password": revision.password, "replaced_at": revision.replaced_at}
+                if revision.replaced_at
+                else {"password": revision.password}
+            )
+            for revision in item.history
+        ]
     for key, value in item.extras.items():
         if key not in KNOWN_ENTRY_KEYS:
             payload[key] = value
     return payload
+
+
+def _history_from_json(value: object) -> tuple[PasswordRevision, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise ValueError("The saved password file is damaged.")
+    revisions: list[PasswordRevision] = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            raise ValueError("The saved password file is damaged.")
+        password = entry.get("password")
+        replaced_at = entry.get("replaced_at", "")
+        if not isinstance(password, str):
+            raise ValueError("The saved password file is damaged.")
+        if replaced_at is None:
+            replaced_at = ""
+        if not isinstance(replaced_at, str):
+            raise ValueError("The saved password file is damaged.")
+        try:
+            secret = _password_line(password)
+        except ValueError as exc:
+            raise ValueError("The saved password file is damaged.") from exc
+        if any(secret == kept.password for kept in revisions):
+            continue
+        revisions.append(PasswordRevision(secret, replaced_at.strip()))
+        if len(revisions) >= MAX_PASSWORD_HISTORY:
+            break
+    return tuple(revisions)
 
 
 def _entry_from_json(entry: dict) -> SavedPassword:
@@ -1208,6 +1321,7 @@ def _entry_from_json(entry: dict) -> SavedPassword:
         raise ValueError("The saved password file is damaged.")
     if not isinstance(favorite, bool):
         raise ValueError("The saved password file is damaged.")
+    history = _history_from_json(entry.get("history"))
     extras = {
         key: value
         for key, value in entry.items()
@@ -1223,6 +1337,7 @@ def _entry_from_json(entry: dict) -> SavedPassword:
         favorite=favorite,
         created=created.strip(),
         modified=modified.strip(),
+        history=history,
         extras=extras,
     )
 
@@ -1259,6 +1374,28 @@ def _prefer_text(left: str, right: str) -> str:
     return left if left.strip() else right
 
 
+def _merge_histories(
+    left: tuple[PasswordRevision, ...],
+    right: tuple[PasswordRevision, ...],
+    *,
+    current_password: str,
+) -> tuple[PasswordRevision, ...]:
+    merged: list[PasswordRevision] = []
+    for revision in (*left, *right):
+        try:
+            secret = _password_line(revision.password)
+        except ValueError:
+            continue
+        if secret == current_password:
+            continue
+        if any(secret == kept.password for kept in merged):
+            continue
+        merged.append(PasswordRevision(secret, revision.replaced_at))
+        if len(merged) >= MAX_PASSWORD_HISTORY:
+            break
+    return tuple(merged)
+
+
 def _merge_matching_entry(local: SavedPassword, incoming: SavedPassword) -> SavedPassword:
     """Same password: keep one row and fill empty optional fields from the other copy."""
     favorites = local.favorite or incoming.favorite
@@ -1279,6 +1416,7 @@ def _merge_matching_entry(local: SavedPassword, incoming: SavedPassword) -> Save
         favorite=favorites,
         created=created,
         modified=modified,
+        history=_merge_histories(local.history, incoming.history, current_password=local.password),
         extras=extras,
     )
 
@@ -2844,7 +2982,7 @@ class PasswordWindow:
             label=(
                 "Passwords stay masked until you show one. Weak or reused passwords are called "
                 "out. Needs attention filters those rows. Replace password generates a strong "
-                "one, saves it, and copies it."
+                "one, saves it, and copies it. Previous keeps the last few passwords for that entry."
             ),
             xalign=0,
         )
@@ -3458,6 +3596,11 @@ class PasswordWindow:
             replace_btn.get_style_context().add_class("secondary")
         replace_btn.connect("clicked", lambda *_args, entry=item: self.on_replace_password(entry))
         actions.pack_start(replace_btn, False, False, 0)
+        if item.history:
+            previous_btn = gtk.Button(label=f"Previous ({len(item.history)})")
+            previous_btn.get_style_context().add_class("secondary")
+            previous_btn.connect("clicked", lambda *_args, entry=item: self.on_previous_passwords(entry))
+            actions.pack_start(previous_btn, False, False, 0)
         edit = gtk.Button(label="Edit")
         edit.get_style_context().add_class("secondary")
         edit.connect("clicked", lambda *_args, entry=item: self.on_edit_entry(entry))
@@ -3516,10 +3659,127 @@ class PasswordWindow:
         if seconds:
             message = (
                 f"Replaced the password for {item.name} and copied it. "
-                f"Clipboard clears in {seconds} seconds."
+                f"The old one is under Previous. Clipboard clears in {seconds} seconds."
             )
         else:
-            message = f"Replaced the password for {item.name} and copied it."
+            message = (
+                f"Replaced the password for {item.name} and copied it. "
+                "The old one is under Previous."
+            )
+        self.status.set_text(message)
+        if self.section == "saved":
+            self.manager_message.set_text(message)
+            self.manager_message.show()
+
+    def on_previous_passwords(self, item: SavedPassword) -> None:
+        self._note_activity()
+        if self.vault_key is None:
+            self.status.set_text("Saved passwords are locked.")
+            return
+        if not item.history:
+            self.status.set_text("There is no previous password for that entry.")
+            return
+        gtk = self.gtk
+        dialog = gtk.Dialog(title="Previous passwords", transient_for=self.window, modal=True)
+        self._match_dialog(dialog)
+        dialog.add_button("Close", gtk.ResponseType.CLOSE)
+        content = dialog.get_content_area()
+        content.set_spacing(10)
+        for setter in (
+            content.set_margin_top,
+            content.set_margin_bottom,
+            content.set_margin_start,
+            content.set_margin_end,
+        ):
+            setter(16)
+        intro = gtk.Label(
+            label=(
+                f'Earlier passwords for "{item.name}". Copy one, or Restore to make it current again. '
+                f"Up to {MAX_PASSWORD_HISTORY} are kept."
+            ),
+            xalign=0,
+        )
+        intro.set_line_wrap(True)
+        intro.set_max_width_chars(46)
+        content.pack_start(intro, False, False, 0)
+        choice: dict[str, object] = {"action": None}
+
+        def choose_copy(_button, secret: str) -> None:
+            choice["action"] = ("copy", secret)
+            dialog.response(gtk.ResponseType.CLOSE)
+
+        def choose_restore(_button, slot: int) -> None:
+            choice["action"] = ("restore", slot)
+            dialog.response(gtk.ResponseType.CLOSE)
+
+        for index, revision in enumerate(item.history):
+            row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
+            detail = gtk.Label(xalign=0)
+            when = revision.replaced_at.strip()
+            if when:
+                detail.set_text(f"Replaced {when}")
+            else:
+                detail.set_text(f"Previous {index + 1}")
+            detail.set_line_wrap(True)
+            row.pack_start(detail, True, True, 0)
+            copy_btn = gtk.Button(label="Copy")
+            copy_btn.get_style_context().add_class("secondary")
+            copy_btn.connect("clicked", choose_copy, revision.password)
+            restore_btn = gtk.Button(label="Restore")
+            restore_btn.get_style_context().add_class("secondary")
+            restore_btn.connect("clicked", choose_restore, index)
+            row.pack_start(copy_btn, False, False, 0)
+            row.pack_start(restore_btn, False, False, 0)
+            content.pack_start(row, False, False, 0)
+        dialog.show_all()
+        dialog.run()
+        dialog.destroy()
+        action = choice["action"]
+        if not isinstance(action, tuple):
+            return
+        if action[0] == "copy":
+            self.on_copy_text(str(action[1]))
+            message = "Copied a previous password."
+            self.status.set_text(message)
+            if self.section == "saved":
+                self.manager_message.set_text(message)
+                self.manager_message.show()
+            return
+        if action[0] == "restore":
+            self._restore_previous(item, int(action[1]))
+
+    def _restore_previous(self, item: SavedPassword, index: int) -> None:
+        if self.vault_key is None:
+            self.status.set_text("Saved passwords are locked.")
+            return
+        current = next((entry for entry in self.saved if entry.name == item.name), None)
+        if current is None:
+            self.status.set_text("That saved password is gone.")
+            return
+        try:
+            updated = restore_entry_password(self.saved, current, index)
+            write_vault(self.vault_key, updated)
+        except ValueError as exc:
+            self.status.set_text(str(exc))
+            if self.section == "saved":
+                self.manager_message.set_text(str(exc))
+                self.manager_message.show()
+            return
+        except OSError:
+            message = "Could not restore that password."
+            self.status.set_text(message)
+            if self.section == "saved":
+                self.manager_message.set_text(message)
+                self.manager_message.show()
+            return
+        restored = next(entry for entry in updated if entry.name == current.name)
+        self.saved = updated
+        self.revealed_names.add(restored.name)
+        self._refresh_saved_rows()
+        if self.section == "dashboard":
+            self._refresh_dashboard()
+        self.on_copy_text(restored.password)
+        message = f"Restored the previous password for {restored.name} and copied it."
         self.status.set_text(message)
         if self.section == "saved":
             self.manager_message.set_text(message)
@@ -3553,7 +3813,8 @@ class PasswordWindow:
         label = gtk.Label(
             label=(
                 f'Replace the password for "{item.name}" with a new strong password?'
-                f"{reason} The new password is saved and copied. Update the site next."
+                f"{reason} The new password is saved and copied. The old one stays under Previous. "
+                "Update the site next."
             ),
             xalign=0,
         )
@@ -4134,6 +4395,20 @@ class PasswordWindow:
         edited = self._edit_entry_dialog(item)
         if edited is None:
             return
+        if edited.password != item.password:
+            edited = with_changed_password(
+                replace(
+                    item,
+                    name=edited.name,
+                    username=edited.username,
+                    url=edited.url,
+                    notes=edited.notes,
+                    category=edited.category,
+                    favorite=edited.favorite,
+                    extras=dict(edited.extras),
+                ),
+                edited.password,
+            )
         try:
             updated = upsert_entry(self.saved, edited, previous_name=item.name)
             write_vault(self.vault_key, updated)
@@ -4228,6 +4503,7 @@ class PasswordWindow:
                     favorite=favorite.get_active(),
                     created=item.created,
                     modified=item.modified,
+                    history=item.history,
                     extras=dict(item.extras),
                 )
             except ValueError as exc:

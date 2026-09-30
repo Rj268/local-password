@@ -105,6 +105,28 @@ class VaultTest {
         assertEquals("2024-01-01T00:00:00Z", next[0].created)
         assert(next[0].modified.isNotEmpty())
         assert(!Generator.isWeakPassword(next[0].password))
+        assertEquals(1, next[0].history.size)
+        assertEquals("abc123", next[0].history[0].password)
+    }
+
+    @Test
+    fun passwordHistoryRestoreAndCap() {
+        var items = listOf(SavedPassword("Site", "one"))
+        for (secret in listOf("two", "three", "four", "five", "six", "seven")) {
+            items = Vault.replaceEntryPassword(items, items[0], secret)
+        }
+        assertEquals("seven", items[0].password)
+        assertEquals(Vault.MAX_PASSWORD_HISTORY, items[0].history.size)
+        assertEquals(listOf("six", "five", "four", "three", "two"), items[0].history.map { it.password })
+        val restored = Vault.restoreEntryPassword(items, items[0], 1)
+        assertEquals("five", restored[0].password)
+        assertEquals("seven", restored[0].history[0].password)
+        assert(!restored[0].history.any { it.password == "five" })
+        val recovery = "alpha bravo charlie delta echo foxtrot golf hotel"
+        val (blob, _) = Vault.create("passphrase-here", recovery, restored)
+        val loaded = Vault.open("passphrase-here", blob).items
+        assertEquals("five", loaded[0].password)
+        assertEquals(restored[0].history.map { it.password }, loaded[0].history.map { it.password })
     }
 
     @Test

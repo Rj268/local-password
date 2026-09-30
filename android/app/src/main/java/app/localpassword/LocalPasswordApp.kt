@@ -399,6 +399,11 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
                             TextButton(onClick = { model.requestReplace(item) }) {
                                 Text("Replace password", color = Green)
                             }
+                            if (item.history.isNotEmpty()) {
+                                TextButton(onClick = { model.showHistory(item) }) {
+                                    Text("Previous (${item.history.size})", color = Green)
+                                }
+                            }
                             TextButton(onClick = { model.beginEdit(item) }) { Text("Edit", color = Green) }
                             TextButton(onClick = { model.requestRemove(item) }) { Text("Remove", color = Danger) }
                         }
@@ -406,6 +411,43 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
                 }
             }
         }
+    }
+    model.historyFor?.let { item ->
+        AlertDialog(
+            onDismissRequest = { model.cancelHistory() },
+            title = { Text("Previous passwords") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Earlier passwords for \"${item.name}\". Copy one, or Restore to make it current again. Up to ${Vault.MAX_PASSWORD_HISTORY} are kept.",
+                        color = muted,
+                    )
+                    item.history.forEachIndexed { index, revision ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                if (revision.replacedAt.isNotEmpty()) {
+                                    "Replaced ${revision.replacedAt}"
+                                } else {
+                                    "Previous ${index + 1}"
+                                },
+                                color = ink,
+                                modifier = Modifier.weight(1f),
+                                fontSize = 13.sp,
+                            )
+                            TextButton(onClick = { model.copyPrevious(revision.password) }) {
+                                Text("Copy", color = Green)
+                            }
+                            TextButton(onClick = { model.restorePrevious(index) }, enabled = !model.busy) {
+                                Text("Restore", color = Green)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { model.cancelHistory() }) { Text("Close") }
+            },
+        )
     }
     model.pendingRemove?.let { item ->
         AlertDialog(
@@ -431,7 +473,7 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
                 Text(
                     "Replace the password for \"${item.name}\" with a new strong password?" +
                         (if (reason.isNotEmpty()) " $reason" else "") +
-                        " The new password is saved and copied. Update the site next.",
+                        " The new password is saved and copied. The old one stays under Previous. Update the site next.",
                 )
             },
             confirmButton = {
@@ -464,6 +506,7 @@ private fun EditEntryDialog(
     var category by remember(item) { mutableStateOf(item.category) }
     var notes by remember(item) { mutableStateOf(item.notes) }
     var favorite by remember(item) { mutableStateOf(item.favorite) }
+    val history = item.history
     AlertDialog(
         onDismissRequest = onCancel,
         title = { Text("Edit saved password") },
@@ -503,6 +546,7 @@ private fun EditEntryDialog(
                             category = category,
                             notes = notes,
                             favorite = favorite,
+                            history = history,
                         ),
                     )
                 },

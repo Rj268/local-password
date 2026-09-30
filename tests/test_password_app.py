@@ -349,6 +349,29 @@ class VaultTests(unittest.TestCase):
         self.assertEqual(updated[0].created, "2024-01-01T00:00:00Z")
         self.assertTrue(updated[0].modified)
         self.assertNotEqual(updated[0].modified, item.modified)
+        self.assertEqual(len(updated[0].history), 1)
+        self.assertEqual(updated[0].history[0].password, "abc123")
+
+    def test_password_history_restore_and_cap(self) -> None:
+        item = password_app.SavedPassword("Site", "one")
+        items = [item]
+        for secret in ("two", "three", "four", "five", "six", "seven"):
+            items = password_app.replace_entry_password(items, items[0], secret)
+        self.assertEqual(items[0].password, "seven")
+        self.assertEqual(len(items[0].history), password_app.MAX_PASSWORD_HISTORY)
+        self.assertEqual([entry.password for entry in items[0].history], ["six", "five", "four", "three", "two"])
+        restored = password_app.restore_entry_password(items, items[0], 1)
+        self.assertEqual(restored[0].password, "five")
+        self.assertEqual(restored[0].history[0].password, "seven")
+        self.assertNotIn("five", [entry.password for entry in restored[0].history])
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "saved.vault"
+            material = password_app.new_vault_key("passphrase-here", password_app.new_recovery_key(), n=2**14)
+            password_app.write_vault(material, restored, path)
+            _key, loaded = password_app.open_vault("passphrase-here", path)
+            self.assertEqual(loaded[0].password, "five")
+            self.assertEqual([entry.password for entry in loaded[0].history], [entry.password for entry in restored[0].history])
+            self.assertEqual(loaded[0].history[0].replaced_at, restored[0].history[0].replaced_at)
 
     def test_parse_password_csv_and_merge_imported(self) -> None:
         text = (

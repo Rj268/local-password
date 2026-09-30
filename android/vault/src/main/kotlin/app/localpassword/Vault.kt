@@ -18,6 +18,11 @@ import kotlin.math.roundToInt
  */
 class VaultException(message: String) : Exception(message)
 
+data class PasswordRevision(
+    val password: String,
+    val replacedAt: String = "",
+)
+
 data class SavedPassword(
     val name: String,
     val password: String,
@@ -28,6 +33,7 @@ data class SavedPassword(
     val favorite: Boolean = false,
     val created: String = "",
     val modified: String = "",
+    val history: List<PasswordRevision> = emptyList(),
     val extras: Map<String, Any?> = emptyMap(),
 )
 
@@ -46,6 +52,7 @@ data class OpenVault(
 object Vault {
     const val MIN_PASSPHRASE_LENGTH = 8
     const val RECOVERY_WORD_COUNT = 8
+    const val MAX_PASSWORD_HISTORY = 5
     const val SCRYPT_N = 1 shl 15
     const val SCRYPT_R = 8
     const val SCRYPT_P = 1
@@ -160,8 +167,29 @@ object Vault {
             favorite = local.favorite || incoming.favorite,
             created = local.created.ifEmpty { incoming.created },
             modified = modified,
+            history = mergeHistories(local.history, incoming.history, local.password),
             extras = extras,
         )
+    }
+
+    private fun mergeHistories(
+        left: List<PasswordRevision>,
+        right: List<PasswordRevision>,
+        currentPassword: String,
+    ): List<PasswordRevision> {
+        val merged = mutableListOf<PasswordRevision>()
+        for (revision in left + right) {
+            val secret = try {
+                passwordLine(revision.password)
+            } catch (_: VaultException) {
+                continue
+            }
+            if (secret == currentPassword) continue
+            if (merged.any { it.password == secret }) continue
+            merged.add(PasswordRevision(secret, revision.replacedAt))
+            if (merged.size >= MAX_PASSWORD_HISTORY) break
+        }
+        return merged
     }
 
     private fun uniqueEntryName(name: String, taken: Map<String, Int>, suffix: String): String {
@@ -394,15 +422,57 @@ object Vault {
         return Triple(weakCount, reuseCount, attentionCount)
     }
 
-    fun replaceEntryPassword(items: List<SavedPassword>, item: SavedPassword, newPassword: String): List<SavedPassword> {
-        val now = utcNow()
-        val stamped = normalizeEntry(
+    fun historyAfterChange(
+        oldPassword: String,
+        history: List<PasswordRevision>,
+        replacedAt: String = utcNow(),
+    ): List<PasswordRevision> {
+        val secret = passwordLine(oldPassword)
+        val revisions = mutableListOf(PasswordRevision(secret, replacedAt))
+        for (item in history) {
+            val previous = try {
+                passwordLine(item.password)
+            } catch (_: VaultException) {
+                continue
+            }
+            if (previous == secret) continue
+            if (revisions.any { it.password == previous }) continue
+            revisions.add(PasswordRevision(previous, item.replacedAt))
+            if (revisions.size >= MAX_PASSWORD_HISTORY) break
+        }
+        return revisions.take(MAX_PASSWORD_HISTORY)
+    }
+
+    fun withChangedPassword(item: SavedPassword, newPassword: String): SavedPassword {
+        val secret = passwordLine(newPassword)
+        if (secret == item.password) return item
+        return normalizeEntry(
             item.copy(
-                password = newPassword,
-                modified = now,
+                password = secret,
+                modified = utcNow(),
+                history = historyAfterChange(item.password, item.history),
             ),
         )
+    }
+
+    fun replaceEntryPassword(items: List<SavedPassword>, item: SavedPassword, newPassword: String): List<SavedPassword> {
+        val stamped = withChangedPassword(item, newPassword)
         return listOf(stamped) + items.filter { it.name != item.name }
+    }
+
+    fun restoreEntryPassword(items: List<SavedPassword>, item: SavedPassword, index: Int): List<SavedPassword> {
+        if (index !in item.history.indices) {
+            throw VaultException("That previous password is gone.")
+        }
+        val revision = item.history[index]
+        val secret = passwordLine(revision.password)
+        if (secret == item.password) {
+            throw VaultException("That is already the current password.")
+        }
+        val stamped = withChangedPassword(item, secret).let { next ->
+            next.copy(history = next.history.filter { it.password != secret })
+        }
+        return listOf(normalizeEntry(stamped)) + items.filter { it.name != item.name }
     }
 
     fun normalizeEntry(item: SavedPassword): SavedPassword {
@@ -415,6 +485,13 @@ object Vault {
             category = cleanCategory(item.category),
             created = item.created.trim(),
             modified = item.modified.trim(),
+            history = item.history.mapNotNull { revision ->
+                try {
+                    PasswordRevision(passwordLine(revision.password), revision.replacedAt.trim())
+                } catch (_: VaultException) {
+                    null
+                }
+            }.distinctBy { it.password }.take(MAX_PASSWORD_HISTORY),
             extras = item.extras.filterKeys { it !in KNOWN_ENTRY_KEYS },
         )
     }
@@ -631,6 +708,16 @@ object Vault {
         if (item.favorite) obj.put("favorite", true)
         if (item.created.isNotEmpty()) obj.put("created", item.created)
         if (item.modified.isNotEmpty()) obj.put("modified", item.modified)
+        if (item.history.isNotEmpty()) {
+            val history = JSONArray()
+            for (revision in item.history) {
+                val row = JSONObject()
+                row.put("password", revision.password)
+                if (revision.replacedAt.isNotEmpty()) row.put("replaced_at", revision.replacedAt)
+                history.put(row)
+            }
+            obj.put("history", history)
+        }
         for ((key, value) in item.extras) {
             if (key !in KNOWN_ENTRY_KEYS) obj.put(key, value)
         }
@@ -690,13 +777,33 @@ object Vault {
                 favorite = obj.optBoolean("favorite", false),
                 created = obj.optString("created", ""),
                 modified = obj.optString("modified", ""),
+                history = historyFromJson(obj.optJSONArray("history")),
                 extras = extras,
             ),
         )
     }
 
+    private fun historyFromJson(array: JSONArray?): List<PasswordRevision> {
+        if (array == null) return emptyList()
+        val revisions = mutableListOf<PasswordRevision>()
+        for (index in 0 until array.length()) {
+            val row = array.optJSONObject(index) ?: continue
+            val password = row.optString("password", "")
+            if (password.isEmpty()) continue
+            val secret = try {
+                passwordLine(password)
+            } catch (_: VaultException) {
+                continue
+            }
+            if (revisions.any { it.password == secret }) continue
+            revisions.add(PasswordRevision(secret, row.optString("replaced_at", "").trim()))
+            if (revisions.size >= MAX_PASSWORD_HISTORY) break
+        }
+        return revisions
+    }
+
     private val KNOWN_ENTRY_KEYS = setOf(
-        "name", "password", "username", "url", "notes", "category", "favorite", "created", "modified",
+        "name", "password", "username", "url", "notes", "category", "favorite", "created", "modified", "history",
     )
 }
 
