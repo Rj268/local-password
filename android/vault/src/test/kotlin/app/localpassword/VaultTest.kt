@@ -110,6 +110,34 @@ class VaultTest {
     }
 
     @Test
+    fun lastUsedLabelAndRecentlyUsedEntries() {
+        val alpha = SavedPassword(
+            name = "Alpha",
+            password = "secret-alpha-value",
+            modified = "2024-01-02T00:00:00Z",
+        )
+        val beta = SavedPassword(
+            name = "Beta",
+            password = "secret-beta-value",
+            modified = "2024-03-01T00:00:00Z",
+            lastUsed = "2024-02-01T12:30:00Z",
+        )
+        val gamma = SavedPassword(
+            name = "Gamma",
+            password = "secret-gamma-value",
+            modified = "2024-01-01T00:00:00Z",
+            lastUsed = "2024-04-01T08:00:00Z",
+        )
+        assertEquals("Not used yet", Vault.lastUsedLabel(alpha))
+        assertEquals("Last used 2024-02-01", Vault.lastUsedLabel(beta))
+        assertEquals(
+            listOf("Gamma", "Beta"),
+            Vault.recentlyUsedEntries(listOf(alpha, beta, gamma), 2).map { it.name },
+        )
+        assertEquals(listOf("Alpha"), Vault.recentlyUsedEntries(listOf(alpha), 5).map { it.name })
+    }
+
+    @Test
     fun sortedSavedEntriesAndTouchLastUsed() {
         val alpha = SavedPassword(
             name = "Alpha",

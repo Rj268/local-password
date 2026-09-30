@@ -352,6 +352,31 @@ class VaultTests(unittest.TestCase):
         self.assertEqual(len(updated[0].history), 1)
         self.assertEqual(updated[0].history[0].password, "abc123")
 
+    def test_last_used_label_and_recently_used_entries(self) -> None:
+        alpha = password_app.SavedPassword(
+            "Alpha",
+            "secret-alpha-value",
+            modified="2024-01-02T00:00:00Z",
+        )
+        beta = password_app.SavedPassword(
+            "Beta",
+            "secret-beta-value",
+            modified="2024-03-01T00:00:00Z",
+            last_used="2024-02-01T12:30:00Z",
+        )
+        gamma = password_app.SavedPassword(
+            "Gamma",
+            "secret-gamma-value",
+            modified="2024-01-01T00:00:00Z",
+            last_used="2024-04-01T08:00:00Z",
+        )
+        self.assertEqual(password_app.last_used_label(alpha), "Not used yet")
+        self.assertEqual(password_app.last_used_label(beta), "Last used 2024-02-01")
+        recent = password_app.recently_used_entries([alpha, beta, gamma], 2)
+        self.assertEqual([item.name for item in recent], ["Gamma", "Beta"])
+        unused_only = password_app.recently_used_entries([alpha], 5)
+        self.assertEqual([item.name for item in unused_only], ["Alpha"])
+
     def test_sorted_saved_entries_and_touch_last_used(self) -> None:
         alpha = password_app.SavedPassword(
             "Alpha",

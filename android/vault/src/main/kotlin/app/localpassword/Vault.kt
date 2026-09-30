@@ -217,6 +217,31 @@ object Vault {
         }
     }
 
+    fun stampDate(stamp: String): String {
+        val text = stamp.trim()
+        return if (text.length < 10) "" else text.take(10)
+    }
+
+    fun lastUsedLabel(item: SavedPassword): String {
+        val day = stampDate(item.lastUsed)
+        return if (day.isNotEmpty()) "Last used $day" else "Not used yet"
+    }
+
+    fun recentlyUsedEntries(items: List<SavedPassword>, limit: Int = 5): List<SavedPassword> {
+        if (limit <= 0) return emptyList()
+        val used = items.filter { it.lastUsed.isNotEmpty() }
+        if (used.isNotEmpty()) {
+            return used
+                .sortedWith(compareByDescending<SavedPassword> { it.lastUsed }.thenBy { it.name.lowercase(Locale.ROOT) })
+                .take(limit)
+        }
+        val stamped = items.filter { it.modified.isNotEmpty() }
+            .sortedWith(compareByDescending<SavedPassword> { it.modified }.thenBy { it.name.lowercase(Locale.ROOT) })
+        val plain = items.filter { it.modified.isEmpty() }
+            .sortedBy { it.name.lowercase(Locale.ROOT) }
+        return (stamped + plain).take(limit)
+    }
+
     private fun mergeHistories(
         left: List<PasswordRevision>,
         right: List<PasswordRevision>,

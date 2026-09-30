@@ -320,9 +320,9 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
             }
             Text(
                 if (healthBits.isNotEmpty()) {
-                    "Passwords stay masked until you show one. Weak or reused passwords are called out. ${healthBits.joinToString(" · ")}. Sort by Name, Recent, or Changed. Copying a saved password marks it Recent."
+                    "Passwords stay masked until you show one. Weak or reused passwords are called out. ${healthBits.joinToString(" · ")}. Sort by Name, Recent, or Changed. Copying a saved password marks it Recent and shows Last used."
                 } else {
-                    "Passwords stay masked until you show one. Weak or reused passwords are called out. Needs attention filters those rows. Sort by Name, Recent, or Changed. Copying a saved password marks it Recent."
+                    "Passwords stay masked until you show one. Weak or reused passwords are called out. Needs attention filters those rows. Sort by Name, Recent, or Changed. Copying a saved password marks it Recent and shows Last used."
                 },
                 color = muted,
                 fontSize = 13.sp,
@@ -381,6 +381,7 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
                         if (meta.isNotEmpty()) {
                             Text(meta.joinToString(" · "), color = muted, fontSize = 13.sp)
                         }
+                        Text(Vault.lastUsedLabel(item), color = muted, fontSize = 13.sp)
                         val strength = model.strengthWarning(item)
                         if (strength.isNotEmpty()) {
                             Text(strength, color = Danger, fontSize = 13.sp)

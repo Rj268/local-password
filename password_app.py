@@ -620,6 +620,37 @@ def touch_last_used(
     return [updated if entry.name == item.name else entry for entry in existing]
 
 
+def stamp_date(stamp: str) -> str:
+    """Return YYYY-MM-DD from an ISO timestamp, or empty when missing."""
+    text = stamp.strip()
+    if len(text) < 10:
+        return ""
+    return text[:10]
+
+
+def last_used_label(item: SavedPassword) -> str:
+    """Short Saved-row / Dashboard line for when the entry was last copied."""
+    day = stamp_date(item.last_used)
+    if day:
+        return f"Last used {day}"
+    return "Not used yet"
+
+
+def recently_used_entries(items: list[SavedPassword], limit: int = 5) -> list[SavedPassword]:
+    """Top entries for the Dashboard: last used first, else last changed."""
+    if limit <= 0:
+        return []
+    used = [item for item in items if item.last_used]
+    if used:
+        used.sort(key=lambda item: (item.last_used, item.name.casefold()), reverse=True)
+        return used[:limit]
+    stamped = [item for item in items if item.modified]
+    plain = [item for item in items if not item.modified]
+    stamped.sort(key=lambda item: (item.modified, item.name.casefold()), reverse=True)
+    plain.sort(key=lambda item: item.name.casefold())
+    return (stamped + plain)[:limit]
+
+
 def reused_password_groups(items: list[SavedPassword]) -> dict[str, list[str]]:
     """Map a password to the entry names that share it, only when reused."""
     groups: dict[str, list[str]] = {}
@@ -2561,9 +2592,9 @@ class PasswordWindow:
         actions.pack_start(self.dashboard_open_saved, False, False, 0)
         page.pack_start(actions, False, False, 0)
 
-        recent_label = gtk.Label(label="Recently saved", xalign=0)
-        recent_label.get_style_context().add_class("eyebrow")
-        page.pack_start(recent_label, False, False, 0)
+        self.dashboard_recent_label = gtk.Label(label="Recently used", xalign=0)
+        self.dashboard_recent_label.get_style_context().add_class("eyebrow")
+        page.pack_start(self.dashboard_recent_label, False, False, 0)
         self.dashboard_recent = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=8)
         page.pack_start(self.dashboard_recent, False, False, 0)
         self.dashboard_empty = gtk.Label(
@@ -2636,7 +2667,11 @@ class PasswordWindow:
         self.dashboard_lock_value.set_text("Unlocked")
         self.dashboard_empty.hide()
         self.dashboard_recent.show()
-        for item in self.saved[-5:][::-1]:
+        if any(item.last_used for item in self.saved):
+            self.dashboard_recent_label.set_text("Recently used")
+        else:
+            self.dashboard_recent_label.set_text("Recently changed")
+        for item in recently_used_entries(self.saved, 5):
             row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
             row.get_style_context().add_class("entry-card")
             for setter in (
@@ -2646,9 +2681,14 @@ class PasswordWindow:
                 row.set_margin_end,
             ):
                 setter(10)
+            text = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=2)
+            text.set_hexpand(True)
             name = gtk.Label(label=item.name, xalign=0)
-            name.set_hexpand(True)
             name.get_style_context().add_class("saved-name")
+            used = gtk.Label(label=last_used_label(item), xalign=0)
+            used.get_style_context().add_class("hint")
+            text.pack_start(name, False, False, 0)
+            text.pack_start(used, False, False, 0)
             if entry_is_weak(item.password):
                 badge = gtk.Label(label="Weak", xalign=1)
                 badge.get_style_context().add_class("danger")
@@ -2658,7 +2698,7 @@ class PasswordWindow:
             else:
                 badge = gtk.Label(label="••••••••", xalign=1)
                 badge.get_style_context().add_class("hint")
-            row.pack_start(name, True, True, 0)
+            row.pack_start(text, True, True, 0)
             row.pack_start(badge, False, False, 0)
             self.dashboard_recent.pack_start(row, False, False, 0)
         self.dashboard_recent.show_all()
@@ -3046,7 +3086,8 @@ class PasswordWindow:
                 "Passwords stay masked until you show one. Weak or reused passwords are called "
                 "out. Needs attention filters those rows. Replace password generates a strong "
                 "one, saves it, and copies it. Previous keeps the last few passwords for that entry. "
-                "Sort by Name, Recent, or Changed. Copying a saved password marks it Recent."
+                "Sort by Name, Recent, or Changed. Copying a saved password marks it Recent "
+                "and shows Last used on the entry."
             ),
             xalign=0,
         )
@@ -3634,15 +3675,17 @@ class PasswordWindow:
         name.set_halign(gtk.Align.START)
         name.get_style_context().add_class("saved-name")
         meta_bits = [part for part in (item.username, item.category, item.url) if part]
+        text.pack_start(name, False, False, 0)
         if meta_bits:
             meta = gtk.Label(label=" · ".join(meta_bits), xalign=0)
             meta.set_line_wrap(True)
             meta.set_halign(gtk.Align.START)
             meta.get_style_context().add_class("hint")
-            text.pack_start(name, False, False, 0)
             text.pack_start(meta, False, False, 0)
-        else:
-            text.pack_start(name, False, False, 0)
+        used = gtk.Label(label=last_used_label(item), xalign=0)
+        used.set_halign(gtk.Align.START)
+        used.get_style_context().add_class("hint")
+        text.pack_start(used, False, False, 0)
         for warning in (
             strength_warning_for(item),
             reuse_warning_for(item, self.saved),
