@@ -238,6 +238,39 @@ object Vault {
         return items
     }
 
+    fun formatPasswordCsv(items: List<SavedPassword>): String {
+        if (items.isEmpty()) throw VaultException("There are no saved passwords to export.")
+        val out = StringBuilder()
+        out.append(csvRow(listOf("name", "username", "password", "url", "notes", "category")))
+        for (item in items) {
+            out.append(
+                csvRow(
+                    listOf(
+                        item.name,
+                        item.username,
+                        item.password,
+                        item.url,
+                        item.notes,
+                        item.category,
+                    ),
+                ),
+            )
+        }
+        return out.toString()
+    }
+
+    private fun csvRow(fields: List<String>): String {
+        return fields.joinToString(",") { csvEscape(it) } + "\n"
+    }
+
+    private fun csvEscape(value: String): String {
+        return if (value.any { it == ',' || it == '"' || it == '\n' || it == '\r' }) {
+            "\"" + value.replace("\"", "\"\"") + "\""
+        } else {
+            value
+        }
+    }
+
     private fun csvCell(row: Map<String, String>, keys: Set<String>): String {
         for (key in keys) {
             val value = row[key]?.trim().orEmpty()

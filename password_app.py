@@ -1536,6 +1536,20 @@ def parse_password_csv(text: str) -> list[SavedPassword]:
     return items
 
 
+def format_password_csv(items: list[SavedPassword]) -> str:
+    """Write vault entries as a portable plaintext CSV other managers can import."""
+    if not items:
+        raise ValueError("There are no saved passwords to export.")
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(["name", "username", "password", "url", "notes", "category"])
+    for item in items:
+        writer.writerow(
+            [item.name, item.username, item.password, item.url, item.notes, item.category]
+        )
+    return buffer.getvalue()
+
+
 def store_vault_blob(blob: bytes, path: Path | None = None) -> Path:
     """Write a vault received from another device without changing its bytes."""
     if not blob.startswith((VAULT_MAGIC, VAULT_MAGIC_V2)):
@@ -2176,6 +2190,69 @@ class PasswordWindow:
         self.manager_message.set_text(note)
         self.manager_message.show()
 
+    def on_export_csv(self, *_args) -> None:
+        gtk = self.gtk
+        if self.vault_key is None:
+            if not self._ensure_vault_key():
+                self._sync_note("Unlock the vault before exporting a CSV.")
+                return
+        if not self.saved:
+            self._sync_note("There are no saved passwords to export.")
+            return
+        confirm = gtk.MessageDialog(
+            transient_for=self.window,
+            modal=True,
+            message_type=gtk.MessageType.WARNING,
+            buttons=gtk.ButtonsType.OK_CANCEL,
+            text="Export passwords as plaintext CSV?",
+        )
+        confirm.format_secondary_text(
+            "The CSV file is not encrypted. Anyone who can open that file can read every password. "
+            "Delete it when you are done moving the entries."
+        )
+        answer = confirm.run()
+        confirm.destroy()
+        if answer != gtk.ResponseType.OK:
+            return
+        dialog = gtk.FileChooserDialog(
+            title="Export CSV",
+            transient_for=self.window,
+            action=gtk.FileChooserAction.SAVE,
+        )
+        dialog.add_button("Cancel", gtk.ResponseType.CANCEL)
+        dialog.add_button("Export", gtk.ResponseType.OK)
+        dialog.set_current_name("local-password.csv")
+        dialog.set_do_overwrite_confirmation(True)
+        filt = gtk.FileFilter()
+        filt.set_name("CSV files")
+        filt.add_pattern("*.csv")
+        dialog.add_filter(filt)
+        response = dialog.run()
+        target = dialog.get_filename()
+        dialog.destroy()
+        if response != gtk.ResponseType.OK or not target:
+            return
+        path = Path(target)
+        if path.suffix.lower() != ".csv":
+            path = path.with_suffix(".csv")
+        try:
+            text = format_password_csv(self.saved)
+            with path.open("w", encoding="utf-8", newline="\n") as handle:
+                handle.write(text)
+            if hasattr(os, "chmod"):
+                try:
+                    os.chmod(path, 0o600)
+                except OSError:
+                    pass
+        except ValueError as exc:
+            self._sync_note(str(exc))
+            return
+        except OSError:
+            self._sync_note("Could not write that CSV file.")
+            return
+        note = f"Exported {len(self.saved)} entr{'y' if len(self.saved) == 1 else 'ies'} to {path.name}."
+        self._sync_note(note)
+
     def apply_dark(self) -> None:
         context = self.window.get_style_context()
         button = self.dark_button.get_style_context()
@@ -2699,7 +2776,8 @@ class PasswordWindow:
                 "Export copies the encrypted vault to a file you choose. "
                 "Import vault replaces the vault on this computer with that file. "
                 "Import CSV adds password rows from another manager into the unlocked vault. "
-                "The passphrase is not inside the export."
+                "Export CSV writes those rows as plaintext — keep that file private. "
+                "The passphrase is not inside either export."
             ),
             xalign=0,
         )
@@ -2717,9 +2795,12 @@ class PasswordWindow:
         files.pack_start(file_row, False, False, 0)
         csv_row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
         self.import_csv_button = gtk.Button(label="Import CSV")
-        self.import_csv_button.get_style_context().add_class("secondary")
+        self.export_csv_button = gtk.Button(label="Export CSV")
+        for button in (self.import_csv_button, self.export_csv_button):
+            button.get_style_context().add_class("secondary")
+            csv_row.pack_start(button, True, True, 0)
         self.import_csv_button.connect("clicked", self.on_import_csv)
-        csv_row.pack_start(self.import_csv_button, True, True, 0)
+        self.export_csv_button.connect("clicked", self.on_export_csv)
         files.pack_start(csv_row, False, False, 0)
         page.pack_start(files, False, False, 0)
 

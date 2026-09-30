@@ -479,6 +479,24 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun exportCsvText(): String? {
+        val currentOpen = opened
+        if (currentOpen == null || !unlocked) {
+            error = "Unlock the vault before exporting a CSV."
+            askUnlock = true
+            return null
+        }
+        return try {
+            Vault.formatPasswordCsv(currentOpen.items).also {
+                status = "CSV is ready. The file is plaintext — delete it when you are done."
+                error = ""
+            }
+        } catch (exc: VaultException) {
+            error = exc.message ?: "Could not export a CSV."
+            null
+        }
+    }
+
     fun sendVault() {
         if (busy || offerCode != null) return
         if (!hasVault()) {

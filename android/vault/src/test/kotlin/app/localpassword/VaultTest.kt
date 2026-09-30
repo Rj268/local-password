@@ -131,6 +131,37 @@ class VaultTest {
     }
 
     @Test
+    fun formatPasswordCsvRoundTrips() {
+        val items = listOf(
+            SavedPassword(
+                name = "Email",
+                password = "secret-one",
+                username = "me@example.com",
+                url = "https://mail.example",
+                notes = "work mail",
+                category = "web",
+            ),
+            SavedPassword(
+                name = "Quoted, Name",
+                password = "pass,word",
+                username = "user",
+                url = "https://q.example",
+            ),
+        )
+        val text = Vault.formatPasswordCsv(items)
+        assert(text.startsWith("name,username,password,url,notes,category\n"))
+        assert(text.contains("\"Quoted, Name\""))
+        assert(text.contains("\"pass,word\""))
+        val back = Vault.parsePasswordCsv(text)
+        assertEquals(2, back.size)
+        assertEquals("Email", back[0].name)
+        assertEquals("secret-one", back[0].password)
+        assertEquals("Quoted, Name", back[1].name)
+        assertEquals("pass,word", back[1].password)
+        assertThrows<VaultException> { Vault.formatPasswordCsv(emptyList()) }
+    }
+
+    @Test
     fun changingPassphraseKeepsItemsAndRetiresOldSecrets() {
         val oldRecovery = "alpha bravo charlie delta echo foxtrot golf hotel"
         val (oldBlob, opened) = Vault.create(

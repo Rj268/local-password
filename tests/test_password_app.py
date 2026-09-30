@@ -380,6 +380,37 @@ class VaultTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             password_app.parse_password_csv("title,login\nA,B\n")
 
+    def test_format_password_csv_round_trips(self) -> None:
+        items = [
+            password_app.SavedPassword(
+                "Email",
+                "secret-one",
+                username="me@example.com",
+                url="https://mail.example",
+                notes="work mail",
+                category="web",
+            ),
+            password_app.SavedPassword(
+                "Quoted, Name",
+                "pass,word",
+                username="user",
+                url="https://q.example",
+            ),
+        ]
+        text = password_app.format_password_csv(items)
+        self.assertTrue(text.startswith("name,username,password,url,notes,category\n"))
+        self.assertIn('"Quoted, Name"', text)
+        self.assertIn('"pass,word"', text)
+        back = password_app.parse_password_csv(text)
+        self.assertEqual(len(back), 2)
+        self.assertEqual(back[0].name, "Email")
+        self.assertEqual(back[0].password, "secret-one")
+        self.assertEqual(back[0].username, "me@example.com")
+        self.assertEqual(back[1].name, "Quoted, Name")
+        self.assertEqual(back[1].password, "pass,word")
+        with self.assertRaises(ValueError):
+            password_app.format_password_csv([])
+
     def test_change_vault_credentials_keeps_items_and_retires_old_secrets(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "saved.vault"
