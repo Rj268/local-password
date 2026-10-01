@@ -110,6 +110,45 @@ class VaultTest {
     }
 
     @Test
+    fun duplicateEntryCopiesFieldsAndNamesUniquely() {
+        val item = SavedPassword(
+            name = "Bank",
+            password = "secret-bank-value",
+            username = "me",
+            url = "https://bank.example",
+            notes = "keep",
+            category = "finance",
+            favorite = true,
+            created = "2024-01-01T00:00:00Z",
+            modified = "2024-02-01T00:00:00Z",
+            lastUsed = "2024-03-01T00:00:00Z",
+            history = listOf(PasswordRevision("old-secret", "2024-01-15T00:00:00Z")),
+        )
+        val other = SavedPassword(name = "Email", password = "secret-email-value")
+        val updated = Vault.duplicateEntry(listOf(item, other), item, whenStamp = "2024-04-01T00:00:00Z")
+        assertEquals("Bank (copy)", updated[0].name)
+        assertEquals("secret-bank-value", updated[0].password)
+        assertEquals("me", updated[0].username)
+        assertEquals("https://bank.example", updated[0].url)
+        assertEquals("keep", updated[0].notes)
+        assertEquals("finance", updated[0].category)
+        assert(updated[0].favorite)
+        assertEquals("2024-04-01T00:00:00Z", updated[0].created)
+        assertEquals("2024-04-01T00:00:00Z", updated[0].modified)
+        assertEquals("", updated[0].lastUsed)
+        assert(updated[0].history.isEmpty())
+        assertEquals("Bank", updated[1].name)
+        assertEquals("2024-03-01T00:00:00Z", updated[1].lastUsed)
+        assertEquals(1, updated[1].history.size)
+        val again = Vault.duplicateEntry(updated, updated[1], whenStamp = "2024-04-02T00:00:00Z")
+        assertEquals("Bank (copy 2)", again[0].name)
+        val recovery = "alpha bravo charlie delta echo foxtrot golf hotel"
+        val (blob, _) = Vault.create("passphrase-here", recovery, again)
+        val loaded = Vault.open("passphrase-here", blob).items
+        assertEquals(setOf("Bank", "Bank (copy)", "Bank (copy 2)", "Email"), loaded.map { it.name }.toSet())
+    }
+
+    @Test
     fun toggleEntryFavoriteKeepsTimestamps() {
         val item = SavedPassword(
             name = "Bank",

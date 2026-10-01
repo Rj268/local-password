@@ -435,6 +435,33 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun duplicateEntry(item: SavedPassword) {
+        val currentOpen = opened ?: return
+        val current = currentOpen.items.firstOrNull { it.name == item.name } ?: run {
+            error = "That saved password is gone."
+            return
+        }
+        viewModelScope.launch {
+            busy = true
+            error = ""
+            try {
+                val next = withContext(Dispatchers.Default) {
+                    Vault.duplicateEntry(currentOpen.items, current)
+                }
+                val blob = withContext(Dispatchers.Default) { Vault.seal(currentOpen, next) }
+                writeAtomically(blob)
+                opened = currentOpen.copy(items = next)
+                saved = next
+                unlocked = true
+                status = "Duplicated as ${next.first().name}."
+            } catch (exc: VaultException) {
+                error = exc.message ?: "Could not duplicate that entry."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
     fun beginEdit(item: SavedPassword) {
         editing = item
     }

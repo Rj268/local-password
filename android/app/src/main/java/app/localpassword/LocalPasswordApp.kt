@@ -320,9 +320,9 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
             }
             Text(
                 if (healthBits.isNotEmpty()) {
-                    "Passwords stay masked until you show one. Weak or reused passwords are called out. ${healthBits.joinToString(" · ")}. Sort by Name, Recent, or Changed. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit."
+                    "Passwords stay masked until you show one. Weak or reused passwords are called out. ${healthBits.joinToString(" · ")}. Sort by Name, Recent, or Changed. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name."
                 } else {
-                    "Passwords stay masked until you show one. Weak or reused passwords are called out. Needs attention filters those rows. Sort by Name, Recent, or Changed. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit."
+                    "Passwords stay masked until you show one. Weak or reused passwords are called out. Needs attention filters those rows. Sort by Name, Recent, or Changed. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name."
                 },
                 color = muted,
                 fontSize = 13.sp,
@@ -423,6 +423,9 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
                             }
                             TextButton(onClick = { model.toggleFavorite(item) }, enabled = !model.busy) {
                                 Text(if (item.favorite) "Unfavorite" else "Favorite", color = Green)
+                            }
+                            TextButton(onClick = { model.duplicateEntry(item) }, enabled = !model.busy) {
+                                Text("Duplicate", color = Green)
                             }
                             TextButton(onClick = { model.beginEdit(item) }) { Text("Edit", color = Green) }
                             TextButton(onClick = { model.requestRemove(item) }) { Text("Remove", color = Danger) }

@@ -669,6 +669,35 @@ def toggle_entry_favorite(
     return set_entry_favorite(existing, item, not item.favorite)
 
 
+def duplicate_entry(
+    existing: list[SavedPassword],
+    item: SavedPassword,
+    *,
+    when: str | None = None,
+) -> list[SavedPassword]:
+    """Copy a saved entry under a new name. History and last-used stay on the original."""
+    taken = {entry.name: index for index, entry in enumerate(existing)}
+    if item.name not in taken:
+        raise ValueError("That saved password is gone.")
+    stamp = when or utc_now()
+    label = _unique_entry_name(item.name, taken, " (copy)")
+    fresh = SavedPassword(
+        label,
+        item.password,
+        username=item.username,
+        url=item.url,
+        notes=item.notes,
+        category=item.category,
+        favorite=item.favorite,
+        created=stamp,
+        modified=stamp,
+        last_used="",
+        history=(),
+        extras=dict(item.extras),
+    )
+    return [fresh] + list(existing)
+
+
 def reused_password_groups(items: list[SavedPassword]) -> dict[str, list[str]]:
     """Map a password to the entry names that share it, only when reused."""
     groups: dict[str, list[str]] = {}
@@ -1694,10 +1723,13 @@ def _unique_entry_name(name: str, taken: dict[str, int], suffix: str) -> str:
     candidate = f"{base}{suffix}"
     number = 2
     while candidate in taken:
-        extra = f" {number}"
-        room = MAX_NAME_LENGTH - len(suffix) - len(extra)
+        if suffix.endswith(")"):
+            numbered = f"{suffix[:-1]} {number})"
+        else:
+            numbered = f"{suffix} {number}"
+        room = MAX_NAME_LENGTH - len(numbered)
         base = name[:room].rstrip()
-        candidate = f"{base}{suffix}{extra}"
+        candidate = f"{base}{numbered}"
         number += 1
     return candidate
 
@@ -3105,7 +3137,8 @@ class PasswordWindow:
                 "out. Needs attention filters those rows. Replace password generates a strong "
                 "one, saves it, and copies it. Previous keeps the last few passwords for that entry. "
                 "Sort by Name, Recent, or Changed. Copying a saved password marks it Recent "
-                "and shows Last used on the entry. Favorite stars or clears a row without opening Edit."
+                "and shows Last used on the entry. Favorite stars or clears a row without opening Edit. "
+                "Duplicate copies a row under a new name."
             ),
             xalign=0,
         )
@@ -3770,6 +3803,10 @@ class PasswordWindow:
         favorite_btn.get_style_context().add_class("secondary")
         favorite_btn.connect("clicked", lambda *_args, entry=item: self.on_toggle_favorite(entry))
         actions.pack_start(favorite_btn, False, False, 0)
+        duplicate_btn = gtk.Button(label="Duplicate")
+        duplicate_btn.get_style_context().add_class("secondary")
+        duplicate_btn.connect("clicked", lambda *_args, entry=item: self.on_duplicate_entry(entry))
+        actions.pack_start(duplicate_btn, False, False, 0)
         edit = gtk.Button(label="Edit")
         edit.get_style_context().add_class("secondary")
         edit.connect("clicked", lambda *_args, entry=item: self.on_edit_entry(entry))
@@ -3813,6 +3850,33 @@ class PasswordWindow:
         self.saved = updated
         stamped = next(entry for entry in updated if entry.name == current.name)
         message = f"Favorited {stamped.name}." if stamped.favorite else f"Cleared favorite on {stamped.name}."
+        self.status.set_text(message)
+        if self.section == "saved":
+            self.manager_message.set_text(message)
+            self.manager_message.show()
+            self._refresh_saved_rows()
+        elif self.section == "dashboard":
+            self._refresh_dashboard()
+
+    def on_duplicate_entry(self, item: SavedPassword) -> None:
+        """Copy a Saved row under a new name ending in (copy)."""
+        self._note_activity()
+        if self.vault_key is None:
+            self.status.set_text("Saved passwords are locked.")
+            return
+        current = next((entry for entry in self.saved if entry.name == item.name), None)
+        if current is None:
+            self.status.set_text("That saved password is gone.")
+            return
+        try:
+            updated = duplicate_entry(self.saved, current)
+            write_vault(self.vault_key, updated)
+        except (OSError, ValueError) as exc:
+            self.status.set_text(str(exc) or "Could not duplicate that entry.")
+            return
+        self.saved = updated
+        fresh = updated[0]
+        message = f"Duplicated as {fresh.name}."
         self.status.set_text(message)
         if self.section == "saved":
             self.manager_message.set_text(message)

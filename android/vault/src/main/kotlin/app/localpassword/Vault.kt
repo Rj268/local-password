@@ -252,6 +252,29 @@ object Vault {
         return setEntryFavorite(items, item, !item.favorite)
     }
 
+    fun duplicateEntry(items: List<SavedPassword>, item: SavedPassword, whenStamp: String = utcNow()): List<SavedPassword> {
+        if (items.none { it.name == item.name }) {
+            throw VaultException("That saved password is gone.")
+        }
+        val taken = items.mapIndexed { index, entry -> entry.name to index }.toMap().toMutableMap()
+        val label = uniqueEntryName(item.name, taken, " (copy)")
+        val fresh = SavedPassword(
+            name = label,
+            password = item.password,
+            username = item.username,
+            url = item.url,
+            notes = item.notes,
+            category = item.category,
+            favorite = item.favorite,
+            created = whenStamp,
+            modified = whenStamp,
+            lastUsed = "",
+            history = emptyList(),
+            extras = item.extras,
+        )
+        return listOf(fresh) + items
+    }
+
     private fun mergeHistories(
         left: List<PasswordRevision>,
         right: List<PasswordRevision>,
@@ -279,9 +302,13 @@ object Vault {
         var candidate = base + suffix
         var number = 2
         while (candidate in taken) {
-            val extra = " $number"
-            room = limit - suffix.length - extra.length
-            candidate = name.take(room).trimEnd() + suffix + extra
+            val numbered = if (suffix.endsWith(")")) {
+                "${suffix.dropLast(1)} $number)"
+            } else {
+                "$suffix $number"
+            }
+            room = limit - numbered.length
+            candidate = name.take(room).trimEnd() + numbered
             number += 1
         }
         return candidate

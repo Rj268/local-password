@@ -352,6 +352,46 @@ class VaultTests(unittest.TestCase):
         self.assertEqual(len(updated[0].history), 1)
         self.assertEqual(updated[0].history[0].password, "abc123")
 
+    def test_duplicate_entry_copies_fields_and_names_uniquely(self) -> None:
+        item = password_app.SavedPassword(
+            "Bank",
+            "secret-bank-value",
+            username="me",
+            url="https://bank.example",
+            notes="keep",
+            category="finance",
+            favorite=True,
+            created="2024-01-01T00:00:00Z",
+            modified="2024-02-01T00:00:00Z",
+            last_used="2024-03-01T00:00:00Z",
+            history=(password_app.PasswordRevision("old-secret", "2024-01-15T00:00:00Z"),),
+        )
+        other = password_app.SavedPassword("Email", "secret-email-value")
+        updated = password_app.duplicate_entry([item, other], item, when="2024-04-01T00:00:00Z")
+        self.assertEqual(updated[0].name, "Bank (copy)")
+        self.assertEqual(updated[0].password, "secret-bank-value")
+        self.assertEqual(updated[0].username, "me")
+        self.assertEqual(updated[0].url, "https://bank.example")
+        self.assertEqual(updated[0].notes, "keep")
+        self.assertEqual(updated[0].category, "finance")
+        self.assertTrue(updated[0].favorite)
+        self.assertEqual(updated[0].created, "2024-04-01T00:00:00Z")
+        self.assertEqual(updated[0].modified, "2024-04-01T00:00:00Z")
+        self.assertEqual(updated[0].last_used, "")
+        self.assertEqual(updated[0].history, ())
+        self.assertEqual(updated[1].name, "Bank")
+        self.assertEqual(updated[1].last_used, "2024-03-01T00:00:00Z")
+        self.assertEqual(len(updated[1].history), 1)
+        again = password_app.duplicate_entry(updated, updated[1], when="2024-04-02T00:00:00Z")
+        self.assertEqual(again[0].name, "Bank (copy 2)")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "saved.vault"
+            material = password_app.new_vault_key("passphrase-here", password_app.new_recovery_key(), n=2**14)
+            password_app.write_vault(material, again, path)
+            _key, loaded = password_app.open_vault("passphrase-here", path)
+            names = {entry.name for entry in loaded}
+            self.assertEqual(names, {"Bank", "Bank (copy)", "Bank (copy 2)", "Email"})
+
     def test_toggle_entry_favorite_keeps_timestamps(self) -> None:
         item = password_app.SavedPassword(
             "Bank",
