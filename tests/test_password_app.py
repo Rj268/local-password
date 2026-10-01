@@ -304,10 +304,26 @@ class VaultTests(unittest.TestCase):
         self.assertIsNone(password_app.browseable_url("file:///tmp/x"))
 
     def test_password_health_flags_weak_and_reused(self) -> None:
-        weak = password_app.SavedPassword("Old", "abc123")
-        strong = password_app.SavedPassword("Bank", "correct-horse-battery-staple-extra")
-        reused_a = password_app.SavedPassword("Email", "shared-secret-value")
-        reused_b = password_app.SavedPassword("Shop", "shared-secret-value")
+        from datetime import date
+
+        today = date(2024, 12, 1)
+        recent = "2024-11-15T00:00:00Z"
+        weak = password_app.SavedPassword("Old", "abc123", modified=recent)
+        strong = password_app.SavedPassword(
+            "Bank",
+            "correct-horse-battery-staple-extra",
+            modified=recent,
+        )
+        reused_a = password_app.SavedPassword(
+            "Email",
+            "shared-secret-value",
+            modified=recent,
+        )
+        reused_b = password_app.SavedPassword(
+            "Shop",
+            "shared-secret-value",
+            modified=recent,
+        )
         items = [weak, strong, reused_a, reused_b]
         self.assertTrue(password_app.entry_is_weak(weak.password))
         self.assertFalse(password_app.entry_is_weak(strong.password))
@@ -316,13 +332,58 @@ class VaultTests(unittest.TestCase):
         self.assertTrue(warning.endswith("bits)."))
         self.assertIn("password", warning)
         self.assertEqual(password_app.strength_warning_for(strong), "")
-        self.assertTrue(password_app.entry_needs_attention(weak, items))
-        self.assertFalse(password_app.entry_needs_attention(strong, items))
-        self.assertTrue(password_app.entry_needs_attention(reused_a, items))
-        weak_count, reuse_count, attention_count = password_app.password_health_summary(items)
+        self.assertTrue(password_app.entry_needs_attention(weak, items, today=today))
+        self.assertFalse(password_app.entry_needs_attention(strong, items, today=today))
+        self.assertTrue(password_app.entry_needs_attention(reused_a, items, today=today))
+        weak_count, reuse_count, stale_count, attention_count = password_app.password_health_summary(
+            items, today=today
+        )
         self.assertEqual(weak_count, 1)
         self.assertEqual(reuse_count, 1)
+        self.assertEqual(stale_count, 0)
         self.assertEqual(attention_count, 3)
+
+    def test_stale_password_flags_old_unchanged_entries(self) -> None:
+        from datetime import date
+
+        today = date(2024, 12, 1)
+        stale = password_app.SavedPassword(
+            "Legacy",
+            "correct-horse-battery-staple-extra",
+            modified="2024-01-01T00:00:00Z",
+        )
+        fresh = password_app.SavedPassword(
+            "Current",
+            "correct-horse-battery-staple-fresh",
+            modified="2024-11-01T00:00:00Z",
+        )
+        created_only = password_app.SavedPassword(
+            "CreatedOnly",
+            "correct-horse-battery-staple-created",
+            created="2023-01-01T00:00:00Z",
+        )
+        self.assertTrue(password_app.entry_is_stale(stale, today=today))
+        self.assertFalse(password_app.entry_is_stale(fresh, today=today))
+        self.assertTrue(password_app.entry_is_stale(created_only, today=today))
+        self.assertEqual(
+            password_app.stale_warning_for(stale, today=today),
+            "Not changed since 2024-01-01.",
+        )
+        self.assertEqual(password_app.stale_warning_for(fresh, today=today), "")
+        items = [stale, fresh, created_only]
+        self.assertEqual(
+            password_app.stale_password_names(items, today=today),
+            ["Legacy", "CreatedOnly"],
+        )
+        self.assertTrue(password_app.entry_needs_attention(stale, items, today=today))
+        self.assertFalse(password_app.entry_needs_attention(fresh, items, today=today))
+        weak_count, reuse_count, stale_count, attention_count = password_app.password_health_summary(
+            items, today=today
+        )
+        self.assertEqual(weak_count, 0)
+        self.assertEqual(reuse_count, 0)
+        self.assertEqual(stale_count, 2)
+        self.assertEqual(attention_count, 2)
 
     def test_replace_entry_password_keeps_fields_and_is_strong(self) -> None:
         item = password_app.SavedPassword(

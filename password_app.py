@@ -25,7 +25,7 @@ import threading
 import time
 import webbrowser
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from cryptography.exceptions import InvalidTag
@@ -69,6 +69,7 @@ KNOWN_ENTRY_KEYS = frozenset(
     }
 )
 MAX_PASSWORD_HISTORY = 5
+STALE_PASSWORD_DAYS = 180
 SAVED_SORT_NAME = "name"
 SAVED_SORT_RECENT = "recent"
 SAVED_SORT_CHANGED = "changed"
@@ -798,17 +799,84 @@ def weak_password_names(items: list[SavedPassword]) -> list[str]:
     return [item.name for item in items if entry_is_weak(item.password)]
 
 
-def entry_needs_attention(item: SavedPassword, items: list[SavedPassword]) -> bool:
-    """True when the password is weak or reused across other entries."""
-    return entry_is_weak(item.password) or bool(reuse_warning_for(item, items))
+def _parse_stamp_day(stamp: str) -> date | None:
+    """Parse YYYY-MM-DD from an ISO stamp, or None when missing or invalid."""
+    day = stamp_date(stamp)
+    if not day:
+        return None
+    try:
+        return date.fromisoformat(day)
+    except ValueError:
+        return None
 
 
-def password_health_summary(items: list[SavedPassword]) -> tuple[int, int, int]:
-    """Return (weak_count, reuse_count, attention_count) for unlocked vault items."""
+def entry_changed_day(item: SavedPassword) -> date | None:
+    """Day the password was last changed, falling back to created."""
+    return _parse_stamp_day(item.modified) or _parse_stamp_day(item.created)
+
+
+def entry_is_stale(
+    item: SavedPassword,
+    *,
+    days: int = STALE_PASSWORD_DAYS,
+    today: date | None = None,
+) -> bool:
+    """True when the password has not been changed for at least `days`."""
+    changed = entry_changed_day(item)
+    if changed is None:
+        return False
+    ref = today or _parse_stamp_day(utc_now()) or date.today()
+    return (ref - changed).days >= days
+
+
+def stale_warning_for(
+    item: SavedPassword,
+    *,
+    days: int = STALE_PASSWORD_DAYS,
+    today: date | None = None,
+) -> str:
+    """Short note when this entry's password has not been changed recently."""
+    if not entry_is_stale(item, days=days, today=today):
+        return ""
+    day = stamp_date(item.modified) or stamp_date(item.created)
+    return f"Not changed since {day}."
+
+
+def stale_password_names(
+    items: list[SavedPassword],
+    *,
+    days: int = STALE_PASSWORD_DAYS,
+    today: date | None = None,
+) -> list[str]:
+    """Names of entries whose passwords are older than the stale window."""
+    return [item.name for item in items if entry_is_stale(item, days=days, today=today)]
+
+
+def entry_needs_attention(
+    item: SavedPassword,
+    items: list[SavedPassword],
+    *,
+    today: date | None = None,
+) -> bool:
+    """True when the password is weak, reused, or stale."""
+    return (
+        entry_is_weak(item.password)
+        or bool(reuse_warning_for(item, items))
+        or entry_is_stale(item, today=today)
+    )
+
+
+def password_health_summary(
+    items: list[SavedPassword],
+    *,
+    today: date | None = None,
+) -> tuple[int, int, int, int]:
+    """Return (weak_count, reuse_count, stale_count, attention_count)."""
     weak_count = len(weak_password_names(items))
     reuse_count = len(reused_password_groups(items))
-    attention_count = sum(1 for item in items if entry_needs_attention(item, items))
-    return weak_count, reuse_count, attention_count
+    stale_count = len(stale_password_names(items, today=today))
+    attention_count = sum(1 for item in items if entry_needs_attention(item, items, today=today))
+    return weak_count, reuse_count, stale_count, attention_count
 
 
 def strong_replacement_password() -> str:
@@ -2723,7 +2791,7 @@ class PasswordWindow:
             self.dashboard_empty.show()
             self.dashboard_recent.hide()
             return
-        weak_count, reuse_count, attention_count = password_health_summary(self.saved)
+        weak_count, reuse_count, stale_count, attention_count = password_health_summary(self.saved)
         self.dashboard_welcome.set_text("Ready when you are")
         if attention_count:
             parts = []
@@ -2735,6 +2803,10 @@ class PasswordWindow:
                 parts.append(
                     f"{reuse_count} reused password{'s' if reuse_count != 1 else ''}"
                 )
+            if stale_count:
+                parts.append(
+                    f"{stale_count} stale password{'s' if stale_count != 1 else ''}"
+                )
             detail = " and ".join(parts) if parts else f"{attention_count} needing attention"
             verb = "needs" if attention_count == 1 else "need"
             self.dashboard_lede.set_text(
@@ -2743,7 +2815,7 @@ class PasswordWindow:
         else:
             self.dashboard_lede.set_text(
                 "Open Saved to copy a password or username, or Generate to make another. "
-                "Saved passwords look strong and unique."
+                "Saved passwords look strong, unique, and recently changed."
             )
         self.dashboard_lock_value.set_text("Unlocked")
         self.dashboard_empty.hide()
@@ -2780,6 +2852,9 @@ class PasswordWindow:
                 badge.get_style_context().add_class("danger")
             elif reuse_warning_for(item, self.saved):
                 badge = gtk.Label(label="Reused", xalign=1)
+                badge.get_style_context().add_class("danger")
+            elif entry_is_stale(item):
+                badge = gtk.Label(label="Stale", xalign=1)
                 badge.get_style_context().add_class("danger")
             else:
                 badge = gtk.Label(label="••••••••", xalign=1)
@@ -3169,8 +3244,9 @@ class PasswordWindow:
         page.pack_start(self.saved_heading, False, False, 0)
         saved_lede = gtk.Label(
             label=(
-                "Passwords stay masked until you show one. Weak or reused passwords are called "
-                "out. Needs attention filters those rows. Replace password generates a strong "
+                "Passwords stay masked until you show one. Weak, reused, or stale passwords "
+                "(unchanged for 180 days) are called out. Needs attention filters those rows. "
+                "Replace password generates a strong "
                 "one, saves it, and copies it. Previous keeps the last few passwords for that entry. "
                 "Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. "
                 "Copying a saved password marks it Recent and shows Last used on the entry. "
@@ -3733,12 +3809,14 @@ class PasswordWindow:
         ]
         matches = sorted_saved_entries(matches, self.saved_sort_mode, all_items=self.saved)
         count = len(self.saved)
-        weak_count, reuse_count, _attention = password_health_summary(self.saved)
+        weak_count, reuse_count, stale_count, _attention = password_health_summary(self.saved)
         heading = "1 saved" if count == 1 else f"{count} saved"
         if weak_count:
             heading += f" · {weak_count} weak"
         if reuse_count:
             heading += f" · {reuse_count} reused"
+        if stale_count:
+            heading += f" · {stale_count} stale"
         self.saved_heading.set_text(heading)
         self.saved_heading.show()
         if not matches:
@@ -3794,6 +3872,7 @@ class PasswordWindow:
         for warning in (
             strength_warning_for(item),
             reuse_warning_for(item, self.saved),
+            stale_warning_for(item),
         ):
             if not warning:
                 continue

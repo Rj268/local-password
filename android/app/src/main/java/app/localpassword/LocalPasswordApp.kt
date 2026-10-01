@@ -313,16 +313,17 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
         } else if (model.saved.isEmpty()) {
             Text("The vault is empty.", color = muted)
         } else {
-            val (weakCount, reuseCount, _) = model.passwordHealthSummary()
+            val health = model.passwordHealthSummary()
             val healthBits = buildList {
-                if (weakCount > 0) add("$weakCount weak")
-                if (reuseCount > 0) add("$reuseCount reused")
+                if (health.weakCount > 0) add("${health.weakCount} weak")
+                if (health.reuseCount > 0) add("${health.reuseCount} reused")
+                if (health.staleCount > 0) add("${health.staleCount} stale")
             }
             Text(
                 if (healthBits.isNotEmpty()) {
-                    "Passwords stay masked until you show one. Weak or reused passwords are called out. ${healthBits.joinToString(" · ")}. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Remove can be undone with Undo."
+                    "Passwords stay masked until you show one. Weak, reused, or stale passwords (unchanged for 180 days) are called out. ${healthBits.joinToString(" · ")}. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Remove can be undone with Undo."
                 } else {
-                    "Passwords stay masked until you show one. Weak or reused passwords are called out. Needs attention filters those rows. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Remove can be undone with Undo."
+                    "Passwords stay masked until you show one. Weak, reused, or stale passwords (unchanged for 180 days) are called out. Needs attention filters those rows. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Remove can be undone with Undo."
                 },
                 color = muted,
                 fontSize = 13.sp,
@@ -405,6 +406,10 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
                         val warning = model.reuseWarning(item)
                         if (warning.isNotEmpty()) {
                             Text(warning, color = Danger, fontSize = 13.sp)
+                        }
+                        val stale = model.staleWarning(item)
+                        if (stale.isNotEmpty()) {
+                            Text(stale, color = Danger, fontSize = 13.sp)
                         }
                         if (model.revealed == item.name) {
                             Text(item.password, color = ink, fontFamily = FontFamily.Monospace)

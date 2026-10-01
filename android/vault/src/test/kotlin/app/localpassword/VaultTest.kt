@@ -60,23 +60,62 @@ class VaultTest {
 
     @Test
     fun weakPasswordHealthAndNeedsAttention() {
-        val weak = SavedPassword("Old", "abc123")
-        val strong = SavedPassword("Bank", "correct-horse-battery-staple-extra")
-        val reusedA = SavedPassword("Email", "shared-secret-value")
-        val reusedB = SavedPassword("Shop", "shared-secret-value")
+        val today = java.time.LocalDate.of(2024, 12, 1)
+        val recent = "2024-11-15T00:00:00Z"
+        val weak = SavedPassword("Old", "abc123", modified = recent)
+        val strong = SavedPassword("Bank", "correct-horse-battery-staple-extra", modified = recent)
+        val reusedA = SavedPassword("Email", "shared-secret-value", modified = recent)
+        val reusedB = SavedPassword("Shop", "shared-secret-value", modified = recent)
         val items = listOf(weak, strong, reusedA, reusedB)
         assert(Generator.isWeakPassword(weak.password))
         assert(!Generator.isWeakPassword(strong.password))
         assertEquals(listOf("Old"), Vault.weakPasswordNames(items))
         assert(Vault.strengthWarningFor(weak).startsWith("Very weak") || Vault.strengthWarningFor(weak).startsWith("Weak") || Vault.strengthWarningFor(weak).startsWith("Fair"))
         assertEquals("", Vault.strengthWarningFor(strong))
-        assert(Vault.entryNeedsAttention(weak, items))
-        assert(!Vault.entryNeedsAttention(strong, items))
-        assert(Vault.entryNeedsAttention(reusedA, items))
-        val (weakCount, reuseCount, attentionCount) = Vault.passwordHealthSummary(items)
-        assertEquals(1, weakCount)
-        assertEquals(1, reuseCount)
-        assertEquals(3, attentionCount)
+        assert(Vault.entryNeedsAttention(weak, items, today = today))
+        assert(!Vault.entryNeedsAttention(strong, items, today = today))
+        assert(Vault.entryNeedsAttention(reusedA, items, today = today))
+        val health = Vault.passwordHealthSummary(items, today = today)
+        assertEquals(1, health.weakCount)
+        assertEquals(1, health.reuseCount)
+        assertEquals(0, health.staleCount)
+        assertEquals(3, health.attentionCount)
+    }
+
+    @Test
+    fun stalePasswordFlagsOldUnchangedEntries() {
+        val today = java.time.LocalDate.of(2024, 12, 1)
+        val stale = SavedPassword(
+            name = "Legacy",
+            password = "correct-horse-battery-staple-extra",
+            modified = "2024-01-01T00:00:00Z",
+        )
+        val fresh = SavedPassword(
+            name = "Current",
+            password = "correct-horse-battery-staple-fresh",
+            modified = "2024-11-01T00:00:00Z",
+        )
+        val createdOnly = SavedPassword(
+            name = "CreatedOnly",
+            password = "correct-horse-battery-staple-created",
+            created = "2023-01-01T00:00:00Z",
+        )
+        assert(Vault.entryIsStale(stale, today = today))
+        assert(!Vault.entryIsStale(fresh, today = today))
+        assert(Vault.entryIsStale(createdOnly, today = today))
+        assertEquals("Not changed since 2024-01-01.", Vault.staleWarningFor(stale, today = today))
+        assertEquals("", Vault.staleWarningFor(fresh, today = today))
+        assertEquals(
+            listOf("Legacy", "CreatedOnly"),
+            Vault.stalePasswordNames(listOf(stale, fresh, createdOnly), today = today),
+        )
+        assert(Vault.entryNeedsAttention(stale, listOf(stale, fresh), today = today))
+        assert(!Vault.entryNeedsAttention(fresh, listOf(stale, fresh), today = today))
+        val health = Vault.passwordHealthSummary(listOf(stale, fresh, createdOnly), today = today)
+        assertEquals(0, health.weakCount)
+        assertEquals(0, health.reuseCount)
+        assertEquals(2, health.staleCount)
+        assertEquals(2, health.attentionCount)
     }
 
     @Test

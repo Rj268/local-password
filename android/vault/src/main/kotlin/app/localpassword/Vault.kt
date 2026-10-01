@@ -6,6 +6,9 @@ import org.json.JSONObject
 import java.security.GeneralSecurityException
 import java.security.SecureRandom
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
+import java.time.temporal.ChronoUnit
 import java.util.Locale
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
@@ -50,10 +53,18 @@ data class OpenVault(
     val recoveryWrap: ByteArray,
 )
 
+data class PasswordHealth(
+    val weakCount: Int,
+    val reuseCount: Int,
+    val staleCount: Int,
+    val attentionCount: Int,
+)
+
 object Vault {
     const val MIN_PASSPHRASE_LENGTH = 8
     const val RECOVERY_WORD_COUNT = 8
     const val MAX_PASSWORD_HISTORY = 5
+    const val STALE_PASSWORD_DAYS = 180
     const val SAVED_SORT_NAME = "name"
     const val SAVED_SORT_RECENT = "recent"
     const val SAVED_SORT_CHANGED = "changed"
@@ -545,14 +556,58 @@ object Vault {
     fun weakPasswordNames(items: List<SavedPassword>): List<String> =
         items.filter { Generator.isWeakPassword(it.password) }.map { it.name }
 
-    fun entryNeedsAttention(item: SavedPassword, items: List<SavedPassword>): Boolean =
-        Generator.isWeakPassword(item.password) || reuseWarningFor(item, items).isNotEmpty()
+    fun entryChangedDay(item: SavedPassword): LocalDate? {
+        val day = stampDate(item.modified).ifEmpty { stampDate(item.created) }
+        if (day.isEmpty()) return null
+        return try {
+            LocalDate.parse(day)
+        } catch (_: Exception) {
+            null
+        }
+    }
 
-    fun passwordHealthSummary(items: List<SavedPassword>): Triple<Int, Int, Int> {
+    fun entryIsStale(
+        item: SavedPassword,
+        days: Int = STALE_PASSWORD_DAYS,
+        today: LocalDate? = null,
+    ): Boolean {
+        val changed = entryChangedDay(item) ?: return false
+        val ref = today ?: LocalDate.now(ZoneOffset.UTC)
+        return ChronoUnit.DAYS.between(changed, ref) >= days
+    }
+
+    fun staleWarningFor(
+        item: SavedPassword,
+        days: Int = STALE_PASSWORD_DAYS,
+        today: LocalDate? = null,
+    ): String {
+        if (!entryIsStale(item, days, today)) return ""
+        val day = stampDate(item.modified).ifEmpty { stampDate(item.created) }
+        return "Not changed since $day."
+    }
+
+    fun stalePasswordNames(
+        items: List<SavedPassword>,
+        days: Int = STALE_PASSWORD_DAYS,
+        today: LocalDate? = null,
+    ): List<String> =
+        items.filter { entryIsStale(it, days, today) }.map { it.name }
+
+    fun entryNeedsAttention(
+        item: SavedPassword,
+        items: List<SavedPassword>,
+        today: LocalDate? = null,
+    ): Boolean =
+        Generator.isWeakPassword(item.password) ||
+            reuseWarningFor(item, items).isNotEmpty() ||
+            entryIsStale(item, today = today)
+
+    fun passwordHealthSummary(items: List<SavedPassword>, today: LocalDate? = null): PasswordHealth {
         val weakCount = weakPasswordNames(items).size
         val reuseCount = reusedPasswordGroups(items).size
-        val attentionCount = items.count { entryNeedsAttention(it, items) }
-        return Triple(weakCount, reuseCount, attentionCount)
+        val staleCount = stalePasswordNames(items, today = today).size
+        val attentionCount = items.count { entryNeedsAttention(it, items, today = today) }
+        return PasswordHealth(weakCount, reuseCount, staleCount, attentionCount)
     }
 
     fun historyAfterChange(

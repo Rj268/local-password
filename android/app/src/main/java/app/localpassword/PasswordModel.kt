@@ -583,7 +583,9 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
 
     fun weakPasswordCount(): Int = Vault.weakPasswordNames(saved).size
 
-    fun passwordHealthSummary(): Triple<Int, Int, Int> = Vault.passwordHealthSummary(saved)
+    fun passwordHealthSummary(): PasswordHealth = Vault.passwordHealthSummary(saved)
+
+    fun staleWarning(item: SavedPassword): String = Vault.staleWarningFor(item)
 
     fun openUrl(url: String) {
         val target = Vault.browseableUrl(url) ?: run {
