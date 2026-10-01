@@ -204,6 +204,25 @@ class VaultTest {
     }
 
     @Test
+    fun entryDatesLabelShowsCreatedAndChanged() {
+        val bare = SavedPassword(name = "Bare", password = "secret-bare-value")
+        val createdOnly = SavedPassword(
+            name = "Created",
+            password = "secret-created-value",
+            created = "2024-01-15T09:00:00Z",
+        )
+        val both = SavedPassword(
+            name = "Both",
+            password = "secret-both-value",
+            created = "2024-01-15T09:00:00Z",
+            modified = "2024-03-20T18:30:00Z",
+        )
+        assertEquals("", Vault.entryDatesLabel(bare))
+        assertEquals("Created 2024-01-15", Vault.entryDatesLabel(createdOnly))
+        assertEquals("Created 2024-01-15 · Changed 2024-03-20", Vault.entryDatesLabel(both))
+    }
+
+    @Test
     fun sortedSavedEntriesAndTouchLastUsed() {
         val alpha = SavedPassword(
             name = "Alpha",

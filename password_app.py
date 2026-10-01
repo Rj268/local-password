@@ -636,6 +636,18 @@ def last_used_label(item: SavedPassword) -> str:
     return "Not used yet"
 
 
+def entry_dates_label(item: SavedPassword) -> str:
+    """Short Saved-row / Dashboard line for created and last-changed dates."""
+    bits: list[str] = []
+    created = stamp_date(item.created)
+    changed = stamp_date(item.modified)
+    if created:
+        bits.append(f"Created {created}")
+    if changed:
+        bits.append(f"Changed {changed}")
+    return " · ".join(bits)
+
+
 def recently_used_entries(items: list[SavedPassword], limit: int = 5) -> list[SavedPassword]:
     """Top entries for the Dashboard: last used first, else last changed."""
     if limit <= 0:
@@ -2735,9 +2747,14 @@ class PasswordWindow:
             text.set_hexpand(True)
             name = gtk.Label(label=item.name, xalign=0)
             name.get_style_context().add_class("saved-name")
+            text.pack_start(name, False, False, 0)
+            dates = entry_dates_label(item)
+            if dates:
+                when = gtk.Label(label=dates, xalign=0)
+                when.get_style_context().add_class("hint")
+                text.pack_start(when, False, False, 0)
             used = gtk.Label(label=last_used_label(item), xalign=0)
             used.get_style_context().add_class("hint")
-            text.pack_start(name, False, False, 0)
             text.pack_start(used, False, False, 0)
             if entry_is_weak(item.password):
                 badge = gtk.Label(label="Weak", xalign=1)
@@ -3136,8 +3153,9 @@ class PasswordWindow:
                 "Passwords stay masked until you show one. Weak or reused passwords are called "
                 "out. Needs attention filters those rows. Replace password generates a strong "
                 "one, saves it, and copies it. Previous keeps the last few passwords for that entry. "
-                "Sort by Name, Recent, or Changed. Copying a saved password marks it Recent "
-                "and shows Last used on the entry. Favorite stars or clears a row without opening Edit. "
+                "Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. "
+                "Copying a saved password marks it Recent and shows Last used on the entry. "
+                "Favorite stars or clears a row without opening Edit. "
                 "Duplicate copies a row under a new name."
             ),
             xalign=0,
@@ -3733,6 +3751,12 @@ class PasswordWindow:
             meta.set_halign(gtk.Align.START)
             meta.get_style_context().add_class("hint")
             text.pack_start(meta, False, False, 0)
+        dates = entry_dates_label(item)
+        if dates:
+            when = gtk.Label(label=dates, xalign=0)
+            when.set_halign(gtk.Align.START)
+            when.get_style_context().add_class("hint")
+            text.pack_start(when, False, False, 0)
         used = gtk.Label(label=last_used_label(item), xalign=0)
         used.set_halign(gtk.Align.START)
         used.get_style_context().add_class("hint")

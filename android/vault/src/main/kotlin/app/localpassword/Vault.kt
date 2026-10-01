@@ -227,6 +227,15 @@ object Vault {
         return if (day.isNotEmpty()) "Last used $day" else "Not used yet"
     }
 
+    fun entryDatesLabel(item: SavedPassword): String {
+        val bits = mutableListOf<String>()
+        val created = stampDate(item.created)
+        val changed = stampDate(item.modified)
+        if (created.isNotEmpty()) bits.add("Created $created")
+        if (changed.isNotEmpty()) bits.add("Changed $changed")
+        return bits.joinToString(" · ")
+    }
+
     fun recentlyUsedEntries(items: List<SavedPassword>, limit: Int = 5): List<SavedPassword> {
         if (limit <= 0) return emptyList()
         val used = items.filter { it.lastUsed.isNotEmpty() }

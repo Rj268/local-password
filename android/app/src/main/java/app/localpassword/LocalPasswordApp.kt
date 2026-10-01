@@ -320,9 +320,9 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
             }
             Text(
                 if (healthBits.isNotEmpty()) {
-                    "Passwords stay masked until you show one. Weak or reused passwords are called out. ${healthBits.joinToString(" · ")}. Sort by Name, Recent, or Changed. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name."
+                    "Passwords stay masked until you show one. Weak or reused passwords are called out. ${healthBits.joinToString(" · ")}. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name."
                 } else {
-                    "Passwords stay masked until you show one. Weak or reused passwords are called out. Needs attention filters those rows. Sort by Name, Recent, or Changed. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name."
+                    "Passwords stay masked until you show one. Weak or reused passwords are called out. Needs attention filters those rows. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name."
                 },
                 color = muted,
                 fontSize = 13.sp,
@@ -380,6 +380,10 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
                         val meta = listOf(item.username, item.category, item.url).filter { it.isNotEmpty() }
                         if (meta.isNotEmpty()) {
                             Text(meta.joinToString(" · "), color = muted, fontSize = 13.sp)
+                        }
+                        val dates = Vault.entryDatesLabel(item)
+                        if (dates.isNotEmpty()) {
+                            Text(dates, color = muted, fontSize = 13.sp)
                         }
                         Text(Vault.lastUsedLabel(item), color = muted, fontSize = 13.sp)
                         val strength = model.strengthWarning(item)

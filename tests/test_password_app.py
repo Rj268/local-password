@@ -444,6 +444,26 @@ class VaultTests(unittest.TestCase):
         unused_only = password_app.recently_used_entries([alpha], 5)
         self.assertEqual([item.name for item in unused_only], ["Alpha"])
 
+    def test_entry_dates_label_shows_created_and_changed(self) -> None:
+        bare = password_app.SavedPassword("Bare", "secret-bare-value")
+        created_only = password_app.SavedPassword(
+            "Created",
+            "secret-created-value",
+            created="2024-01-15T09:00:00Z",
+        )
+        both = password_app.SavedPassword(
+            "Both",
+            "secret-both-value",
+            created="2024-01-15T09:00:00Z",
+            modified="2024-03-20T18:30:00Z",
+        )
+        self.assertEqual(password_app.entry_dates_label(bare), "")
+        self.assertEqual(password_app.entry_dates_label(created_only), "Created 2024-01-15")
+        self.assertEqual(
+            password_app.entry_dates_label(both),
+            "Created 2024-01-15 · Changed 2024-03-20",
+        )
+
     def test_sorted_saved_entries_and_touch_last_used(self) -> None:
         alpha = password_app.SavedPassword(
             "Alpha",
