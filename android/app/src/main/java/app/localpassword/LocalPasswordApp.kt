@@ -321,9 +321,9 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
             }
             Text(
                 if (healthBits.isNotEmpty()) {
-                    "Passwords stay masked until you show one. Weak, reused, or stale passwords (unchanged for 180 days) are called out. ${healthBits.joinToString(" · ")}. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Remove can be undone with Undo."
+                    "Passwords stay masked until you show one. Weak, reused, or stale passwords (unchanged for 180 days) are called out. ${healthBits.joinToString(" · ")}. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Copy URL and Copy notes appear when those fields are set. Notes show without revealing the password. Remove can be undone with Undo."
                 } else {
-                    "Passwords stay masked until you show one. Weak, reused, or stale passwords (unchanged for 180 days) are called out. Needs attention filters those rows. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Remove can be undone with Undo."
+                    "Passwords stay masked until you show one. Weak, reused, or stale passwords (unchanged for 180 days) are called out. Needs attention filters those rows. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Copy URL and Copy notes appear when those fields are set. Notes show without revealing the password. Remove can be undone with Undo."
                 },
                 color = muted,
                 fontSize = 13.sp,
@@ -413,11 +413,11 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
                         }
                         if (model.revealed == item.name) {
                             Text(item.password, color = ink, fontFamily = FontFamily.Monospace)
-                            if (item.notes.isNotEmpty()) {
-                                Text(item.notes, color = muted, fontSize = 13.sp)
-                            }
                         } else {
                             Text("••••••••••••", color = muted)
+                        }
+                        if (item.notes.isNotBlank()) {
+                            Text(item.notes, color = muted, fontSize = 13.sp)
                         }
                         Row {
                             TextButton(onClick = { model.revealed = if (model.revealed == item.name) null else item.name }) {
@@ -431,8 +431,15 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
                                     Text("Copy username", color = Green)
                                 }
                             }
-                            if (Vault.browseableUrl(item.url) != null) {
-                                TextButton(onClick = { model.openUrl(item.url) }) { Text("Open URL", color = Green) }
+                            Vault.optionalCopyFields(item).forEach { (label, value) ->
+                                TextButton(onClick = { model.copySavedSecret(item, value) }) {
+                                    Text(label, color = Green)
+                                }
+                                if (label == "Copy URL" && Vault.browseableUrl(item.url) != null) {
+                                    TextButton(onClick = { model.openUrl(item.url) }) {
+                                        Text("Open URL", color = Green)
+                                    }
+                                }
                             }
                             TextButton(onClick = { model.requestReplace(item) }) {
                                 Text("Replace password", color = Green)

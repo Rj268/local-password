@@ -77,7 +77,7 @@ $sizeKb = [int]((Get-ChildItem -LiteralPath $dest -Recurse -File | Measure-Objec
 Set-ItemProperty -LiteralPath $reg -Name DisplayName -Value "Local Password"
 Set-ItemProperty -LiteralPath $reg -Name DisplayIcon -Value $iconLocation
 Set-ItemProperty -LiteralPath $reg -Name Publisher -Value "Local Password"
-Set-ItemProperty -LiteralPath $reg -Name DisplayVersion -Value "1.21.0"
+Set-ItemProperty -LiteralPath $reg -Name DisplayVersion -Value "1.22.0"
 Set-ItemProperty -LiteralPath $reg -Name InstallLocation -Value $dest
 Set-ItemProperty -LiteralPath $reg -Name UninstallString -Value "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$uninstallPath`""
 Set-ItemProperty -LiteralPath $reg -Name EstimatedSize -Value $sizeKb -Type DWord

@@ -59,6 +59,43 @@ class VaultTest {
     }
 
     @Test
+    fun optionalCopyFieldsForUrlAndNotes() {
+        val bare = SavedPassword("Bare", "secret-value-here")
+        assertEquals(emptyList<Pair<String, String>>(), Vault.optionalCopyFields(bare))
+        val withUrl = SavedPassword("Mail", "secret-value-here", url = "  mail.example/login  ")
+        assertEquals(listOf("Copy URL" to "mail.example/login"), Vault.optionalCopyFields(withUrl))
+        val withNotes = SavedPassword(
+            "Bank",
+            "secret-value-here",
+            notes = "recovery codes\nkeep private",
+        )
+        assertEquals(
+            listOf("Copy notes" to "recovery codes\nkeep private"),
+            Vault.optionalCopyFields(withNotes),
+        )
+        val both = SavedPassword(
+            "Work",
+            "secret-value-here",
+            url = "https://work.example",
+            notes = "  desk drawer  ",
+        )
+        assertEquals(
+            listOf(
+                "Copy URL" to "https://work.example",
+                "Copy notes" to "  desk drawer  ",
+            ),
+            Vault.optionalCopyFields(both),
+        )
+        val whitespaceOnly = SavedPassword(
+            "Empty",
+            "secret-value-here",
+            url = "   ",
+            notes = "\n\t",
+        )
+        assertEquals(emptyList<Pair<String, String>>(), Vault.optionalCopyFields(whitespaceOnly))
+    }
+
+    @Test
     fun weakPasswordHealthAndNeedsAttention() {
         val today = java.time.LocalDate.of(2024, 12, 1)
         val recent = "2024-11-15T00:00:00Z"

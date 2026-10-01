@@ -303,6 +303,48 @@ class VaultTests(unittest.TestCase):
         self.assertIsNone(password_app.browseable_url("javascript:alert(1)"))
         self.assertIsNone(password_app.browseable_url("file:///tmp/x"))
 
+    def test_optional_copy_fields_for_url_and_notes(self) -> None:
+        bare = password_app.SavedPassword("Bare", "secret-value-here")
+        self.assertEqual(password_app.optional_copy_fields(bare), [])
+        with_url = password_app.SavedPassword(
+            "Mail",
+            "secret-value-here",
+            url="  mail.example/login  ",
+        )
+        self.assertEqual(
+            password_app.optional_copy_fields(with_url),
+            [("Copy URL", "mail.example/login")],
+        )
+        with_notes = password_app.SavedPassword(
+            "Bank",
+            "secret-value-here",
+            notes="recovery codes\nkeep private",
+        )
+        self.assertEqual(
+            password_app.optional_copy_fields(with_notes),
+            [("Copy notes", "recovery codes\nkeep private")],
+        )
+        both = password_app.SavedPassword(
+            "Work",
+            "secret-value-here",
+            url="https://work.example",
+            notes="  desk drawer  ",
+        )
+        self.assertEqual(
+            password_app.optional_copy_fields(both),
+            [
+                ("Copy URL", "https://work.example"),
+                ("Copy notes", "  desk drawer  "),
+            ],
+        )
+        whitespace_only = password_app.SavedPassword(
+            "Empty",
+            "secret-value-here",
+            url="   ",
+            notes="\n\t",
+        )
+        self.assertEqual(password_app.optional_copy_fields(whitespace_only), [])
+
     def test_password_health_flags_weak_and_reused(self) -> None:
         from datetime import date
 

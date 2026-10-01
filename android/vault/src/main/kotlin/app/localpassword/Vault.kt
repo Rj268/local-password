@@ -546,6 +546,15 @@ object Vault {
         return "https://$text"
     }
 
+    fun optionalCopyFields(item: SavedPassword): List<Pair<String, String>> {
+        val fields = mutableListOf<Pair<String, String>>()
+        val url = item.url.trim()
+        if (url.isNotEmpty()) fields.add("Copy URL" to url)
+        val notes = item.notes.trim()
+        if (notes.isNotEmpty()) fields.add("Copy notes" to item.notes)
+        return fields
+    }
+
     fun strengthWarningFor(item: SavedPassword): String {
         if (!Generator.isWeakPassword(item.password)) return ""
         val bits = Generator.passwordStrengthBits(item.password)

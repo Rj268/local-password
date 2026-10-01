@@ -767,6 +767,18 @@ def browseable_url(url: str) -> str | None:
     return "https://" + text
 
 
+def optional_copy_fields(item: SavedPassword) -> list[tuple[str, str]]:
+    """Copy URL and Copy notes labels with values when those fields are set."""
+    fields: list[tuple[str, str]] = []
+    url = item.url.strip()
+    if url:
+        fields.append(("Copy URL", url))
+    notes = item.notes.strip()
+    if notes:
+        fields.append(("Copy notes", item.notes))
+    return fields
+
+
 def open_entry_url(url: str) -> bool:
     """Open a saved entry URL in the default browser."""
     target = browseable_url(url)
@@ -3252,6 +3264,8 @@ class PasswordWindow:
                 "Copying a saved password marks it Recent and shows Last used on the entry. "
                 "Favorite stars or clears a row without opening Edit. "
                 "Duplicate copies a row under a new name. "
+                "Copy URL and Copy notes appear when those fields are set. "
+                "Notes show without revealing the password. "
                 "Remove can be undone with Undo on this page."
             ),
             xalign=0,
@@ -3888,7 +3902,7 @@ class PasswordWindow:
         secret.set_halign(gtk.Align.START)
         secret.get_style_context().add_class("hint")
         text.pack_start(secret, False, False, 0)
-        if item.notes and shown:
+        if item.notes.strip():
             notes = gtk.Label(label=item.notes, xalign=0)
             notes.set_line_wrap(True)
             notes.set_halign(gtk.Align.START)
@@ -3915,11 +3929,19 @@ class PasswordWindow:
                 lambda *_args, entry=item: self.on_copy_saved_secret(entry, entry.username),
             )
             actions.pack_start(copy_user, False, False, 0)
-        if browseable_url(item.url):
-            open_url = gtk.Button(label="Open URL")
-            open_url.get_style_context().add_class("secondary")
-            open_url.connect("clicked", lambda *_args, entry=item: self.on_open_url(entry))
-            actions.pack_start(open_url, False, False, 0)
+        for label, value in optional_copy_fields(item):
+            copy_field = gtk.Button(label=label)
+            copy_field.get_style_context().add_class("secondary")
+            copy_field.connect(
+                "clicked",
+                lambda *_args, entry=item, text=value: self.on_copy_saved_secret(entry, text),
+            )
+            actions.pack_start(copy_field, False, False, 0)
+            if label == "Copy URL" and browseable_url(item.url):
+                open_url = gtk.Button(label="Open URL")
+                open_url.get_style_context().add_class("secondary")
+                open_url.connect("clicked", lambda *_args, entry=item: self.on_open_url(entry))
+                actions.pack_start(open_url, False, False, 0)
         replace_btn = gtk.Button(label="Replace password")
         if entry_needs_attention(item, self.saved):
             replace_btn.get_style_context().add_class("primary")
