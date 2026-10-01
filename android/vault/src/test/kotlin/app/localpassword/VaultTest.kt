@@ -110,6 +110,33 @@ class VaultTest {
     }
 
     @Test
+    fun toggleEntryFavoriteKeepsTimestamps() {
+        val item = SavedPassword(
+            name = "Bank",
+            password = "secret-bank-value",
+            favorite = false,
+            created = "2024-01-01T00:00:00Z",
+            modified = "2024-02-01T00:00:00Z",
+            lastUsed = "2024-03-01T00:00:00Z",
+        )
+        val other = SavedPassword(name = "Email", password = "secret-email-value", favorite = true)
+        val updated = Vault.toggleEntryFavorite(listOf(item, other), item)
+        assert(updated[0].favorite)
+        assertEquals("2024-02-01T00:00:00Z", updated[0].modified)
+        assertEquals("2024-03-01T00:00:00Z", updated[0].lastUsed)
+        assertEquals("secret-bank-value", updated[0].password)
+        assert(updated[1].favorite)
+        val cleared = Vault.toggleEntryFavorite(updated, updated[0])
+        assert(!cleared[0].favorite)
+        val recovery = "alpha bravo charlie delta echo foxtrot golf hotel"
+        val (blob, _) = Vault.create("passphrase-here", recovery, cleared)
+        val loaded = Vault.open("passphrase-here", blob).items
+        val loadedBank = loaded.first { it.name == "Bank" }
+        assert(!loadedBank.favorite)
+        assertEquals("2024-02-01T00:00:00Z", loadedBank.modified)
+    }
+
+    @Test
     fun lastUsedLabelAndRecentlyUsedEntries() {
         val alpha = SavedPassword(
             name = "Alpha",

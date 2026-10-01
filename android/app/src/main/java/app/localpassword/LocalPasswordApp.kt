@@ -320,9 +320,9 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
             }
             Text(
                 if (healthBits.isNotEmpty()) {
-                    "Passwords stay masked until you show one. Weak or reused passwords are called out. ${healthBits.joinToString(" · ")}. Sort by Name, Recent, or Changed. Copying a saved password marks it Recent and shows Last used."
+                    "Passwords stay masked until you show one. Weak or reused passwords are called out. ${healthBits.joinToString(" · ")}. Sort by Name, Recent, or Changed. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit."
                 } else {
-                    "Passwords stay masked until you show one. Weak or reused passwords are called out. Needs attention filters those rows. Sort by Name, Recent, or Changed. Copying a saved password marks it Recent and shows Last used."
+                    "Passwords stay masked until you show one. Weak or reused passwords are called out. Needs attention filters those rows. Sort by Name, Recent, or Changed. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit."
                 },
                 color = muted,
                 fontSize = 13.sp,
@@ -420,6 +420,9 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
                                 TextButton(onClick = { model.showHistory(item) }) {
                                     Text("Previous (${item.history.size})", color = Green)
                                 }
+                            }
+                            TextButton(onClick = { model.toggleFavorite(item) }, enabled = !model.busy) {
+                                Text(if (item.favorite) "Unfavorite" else "Favorite", color = Green)
                             }
                             TextButton(onClick = { model.beginEdit(item) }) { Text("Edit", color = Green) }
                             TextButton(onClick = { model.requestRemove(item) }) { Text("Remove", color = Danger) }

@@ -403,6 +403,38 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun toggleFavorite(item: SavedPassword) {
+        val currentOpen = opened ?: return
+        val current = currentOpen.items.firstOrNull { it.name == item.name } ?: run {
+            error = "That saved password is gone."
+            return
+        }
+        viewModelScope.launch {
+            busy = true
+            error = ""
+            try {
+                val next = withContext(Dispatchers.Default) {
+                    Vault.toggleEntryFavorite(currentOpen.items, current)
+                }
+                val blob = withContext(Dispatchers.Default) { Vault.seal(currentOpen, next) }
+                writeAtomically(blob)
+                opened = currentOpen.copy(items = next)
+                saved = next
+                unlocked = true
+                val stamped = next.first { it.name == current.name }
+                status = if (stamped.favorite) {
+                    "Favorited ${stamped.name}."
+                } else {
+                    "Cleared favorite on ${stamped.name}."
+                }
+            } catch (exc: VaultException) {
+                error = exc.message ?: "Could not update Favorite."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
     fun beginEdit(item: SavedPassword) {
         editing = item
     }

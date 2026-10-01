@@ -352,6 +352,33 @@ class VaultTests(unittest.TestCase):
         self.assertEqual(len(updated[0].history), 1)
         self.assertEqual(updated[0].history[0].password, "abc123")
 
+    def test_toggle_entry_favorite_keeps_timestamps(self) -> None:
+        item = password_app.SavedPassword(
+            "Bank",
+            "secret-bank-value",
+            favorite=False,
+            created="2024-01-01T00:00:00Z",
+            modified="2024-02-01T00:00:00Z",
+            last_used="2024-03-01T00:00:00Z",
+        )
+        other = password_app.SavedPassword("Email", "secret-email-value", favorite=True)
+        updated = password_app.toggle_entry_favorite([item, other], item)
+        self.assertTrue(updated[0].favorite)
+        self.assertEqual(updated[0].modified, "2024-02-01T00:00:00Z")
+        self.assertEqual(updated[0].last_used, "2024-03-01T00:00:00Z")
+        self.assertEqual(updated[0].password, "secret-bank-value")
+        self.assertTrue(updated[1].favorite)
+        cleared = password_app.toggle_entry_favorite(updated, updated[0])
+        self.assertFalse(cleared[0].favorite)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "saved.vault"
+            material = password_app.new_vault_key("passphrase-here", password_app.new_recovery_key(), n=2**14)
+            password_app.write_vault(material, cleared, path)
+            _key, loaded = password_app.open_vault("passphrase-here", path)
+            loaded_bank = next(entry for entry in loaded if entry.name == "Bank")
+            self.assertFalse(loaded_bank.favorite)
+            self.assertEqual(loaded_bank.modified, "2024-02-01T00:00:00Z")
+
     def test_last_used_label_and_recently_used_entries(self) -> None:
         alpha = password_app.SavedPassword(
             "Alpha",

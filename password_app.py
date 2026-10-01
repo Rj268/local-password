@@ -651,6 +651,24 @@ def recently_used_entries(items: list[SavedPassword], limit: int = 5) -> list[Sa
     return (stamped + plain)[:limit]
 
 
+def set_entry_favorite(
+    existing: list[SavedPassword],
+    item: SavedPassword,
+    favorite: bool,
+) -> list[SavedPassword]:
+    """Mark or clear Favorite without changing the password or timestamps."""
+    updated = replace(item, favorite=bool(favorite))
+    return [updated if entry.name == item.name else entry for entry in existing]
+
+
+def toggle_entry_favorite(
+    existing: list[SavedPassword],
+    item: SavedPassword,
+) -> list[SavedPassword]:
+    """Flip Favorite on one entry without changing the password or timestamps."""
+    return set_entry_favorite(existing, item, not item.favorite)
+
+
 def reused_password_groups(items: list[SavedPassword]) -> dict[str, list[str]]:
     """Map a password to the entry names that share it, only when reused."""
     groups: dict[str, list[str]] = {}
@@ -3087,7 +3105,7 @@ class PasswordWindow:
                 "out. Needs attention filters those rows. Replace password generates a strong "
                 "one, saves it, and copies it. Previous keeps the last few passwords for that entry. "
                 "Sort by Name, Recent, or Changed. Copying a saved password marks it Recent "
-                "and shows Last used on the entry."
+                "and shows Last used on the entry. Favorite stars or clears a row without opening Edit."
             ),
             xalign=0,
         )
@@ -3748,6 +3766,10 @@ class PasswordWindow:
             previous_btn.get_style_context().add_class("secondary")
             previous_btn.connect("clicked", lambda *_args, entry=item: self.on_previous_passwords(entry))
             actions.pack_start(previous_btn, False, False, 0)
+        favorite_btn = gtk.Button(label="Unfavorite" if item.favorite else "Favorite")
+        favorite_btn.get_style_context().add_class("secondary")
+        favorite_btn.connect("clicked", lambda *_args, entry=item: self.on_toggle_favorite(entry))
+        actions.pack_start(favorite_btn, False, False, 0)
         edit = gtk.Button(label="Edit")
         edit.get_style_context().add_class("secondary")
         edit.connect("clicked", lambda *_args, entry=item: self.on_edit_entry(entry))
@@ -3771,6 +3793,33 @@ class PasswordWindow:
         if self.section == "saved":
             self.manager_message.set_text(message)
             self.manager_message.show()
+
+    def on_toggle_favorite(self, item: SavedPassword) -> None:
+        """Star or clear Favorite on a Saved row without opening Edit."""
+        self._note_activity()
+        if self.vault_key is None:
+            self.status.set_text("Saved passwords are locked.")
+            return
+        current = next((entry for entry in self.saved if entry.name == item.name), None)
+        if current is None:
+            self.status.set_text("That saved password is gone.")
+            return
+        try:
+            updated = toggle_entry_favorite(self.saved, current)
+            write_vault(self.vault_key, updated)
+        except (OSError, ValueError) as exc:
+            self.status.set_text(str(exc) or "Could not update Favorite.")
+            return
+        self.saved = updated
+        stamped = next(entry for entry in updated if entry.name == current.name)
+        message = f"Favorited {stamped.name}." if stamped.favorite else f"Cleared favorite on {stamped.name}."
+        self.status.set_text(message)
+        if self.section == "saved":
+            self.manager_message.set_text(message)
+            self.manager_message.show()
+            self._refresh_saved_rows()
+        elif self.section == "dashboard":
+            self._refresh_dashboard()
 
     def on_replace_password(self, item: SavedPassword) -> None:
         self._note_activity()

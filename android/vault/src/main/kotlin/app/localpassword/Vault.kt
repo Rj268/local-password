@@ -242,6 +242,16 @@ object Vault {
         return (stamped + plain).take(limit)
     }
 
+    fun setEntryFavorite(items: List<SavedPassword>, item: SavedPassword, favorite: Boolean): List<SavedPassword> {
+        return items.map { entry ->
+            if (entry.name == item.name) entry.copy(favorite = favorite) else entry
+        }
+    }
+
+    fun toggleEntryFavorite(items: List<SavedPassword>, item: SavedPassword): List<SavedPassword> {
+        return setEntryFavorite(items, item, !item.favorite)
+    }
+
     private fun mergeHistories(
         left: List<PasswordRevision>,
         right: List<PasswordRevision>,
