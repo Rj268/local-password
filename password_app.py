@@ -710,6 +710,25 @@ def duplicate_entry(
     return [fresh] + list(existing)
 
 
+def remove_entry(existing: list[SavedPassword], item: SavedPassword) -> list[SavedPassword]:
+    """Drop one saved entry by name."""
+    if all(entry.name != item.name for entry in existing):
+        raise ValueError("That saved password is gone.")
+    return [entry for entry in existing if entry.name != item.name]
+
+
+def restore_removed_entry(
+    existing: list[SavedPassword],
+    item: SavedPassword,
+) -> list[SavedPassword]:
+    """Put a removed entry back. If the name is taken, keep a unique restored name."""
+    taken = {entry.name: index for index, entry in enumerate(existing)}
+    if item.name in taken:
+        label = _unique_entry_name(item.name, taken, " (restored)")
+        item = replace(item, name=label)
+    return [item] + list(existing)
+
+
 def reused_password_groups(items: list[SavedPassword]) -> dict[str, list[str]]:
     """Map a password to the entry names that share it, only when reused."""
     groups: dict[str, list[str]] = {}
@@ -3156,7 +3175,8 @@ class PasswordWindow:
                 "Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. "
                 "Copying a saved password marks it Recent and shows Last used on the entry. "
                 "Favorite stars or clears a row without opening Edit. "
-                "Duplicate copies a row under a new name."
+                "Duplicate copies a row under a new name. "
+                "Remove can be undone with Undo on this page."
             ),
             xalign=0,
         )
@@ -3206,10 +3226,19 @@ class PasswordWindow:
         page.pack_start(sort_row, False, False, 0)
         self.sort_row = sort_row
 
+        message_row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
         self.manager_message = gtk.Label(label="", xalign=0)
         self.manager_message.set_line_wrap(True)
+        self.manager_message.set_hexpand(True)
         self.manager_message.get_style_context().add_class("hint")
-        page.pack_start(self.manager_message, False, False, 0)
+        message_row.pack_start(self.manager_message, True, True, 0)
+        self.undo_remove_button = gtk.Button(label="Undo")
+        self.undo_remove_button.get_style_context().add_class("secondary")
+        self.undo_remove_button.set_no_show_all(True)
+        self.undo_remove_button.hide()
+        self.undo_remove_button.connect("clicked", self.on_undo_remove)
+        message_row.pack_start(self.undo_remove_button, False, False, 0)
+        page.pack_start(message_row, False, False, 0)
 
         self.saved_box = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=8)
         self.saved_scroll = gtk.ScrolledWindow()
@@ -3227,6 +3256,7 @@ class PasswordWindow:
         page.pack_start(self.lock_button, False, False, 0)
 
         self.saved: list[SavedPassword] = []
+        self.removed_entry: SavedPassword | None = None
         self.showing_saved = False
         self.save_ready = False
         self.locked = False
@@ -4544,6 +4574,8 @@ class PasswordWindow:
     def _lock_saved(self) -> None:
         self.vault_key = None
         self.saved = []
+        self.removed_entry = None
+        self.undo_remove_button.hide()
         self.revealed_names.clear()
         self.locked = vault_path().exists() or saved_passwords_path().exists()
         self._refresh_saved_rows()
@@ -4644,10 +4676,14 @@ class PasswordWindow:
         if self.vault_key is None:
             self.status.set_text("Saved passwords are locked.")
             return
+        current = next((entry for entry in self.saved if entry.name == name), None)
+        if current is None:
+            self.status.set_text("That saved password is gone.")
+            return
         if not self._confirm_remove(name):
             return
-        updated = [item for item in self.saved if item.name != name]
         try:
+            updated = remove_entry(self.saved, current)
             write_vault(self.vault_key, updated)
         except ValueError as exc:
             self.status.set_text(str(exc))
@@ -4656,10 +4692,44 @@ class PasswordWindow:
             self.status.set_text("Could not remove the saved password.")
             return
         self.saved = updated
+        self.removed_entry = current
         self.revealed_names.discard(name)
         self.showing_saved = False
         self._refresh_saved_rows()
-        self.status.set_text("Removed from this computer.")
+        message = f'Removed "{current.name}". Undo to put it back.'
+        self.status.set_text(message)
+        self.manager_message.set_text(message)
+        self.manager_message.show()
+        self.undo_remove_button.show()
+        if self.section == "dashboard":
+            self._refresh_dashboard()
+
+    def on_undo_remove(self, *_args) -> None:
+        """Restore the last removed Saved entry."""
+        self._note_activity()
+        if self.vault_key is None:
+            self.status.set_text("Saved passwords are locked.")
+            return
+        item = self.removed_entry
+        if item is None:
+            self.status.set_text("Nothing to undo.")
+            self.undo_remove_button.hide()
+            return
+        try:
+            updated = restore_removed_entry(self.saved, item)
+            write_vault(self.vault_key, updated)
+        except (OSError, ValueError) as exc:
+            self.status.set_text(str(exc) or "Could not restore that entry.")
+            return
+        self.saved = updated
+        restored = updated[0]
+        self.removed_entry = None
+        self.undo_remove_button.hide()
+        message = f'Restored "{restored.name}".'
+        self.status.set_text(message)
+        self.manager_message.set_text(message)
+        self.manager_message.show()
+        self._refresh_saved_rows()
         if self.section == "dashboard":
             self._refresh_dashboard()
 
@@ -4680,7 +4750,7 @@ class PasswordWindow:
         ):
             setter(16)
         label = gtk.Label(
-            label=f'Remove "{name}" from this computer? This cannot be undone.',
+            label=f'Remove "{name}" from this computer? You can Undo on the Saved page.',
             xalign=0,
         )
         label.set_line_wrap(True)

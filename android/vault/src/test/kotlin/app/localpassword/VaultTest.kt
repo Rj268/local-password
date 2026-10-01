@@ -204,6 +204,43 @@ class VaultTest {
     }
 
     @Test
+    fun removeAndRestoreEntry() {
+        val bank = SavedPassword(
+            name = "Bank",
+            password = "secret-bank-value",
+            username = "me",
+            notes = "keep",
+            favorite = true,
+            created = "2024-01-01T00:00:00Z",
+            modified = "2024-02-01T00:00:00Z",
+            lastUsed = "2024-03-01T00:00:00Z",
+            history = listOf(PasswordRevision("old-secret", "2024-01-15T00:00:00Z")),
+        )
+        val email = SavedPassword(name = "Email", password = "secret-email-value")
+        val removed = Vault.removeEntry(listOf(bank, email), bank)
+        assertEquals(listOf("Email"), removed.map { it.name })
+        val restored = Vault.restoreRemovedEntry(removed, bank)
+        assertEquals("Bank", restored[0].name)
+        assertEquals("secret-bank-value", restored[0].password)
+        assertEquals("me", restored[0].username)
+        assertEquals("keep", restored[0].notes)
+        assert(restored[0].favorite)
+        assertEquals("2024-03-01T00:00:00Z", restored[0].lastUsed)
+        assertEquals(1, restored[0].history.size)
+        val conflicted = Vault.restoreRemovedEntry(
+            listOf(SavedPassword(name = "Bank", password = "other"), email),
+            bank,
+        )
+        assertEquals("Bank (restored)", conflicted[0].name)
+        assertEquals("secret-bank-value", conflicted[0].password)
+        try {
+            Vault.removeEntry(listOf(email), bank)
+            throw AssertionError("expected VaultException")
+        } catch (_: VaultException) {
+        }
+    }
+
+    @Test
     fun entryDatesLabelShowsCreatedAndChanged() {
         val bare = SavedPassword(name = "Bare", password = "secret-bare-value")
         val createdOnly = SavedPassword(

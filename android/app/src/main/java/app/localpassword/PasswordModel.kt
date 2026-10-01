@@ -52,6 +52,7 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     var categoryFilter by mutableStateOf("all")
     var savedSortMode by mutableStateOf(Vault.SAVED_SORT_NAME)
     var pendingRemove by mutableStateOf<SavedPassword?>(null)
+    var lastRemoved by mutableStateOf<SavedPassword?>(null)
     var pendingReplace by mutableStateOf<SavedPassword?>(null)
     var historyFor by mutableStateOf<SavedPassword?>(null)
     var editing by mutableStateOf<SavedPassword?>(null)
@@ -314,12 +315,56 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
         val item = pendingRemove ?: return
         val currentOpen = opened ?: return
         pendingRemove = null
-        replace(currentOpen, currentOpen.items.filter { it.name != item.name }, "Removed.")
-        if (revealed == item.name) revealed = null
+        viewModelScope.launch {
+            busy = true
+            error = ""
+            try {
+                val next = withContext(Dispatchers.Default) {
+                    Vault.removeEntry(currentOpen.items, item)
+                }
+                val blob = withContext(Dispatchers.Default) { Vault.seal(currentOpen, next) }
+                writeAtomically(blob)
+                opened = currentOpen.copy(items = next)
+                saved = next
+                unlocked = true
+                lastRemoved = item
+                if (revealed == item.name) revealed = null
+                status = "Removed \"${item.name}\". Undo to put it back."
+            } catch (exc: VaultException) {
+                error = exc.message ?: "Could not remove the saved password."
+            } finally {
+                busy = false
+            }
+        }
     }
 
     fun cancelRemove() {
         pendingRemove = null
+    }
+
+    fun undoRemove() {
+        val item = lastRemoved ?: return
+        val currentOpen = opened ?: return
+        viewModelScope.launch {
+            busy = true
+            error = ""
+            try {
+                val next = withContext(Dispatchers.Default) {
+                    Vault.restoreRemovedEntry(currentOpen.items, item)
+                }
+                val blob = withContext(Dispatchers.Default) { Vault.seal(currentOpen, next) }
+                writeAtomically(blob)
+                opened = currentOpen.copy(items = next)
+                saved = next
+                unlocked = true
+                lastRemoved = null
+                status = "Restored \"${next.first().name}\"."
+            } catch (exc: VaultException) {
+                error = exc.message ?: "Could not restore that entry."
+            } finally {
+                busy = false
+            }
+        }
     }
 
     fun requestReplace(item: SavedPassword) {
@@ -568,6 +613,7 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
         opened = null
         unlocked = false
         saved = emptyList()
+        lastRemoved = null
         revealed = null
         section = "saved"
         askUnlock = true

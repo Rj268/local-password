@@ -444,6 +444,38 @@ class VaultTests(unittest.TestCase):
         unused_only = password_app.recently_used_entries([alpha], 5)
         self.assertEqual([item.name for item in unused_only], ["Alpha"])
 
+    def test_remove_and_restore_entry(self) -> None:
+        bank = password_app.SavedPassword(
+            "Bank",
+            "secret-bank-value",
+            username="me",
+            notes="keep",
+            favorite=True,
+            created="2024-01-01T00:00:00Z",
+            modified="2024-02-01T00:00:00Z",
+            last_used="2024-03-01T00:00:00Z",
+            history=(password_app.PasswordRevision("old-secret", "2024-01-15T00:00:00Z"),),
+        )
+        email = password_app.SavedPassword("Email", "secret-email-value")
+        removed = password_app.remove_entry([bank, email], bank)
+        self.assertEqual([item.name for item in removed], ["Email"])
+        restored = password_app.restore_removed_entry(removed, bank)
+        self.assertEqual(restored[0].name, "Bank")
+        self.assertEqual(restored[0].password, "secret-bank-value")
+        self.assertEqual(restored[0].username, "me")
+        self.assertEqual(restored[0].notes, "keep")
+        self.assertTrue(restored[0].favorite)
+        self.assertEqual(restored[0].last_used, "2024-03-01T00:00:00Z")
+        self.assertEqual(len(restored[0].history), 1)
+        conflicted = password_app.restore_removed_entry(
+            [password_app.SavedPassword("Bank", "other"), email],
+            bank,
+        )
+        self.assertEqual(conflicted[0].name, "Bank (restored)")
+        self.assertEqual(conflicted[0].password, "secret-bank-value")
+        with self.assertRaises(ValueError):
+            password_app.remove_entry([email], bank)
+
     def test_entry_dates_label_shows_created_and_changed(self) -> None:
         bare = password_app.SavedPassword("Bare", "secret-bare-value")
         created_only = password_app.SavedPassword(

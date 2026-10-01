@@ -284,6 +284,23 @@ object Vault {
         return listOf(fresh) + items
     }
 
+    fun removeEntry(items: List<SavedPassword>, item: SavedPassword): List<SavedPassword> {
+        if (items.none { it.name == item.name }) {
+            throw VaultException("That saved password is gone.")
+        }
+        return items.filter { it.name != item.name }
+    }
+
+    fun restoreRemovedEntry(items: List<SavedPassword>, item: SavedPassword): List<SavedPassword> {
+        val taken = items.mapIndexed { index, entry -> entry.name to index }.toMap().toMutableMap()
+        val restored = if (item.name in taken) {
+            item.copy(name = uniqueEntryName(item.name, taken, " (restored)"))
+        } else {
+            item
+        }
+        return listOf(restored) + items
+    }
+
     private fun mergeHistories(
         left: List<PasswordRevision>,
         right: List<PasswordRevision>,

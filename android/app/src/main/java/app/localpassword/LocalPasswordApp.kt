@@ -320,13 +320,25 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
             }
             Text(
                 if (healthBits.isNotEmpty()) {
-                    "Passwords stay masked until you show one. Weak or reused passwords are called out. ${healthBits.joinToString(" · ")}. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name."
+                    "Passwords stay masked until you show one. Weak or reused passwords are called out. ${healthBits.joinToString(" · ")}. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Remove can be undone with Undo."
                 } else {
-                    "Passwords stay masked until you show one. Weak or reused passwords are called out. Needs attention filters those rows. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name."
+                    "Passwords stay masked until you show one. Weak or reused passwords are called out. Needs attention filters those rows. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Remove can be undone with Undo."
                 },
                 color = muted,
                 fontSize = 13.sp,
             )
+            if (model.lastRemoved != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(model.status.ifEmpty { "Removed. Undo to put it back." }, color = muted, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { model.undoRemove() }, enabled = !model.busy) {
+                        Text("Undo", color = Green)
+                    }
+                }
+            }
             OutlinedTextField(
                 value = model.savedQuery,
                 onValueChange = { model.savedQuery = it },
@@ -480,7 +492,7 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
         AlertDialog(
             onDismissRequest = { model.cancelRemove() },
             title = { Text("Remove saved password") },
-            text = { Text("Remove \"${item.name}\" from this phone? This cannot be undone.") },
+            text = { Text("Remove \"${item.name}\" from this phone? You can Undo afterward.") },
             confirmButton = {
                 TextButton(onClick = { model.confirmRemove() }) { Text("Remove", color = Danger) }
             },
