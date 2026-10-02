@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import csv
+import hashlib
 import io
 import json
 import math
@@ -23,6 +24,8 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 import webbrowser
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timezone
@@ -89,7 +92,7 @@ AUTO_LOCK_OPTIONS = (
     (300, "5 minutes"),
     (900, "15 minutes"),
 )
-APP_VERSION = "1.29.2"
+APP_VERSION = "1.30.0"
 THEME_LIGHT = "light"
 THEME_DARK = "dark"
 THEME_SYSTEM = "system"
@@ -103,6 +106,8 @@ DEFAULT_CATEGORIES = (
     "Entertainment",
     "Other",
 )
+HIBP_RANGE_URL = "https://api.pwnedpasswords.com/range/{prefix}"
+HIBP_TIMEOUT_SECONDS = 15.0
 
 STYLES = """
 window.app {
@@ -610,6 +615,7 @@ def sorted_saved_entries(
     mode: str,
     *,
     all_items: list[SavedPassword] | None = None,
+    breach_counts: dict[str, int] | None = None,
 ) -> list[SavedPassword]:
     """Order Saved rows by name, last used, or last changed."""
     pool = all_items if all_items is not None else items
@@ -629,7 +635,7 @@ def sorted_saved_entries(
     return sorted(
         items,
         key=lambda item: (
-            not entry_needs_attention(item, pool),
+            not entry_needs_attention(item, pool, breach_counts=breach_counts),
             not item.favorite,
             item.name.casefold(),
         ),
@@ -1022,8 +1028,11 @@ def entry_needs_attention(
     items: list[SavedPassword],
     *,
     today: date | None = None,
+    breach_counts: dict[str, int] | None = None,
 ) -> bool:
-    """True when the password is weak, reused, or stale."""
+    """True when the password is weak, reused, stale, or known-breached this session."""
+    if breach_counts and breach_counts.get(password_sha1_hex(item.password), 0) > 0:
+        return True
     return (
         entry_is_weak(item.password)
         or bool(reuse_warning_for(item, items))
@@ -1035,17 +1044,122 @@ def password_health_summary(
     items: list[SavedPassword],
     *,
     today: date | None = None,
-) -> tuple[int, int, int, int]:
-    """Return (weak_count, reuse_count, stale_count, attention_count).
+    breach_counts: dict[str, int] | None = None,
+) -> tuple[int, int, int, int, int]:
+    """Return (weak, reuse, stale, breached, attention) counts for active entries.
 
     Archived entries are ignored so they do not keep Needs attention lit.
+    Breached counts use session results from an optional HIBP check.
     """
     active = active_saved_entries(items)
     weak_count = len(weak_password_names(active))
     reuse_count = len(reused_password_groups(active))
     stale_count = len(stale_password_names(active, today=today))
-    attention_count = sum(1 for item in active if entry_needs_attention(item, active, today=today))
-    return weak_count, reuse_count, stale_count, attention_count
+    breached_count = 0
+    if breach_counts:
+        breached_count = sum(
+            1
+            for item in active
+            if breach_counts.get(password_sha1_hex(item.password), 0) > 0
+        )
+    attention_count = sum(
+        1
+        for item in active
+        if entry_needs_attention(item, active, today=today, breach_counts=breach_counts)
+    )
+    return weak_count, reuse_count, stale_count, breached_count, attention_count
+
+
+def password_sha1_hex(password: str) -> str:
+    """SHA-1 hex digest used only for HIBP k-anonymity range lookups."""
+    return hashlib.sha1(password.encode("utf-8"), usedforsecurity=False).hexdigest().upper()
+
+
+def match_hibp_range(body: str, suffix: str) -> int:
+    """Return breach count for a SHA-1 suffix in an HIBP range response, or 0."""
+    want = suffix.strip().upper()
+    for raw in body.splitlines():
+        line = raw.strip()
+        if not line or ":" not in line:
+            continue
+        found, count_text = line.split(":", 1)
+        if found.strip().upper() != want:
+            continue
+        try:
+            return max(0, int(count_text.strip()))
+        except ValueError:
+            return 1
+    return 0
+
+
+def fetch_hibp_range(prefix: str, *, timeout: float = HIBP_TIMEOUT_SECONDS) -> str:
+    """Fetch one HIBP password-hash range. Only a 5-character prefix is requested."""
+    clean = prefix.strip().upper()
+    if len(clean) != 5 or any(ch not in "0123456789ABCDEF" for ch in clean):
+        raise ValueError("The hash prefix for a breach check is invalid.")
+    url = HIBP_RANGE_URL.format(prefix=clean)
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": f"LocalPassword/{APP_VERSION}",
+            "Add-Padding": "true",
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        raise ValueError(f"Breach list request failed ({exc.code}).") from exc
+    except urllib.error.URLError as exc:
+        raise ValueError("Could not reach the breach list. Check the network and try again.") from exc
+    except TimeoutError as exc:
+        raise ValueError("The breach list timed out. Try again.") from exc
+
+
+def check_password_pwned(
+    password: str,
+    *,
+    fetch_range=fetch_hibp_range,
+) -> int:
+    """How many times this password appears in known breaches (0 means clear).
+
+    Uses Have I Been Pwned k-anonymity: only the first five characters of the
+    SHA-1 hash leave this computer. The password and full hash never do.
+    """
+    digest = password_sha1_hex(password)
+    return match_hibp_range(fetch_range(digest[:5]), digest[5:])
+
+
+def check_passwords_pwned(
+    passwords: list[str],
+    *,
+    fetch_range=fetch_hibp_range,
+) -> dict[str, int]:
+    """Map password SHA-1 hex → breach count for each distinct password."""
+    counts: dict[str, int] = {}
+    unique: dict[str, str] = {}
+    for password in passwords:
+        digest = password_sha1_hex(password)
+        unique.setdefault(digest, password)
+    # One range request per distinct prefix, then match each suffix locally.
+    by_prefix: dict[str, list[str]] = {}
+    for digest in unique:
+        by_prefix.setdefault(digest[:5], []).append(digest)
+    for prefix, digests in by_prefix.items():
+        body = fetch_range(prefix)
+        for digest in digests:
+            counts[digest] = match_hibp_range(body, digest[5:])
+    return counts
+
+
+def breach_warning_for(count: int) -> str:
+    """Short note when a password was found in known breaches."""
+    if count <= 0:
+        return ""
+    if count == 1:
+        return "Found in 1 known breach. Replace it."
+    return f"Found in {count:,} known breaches. Replace it."
 
 
 def strong_replacement_password() -> str:
@@ -2465,6 +2579,8 @@ class PasswordWindow:
         self.dark = resolve_dark_mode(self.theme_mode)
         self.preferences = load_preferences()
         self.revealed_names: set[str] = set()
+        self.breach_counts: dict[str, int] = {}
+        self._breach_check_running = False
         self._clipboard_generation = 0
         self._clipboard_value = ""
         self._clipboard_clear_source = 0
@@ -3243,7 +3359,9 @@ class PasswordWindow:
             self.dashboard_empty.show()
             self.dashboard_recent.hide()
             return
-        weak_count, reuse_count, stale_count, attention_count = password_health_summary(self.saved)
+        weak_count, reuse_count, stale_count, breached_count, attention_count = (
+            password_health_summary(self.saved, breach_counts=self.breach_counts)
+        )
         self.dashboard_welcome.set_text("Ready when you are")
         if attention_count:
             parts = []
@@ -3258,6 +3376,10 @@ class PasswordWindow:
             if stale_count:
                 parts.append(
                     f"{stale_count} stale password{'s' if stale_count != 1 else ''}"
+                )
+            if breached_count:
+                parts.append(
+                    f"{breached_count} found in known breaches"
                 )
             detail = " and ".join(parts) if parts else f"{attention_count} needing attention"
             verb = "needs" if attention_count == 1 else "need"
@@ -3299,7 +3421,11 @@ class PasswordWindow:
             used = gtk.Label(label=last_used_label(item), xalign=0)
             used.get_style_context().add_class("hint")
             text.pack_start(used, False, False, 0)
-            if entry_is_weak(item.password):
+            breach_count = self.breach_counts.get(password_sha1_hex(item.password), 0)
+            if breach_count > 0:
+                badge = gtk.Label(label="Breached", xalign=1)
+                badge.get_style_context().add_class("danger")
+            elif entry_is_weak(item.password):
                 badge = gtk.Label(label="Weak", xalign=1)
                 badge.get_style_context().add_class("danger")
             elif reuse_warning_for(item, self.saved):
@@ -3614,6 +3740,8 @@ class PasswordWindow:
                 "Auto-lock hides saved passwords after the window sits idle. "
                 "Confirm before reveal asks once before showing a saved password. "
                 "Lock on open asks for the passphrase when the app starts (off by default). "
+                "Check breaches on Saved compares password hashes to a public leak list "
+                "using k-anonymity — only a short hash prefix leaves this computer. "
                 "Change passphrase seals the vault under a new passphrase and recovery key."
             ),
             xalign=0,
@@ -3755,6 +3883,8 @@ class PasswordWindow:
                 "A local password manager and generator for this computer. "
                 "Passwords stay in an encrypted vault you unlock with a passphrase "
                 "or recovery key. Nothing is uploaded for analytics or advertising. "
+                "Optional breach checks send only a short password-hash prefix to "
+                "Have I Been Pwned — never the password or the vault. "
                 "Read SECURITY.md in the project for known limits before a public release. "
                 "Passphrases use the EFF large wordlist (CC BY 3.0 US)."
             ),
@@ -3773,7 +3903,9 @@ class PasswordWindow:
         saved_lede = gtk.Label(
             label=(
                 "Passwords stay masked until you show one. Weak, reused, or stale passwords "
-                "(unchanged for 180 days) are called out. Needs attention filters those rows. "
+                "(unchanged for 180 days) are called out. Check breaches optionally compares "
+                "hashes to a public leak list without sending the password itself. "
+                "Needs attention filters those rows. "
                 "Replace password generates a strong "
                 "one, saves it, and copies it. Previous keeps the last few passwords for that entry. "
                 "Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. "
@@ -3801,8 +3933,12 @@ class PasswordWindow:
         self.saved_generate_button = gtk.Button(label="Generate password")
         self.saved_generate_button.get_style_context().add_class("primary")
         self.saved_generate_button.connect("clicked", lambda *_: self.show_section("generate"))
+        self.check_breaches_button = gtk.Button(label="Check breaches")
+        self.check_breaches_button.get_style_context().add_class("secondary")
+        self.check_breaches_button.connect("clicked", self.on_check_breaches)
         saved_actions.pack_start(self.saved_generate_button, False, False, 0)
         saved_actions.pack_start(self.add_password_button, False, False, 0)
+        saved_actions.pack_start(self.check_breaches_button, False, False, 0)
         page.pack_start(saved_actions, False, False, 0)
         self.saved_actions_row = saved_actions
 
@@ -4389,13 +4525,23 @@ class PasswordWindow:
             for item in pool
             if entry_matches(item, query)
             and (not favorites_only or item.favorite)
-            and (not attention_only or entry_needs_attention(item, pool))
+            and (
+                not attention_only
+                or entry_needs_attention(item, pool, breach_counts=self.breach_counts)
+            )
             and (category == "all" or item.category == category)
         ]
-        matches = sorted_saved_entries(matches, self.saved_sort_mode, all_items=pool)
+        matches = sorted_saved_entries(
+            matches,
+            self.saved_sort_mode,
+            all_items=pool,
+            breach_counts=self.breach_counts,
+        )
         active = active_saved_entries(self.saved)
         archived_count = len(self.saved) - len(active)
-        weak_count, reuse_count, stale_count, _attention = password_health_summary(self.saved)
+        weak_count, reuse_count, stale_count, breached_count, _attention = password_health_summary(
+            self.saved, breach_counts=self.breach_counts
+        )
         if archived_only:
             count = archived_count
             heading = "1 archived" if count == 1 else f"{count} archived"
@@ -4408,6 +4554,8 @@ class PasswordWindow:
                 heading += f" · {reuse_count} reused"
             if stale_count:
                 heading += f" · {stale_count} stale"
+            if breached_count:
+                heading += f" · {breached_count} breached"
             if archived_count:
                 heading += f" · {archived_count} archived"
         self.saved_heading.set_text(heading)
@@ -4474,6 +4622,9 @@ class PasswordWindow:
         used.get_style_context().add_class("hint")
         text.pack_start(used, False, False, 0)
         for warning in (
+            breach_warning_for(
+                self.breach_counts.get(password_sha1_hex(item.password), 0)
+            ),
             strength_warning_for(item),
             reuse_warning_for(item, self.saved),
             stale_warning_for(item),
@@ -4542,8 +4693,14 @@ class PasswordWindow:
                 open_url.get_style_context().add_class("secondary")
                 open_url.connect("clicked", lambda *_args, entry=item: self.on_open_url(entry))
                 actions.pack_start(open_url, False, False, 0)
+        check_breach_btn = gtk.Button(label="Check breach")
+        check_breach_btn.get_style_context().add_class("secondary")
+        check_breach_btn.connect(
+            "clicked", lambda *_args, entry=item: self.on_check_breach_one(entry)
+        )
+        actions.pack_start(check_breach_btn, False, False, 0)
         replace_btn = gtk.Button(label="Replace password")
-        if entry_needs_attention(item, self.saved):
+        if entry_needs_attention(item, self.saved, breach_counts=self.breach_counts):
             replace_btn.get_style_context().add_class("primary")
         else:
             replace_btn.get_style_context().add_class("secondary")
@@ -5228,6 +5385,149 @@ class PasswordWindow:
             dialog.destroy()
             return label
 
+    def _confirm_breach_check(self, *, one: bool) -> bool:
+        gtk = self.gtk
+        title = "Check one password for breaches?" if one else "Check saved passwords for breaches?"
+        dialog = gtk.Dialog(title=title, transient_for=self.window, modal=True)
+        dialog.add_button("Cancel", gtk.ResponseType.CANCEL)
+        dialog.add_button("Check", gtk.ResponseType.OK)
+        dialog.set_default_response(gtk.ResponseType.OK)
+        content = dialog.get_content_area()
+        content.set_spacing(10)
+        for setter in (
+            content.set_margin_top,
+            content.set_margin_bottom,
+            content.set_margin_start,
+            content.set_margin_end,
+        ):
+            setter(16)
+        body = gtk.Label(
+            label=(
+                "This asks Have I Been Pwned whether a password appears in known leaks. "
+                "Only the first five characters of a SHA-1 hash leave this computer — "
+                "never the password, the full hash, or your vault. "
+                "Results stay in this session until you lock or check again."
+            ),
+            xalign=0,
+        )
+        body.set_line_wrap(True)
+        body.set_max_width_chars(52)
+        content.pack_start(body, False, False, 0)
+        dialog.show_all()
+        response = dialog.run()
+        dialog.destroy()
+        return response == gtk.ResponseType.OK
+
+    def on_check_breaches(self, *_args) -> None:
+        self._note_activity()
+        if self.vault_key is None:
+            self.status.set_text("Unlock saved passwords before checking for breaches.")
+            return
+        if self._breach_check_running:
+            self.status.set_text("A breach check is already running.")
+            return
+        active = active_saved_entries(self.saved)
+        if not active:
+            self.status.set_text("Nothing saved to check yet.")
+            return
+        if not self._confirm_breach_check(one=False):
+            return
+        passwords = [item.password for item in active]
+        self._start_breach_check(passwords)
+
+    def on_check_breach_one(self, item: SavedPassword) -> None:
+        self._note_activity()
+        if self.vault_key is None:
+            self.status.set_text("Unlock saved passwords before checking for breaches.")
+            return
+        if self._breach_check_running:
+            self.status.set_text("A breach check is already running.")
+            return
+        if not self._confirm_breach_check(one=True):
+            return
+        self._start_breach_check([item.password], focus_name=item.name)
+
+    def _start_breach_check(
+        self, passwords: list[str], *, focus_name: str | None = None
+    ) -> None:
+        self._breach_check_running = True
+        self.check_breaches_button.set_sensitive(False)
+        self.status.set_text("Checking for breaches…")
+        if self.section == "saved":
+            self.manager_message.set_text("Checking for breaches…")
+            self.manager_message.show()
+
+        def worker() -> None:
+            from gi.repository import GLib
+
+            try:
+                results = check_passwords_pwned(passwords)
+                GLib.idle_add(self._breach_check_finished, results, None, focus_name)
+            except ValueError as exc:
+                GLib.idle_add(self._breach_check_finished, None, str(exc), focus_name)
+            except Exception:
+                GLib.idle_add(
+                    self._breach_check_finished,
+                    None,
+                    "Could not finish the breach check.",
+                    focus_name,
+                )
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _breach_check_finished(
+        self,
+        results: dict[str, int] | None,
+        error: str | None,
+        focus_name: str | None,
+    ) -> bool:
+        self._breach_check_running = False
+        self.check_breaches_button.set_sensitive(True)
+        if error:
+            self.status.set_text(error)
+            if self.section == "saved":
+                self.manager_message.set_text(error)
+                self.manager_message.show()
+            return False
+        assert results is not None
+        self.breach_counts.update(results)
+        hit_names = [
+            item.name
+            for item in active_saved_entries(self.saved)
+            if self.breach_counts.get(password_sha1_hex(item.password), 0) > 0
+        ]
+        checked = len(results)
+        hits = sum(1 for count in results.values() if count > 0)
+        if focus_name is not None:
+            digest = next(iter(results))
+            count = results[digest]
+            if count > 0:
+                message = f"{focus_name}: {breach_warning_for(count)}"
+            else:
+                message = f"{focus_name}: not found in known breaches."
+        elif hits == 0:
+            message = (
+                f"Checked {checked} distinct password{'s' if checked != 1 else ''}. "
+                "None were found in known breaches."
+            )
+        else:
+            sample = ", ".join(hit_names[:5])
+            if len(hit_names) > 5:
+                sample += "…"
+            named = f" ({sample})" if hit_names else ""
+            message = (
+                f"Checked {checked} distinct password{'s' if checked != 1 else ''}. "
+                f"{hits} found in known breaches{named}. Replace those passwords."
+            )
+        self.status.set_text(message)
+        self._refresh_saved_rows()
+        if self.section == "dashboard":
+            self._refresh_dashboard()
+        if self.section == "saved":
+            self.manager_message.set_text(message)
+            self.manager_message.show()
+        return False
+
     def on_replace_password(self, item: SavedPassword) -> None:
         self._note_activity()
         if self.vault_key is None:
@@ -5235,6 +5535,7 @@ class PasswordWindow:
             return
         if not self._confirm_replace_password(item):
             return
+        old_digest = password_sha1_hex(item.password)
         fresh = strong_replacement_password()
         try:
             updated = replace_entry_password(self.saved, item, fresh)
@@ -5252,6 +5553,7 @@ class PasswordWindow:
                 self.manager_message.set_text(message)
                 self.manager_message.show()
             return
+        self.breach_counts.pop(old_digest, None)
         self.saved = updated
         self.revealed_names.add(item.name)
         self._refresh_saved_rows()
@@ -5885,6 +6187,10 @@ class PasswordWindow:
         self.removed_entry = None
         self.undo_remove_button.hide()
         self.revealed_names.clear()
+        self.breach_counts.clear()
+        self._breach_check_running = False
+        if hasattr(self, "check_breaches_button"):
+            self.check_breaches_button.set_sensitive(True)
         self.locked = vault_path().exists() or saved_passwords_path().exists()
         self._refresh_saved_rows()
         if self.showing_saved:

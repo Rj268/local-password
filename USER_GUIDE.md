@@ -13,6 +13,7 @@
 - **Saved** — Search, copy, favorite, edit fields, or replace a weak password.
 - **Lock** — Hides the vault until you unlock with the passphrase or recovery key.
 - **Settings → Lock on open** — Optional. When on, the app asks for the passphrase as soon as it starts.
+- **Saved → Check breaches** — Optional. Asks a public leak list whether a password appeared in known breaches. Only a short hash prefix is sent — not the password or vault.
 
 ## Backup
 

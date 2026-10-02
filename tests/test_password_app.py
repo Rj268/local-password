@@ -423,12 +423,13 @@ class VaultTests(unittest.TestCase):
         self.assertTrue(password_app.entry_needs_attention(weak, items, today=today))
         self.assertFalse(password_app.entry_needs_attention(strong, items, today=today))
         self.assertTrue(password_app.entry_needs_attention(reused_a, items, today=today))
-        weak_count, reuse_count, stale_count, attention_count = password_app.password_health_summary(
-            items, today=today
+        weak_count, reuse_count, stale_count, breached_count, attention_count = (
+            password_app.password_health_summary(items, today=today)
         )
         self.assertEqual(weak_count, 1)
         self.assertEqual(reuse_count, 1)
         self.assertEqual(stale_count, 0)
+        self.assertEqual(breached_count, 0)
         self.assertEqual(attention_count, 3)
 
     def test_stale_password_flags_old_unchanged_entries(self) -> None:
@@ -465,13 +466,64 @@ class VaultTests(unittest.TestCase):
         )
         self.assertTrue(password_app.entry_needs_attention(stale, items, today=today))
         self.assertFalse(password_app.entry_needs_attention(fresh, items, today=today))
-        weak_count, reuse_count, stale_count, attention_count = password_app.password_health_summary(
-            items, today=today
+        weak_count, reuse_count, stale_count, breached_count, attention_count = (
+            password_app.password_health_summary(items, today=today)
         )
         self.assertEqual(weak_count, 0)
         self.assertEqual(reuse_count, 0)
         self.assertEqual(stale_count, 2)
+        self.assertEqual(breached_count, 0)
         self.assertEqual(attention_count, 2)
+
+    def test_hibp_k_anonymity_matches_suffix_without_full_hash(self) -> None:
+        # SHA-1("password") is a well-known HIBP example.
+        digest = password_app.password_sha1_hex("password")
+        self.assertEqual(len(digest), 40)
+        prefix, suffix = digest[:5], digest[5:]
+        body = f"{suffix}:3861493\nABCDEF0123456789ABCDEF0123456789ABCD:2\n"
+        self.assertEqual(password_app.match_hibp_range(body, suffix), 3861493)
+        self.assertEqual(password_app.match_hibp_range(body, "deadbeef"), 0)
+        self.assertEqual(
+            password_app.breach_warning_for(3861493),
+            "Found in 3,861,493 known breaches. Replace it.",
+        )
+        self.assertEqual(password_app.breach_warning_for(0), "")
+
+        seen: list[str] = []
+
+        def fake_fetch(prefix_arg: str, *, timeout: float = 15.0) -> str:
+            seen.append(prefix_arg)
+            self.assertEqual(len(prefix_arg), 5)
+            self.assertEqual(prefix_arg, prefix)
+            return body
+
+        self.assertEqual(
+            password_app.check_password_pwned("password", fetch_range=fake_fetch),
+            3861493,
+        )
+        self.assertEqual(seen, [prefix])
+        counts = password_app.check_passwords_pwned(
+            ["password", "password", "unique-safe-value"],
+            fetch_range=lambda prefix_arg, **_kwargs: (
+                f"{password_app.password_sha1_hex('password')[5:]}:9\n"
+                if prefix_arg == prefix
+                else ""
+            ),
+        )
+        self.assertEqual(counts[digest], 9)
+        safe = password_app.password_sha1_hex("unique-safe-value")
+        self.assertEqual(counts[safe], 0)
+        item = password_app.SavedPassword("Email", "password")
+        self.assertTrue(
+            password_app.entry_needs_attention(
+                item, [item], breach_counts={digest: 9}
+            )
+        )
+        summary = password_app.password_health_summary(
+            [item], breach_counts={digest: 9}
+        )
+        self.assertEqual(summary[3], 1)
+        self.assertGreaterEqual(summary[4], 1)
 
     def test_replace_entry_password_keeps_fields_and_is_strong(self) -> None:
         item = password_app.SavedPassword(
@@ -853,7 +905,7 @@ class VaultTests(unittest.TestCase):
         restored = password_app.toggle_entry_archived(toggled, toggled[0])
         self.assertFalse(restored[0].archived)
         health = password_app.password_health_summary(items, today=today)
-        self.assertEqual(health, (0, 0, 0, 0))
+        self.assertEqual(health, (0, 0, 0, 0, 0))
         recent_names = [item.name for item in password_app.recently_used_entries(items)]
         self.assertEqual(recent_names, ["Email"])
         sealed = password_app._entry_to_json(archived)

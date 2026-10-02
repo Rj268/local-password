@@ -1,5 +1,10 @@
 # Release notes
 
+## 1.30.0
+
+- Saved: **Check breaches** / per-row **Check breach** — optional Have I Been Pwned k-anonymity check (only a short hash prefix leaves this computer; vault never uploaded)
+- Breached passwords count toward Needs attention for the session until you lock or replace them
+
 ## 1.29.2
 
 - Settings: optional **Lock on open** — when on, ask for the passphrase as soon as the app starts (off by default)
