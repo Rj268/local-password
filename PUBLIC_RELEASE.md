@@ -52,8 +52,6 @@ Share `dist/local-password_1.31.0_all.deb`.
 
 ### 4. Android / Google Play
 
-See [`PLAY_STORE.md`](PLAY_STORE.md) for the Play Console checklist, upload keystore, and App Bundle build.
-
 ```bash
 cd android
 bash scripts/create-release-keystore.sh   # once; keep offline backup
@@ -61,6 +59,7 @@ bash scripts/create-release-keystore.sh   # once; keep offline backup
 ```
 
 Upload `app/build/outputs/bundle/release/app-release.aab` in Play Console.
+Use this repo’s `PRIVACY.md` as the listing privacy policy URL.
 Ship a sideload APK from GitHub Releases only if you want that channel too.
 
 ### 5. Public page copy

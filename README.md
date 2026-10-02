@@ -107,7 +107,7 @@ export ANDROID_HOME=/path/to/android-sdk
 ./gradlew :vault:test :app:assembleDebug
 ```
 
-For Google Play, follow [`PLAY_STORE.md`](PLAY_STORE.md): create an upload keystore, then build the App Bundle with `./gradlew :app:bundleRelease` from `android/`.
+For Google Play, create an upload keystore with `bash scripts/create-release-keystore.sh` in `android/` (keep `release.keystore` and `keystore.properties` offline — never commit them), then build the App Bundle with `./gradlew :app:bundleRelease`. Upload `app/build/outputs/bundle/release/app-release.aab` in Play Console. Privacy policy URL: this repo’s `PRIVACY.md`.
 
 For sideloading a debug build during development:
 
