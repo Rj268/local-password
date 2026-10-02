@@ -4,8 +4,12 @@ __pycache__/
 .pytest_cache/
 build/
 dist/
-uploads/paste_*.py
-uploads/random_password_generator_620e.py
+uploads/
 *.deb
+*.apk
+*.zip
 .DS_Store
 Thumbs.db
+.gradle/
+.kotlin/
+android/**/build/

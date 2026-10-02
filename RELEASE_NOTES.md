@@ -72,12 +72,6 @@ Polish release that closes the main gaps from the product plan without more Stag
 - Category presets in the category dialog
 - Same vault helpers as desktop
 
-### Windows apply from Stage 22
-
-If you cannot sync the repo yet and still have Stage 22 (`password_app.py` = 212506 bytes), use the one-shot paste package:
-
-See `uploads/APPLY_1_28.md`.
-
 ### Packaging
 
 - Debian and Windows installer version strings set to **1.28.0**

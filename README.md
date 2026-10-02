@@ -63,8 +63,6 @@ Generation itself needs only the Python standard library. The window needs GTK 3
 
 The window is ready to build on Windows. Saved passwords go in `%LOCALAPPDATA%\local-password\saved.vault`. Copy uses the Windows clipboard. This Linux machine cannot build or run the `.exe`, because the Windows copies of GTK have to come from a Windows setup.
 
-If you are updating a Stage 22 checkout without git sync, follow `uploads/APPLY_1_28.md` once (not Stage-by-stage pastes).
-
 On a Windows computer:
 
 1. Install [MSYS2](https://www.msys2.org/) and open the **UCRT64** shell.

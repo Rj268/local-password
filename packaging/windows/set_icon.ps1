@@ -29,8 +29,12 @@ foreach ($lnk in @(
 
 # PyInstaller stores its archive after the normal Windows icon data. A plain
 # icon rewrite drops that archive, so keep those bytes and put them back.
-$sourceExe = "C:\Users\<you>\passgen\dist\windows\LocalPassword\LocalPassword.exe"
-if (-not (Test-Path -LiteralPath $sourceExe)) { $sourceExe = $exe }
+$repoExe = Join-Path $PSScriptRoot "..\..\dist\windows\LocalPassword\LocalPassword.exe"
+$sourceExe = if (Test-Path -LiteralPath $repoExe) {
+    (Resolve-Path -LiteralPath $repoExe).Path
+} else {
+    $exe
+}
 $work = Join-Path $env:TEMP "LocalPassword-with-icon.exe"
 Copy-Item -LiteralPath $sourceExe -Destination $work -Force
 
