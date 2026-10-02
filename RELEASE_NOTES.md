@@ -1,5 +1,12 @@
 # Release notes
 
+## 1.29.0
+
+- Generate: **Also exclude** — leave out specific characters a site rejects
+- CLI: `--exclude`
+- Windows share text covers vault location, uninstall, and SmartScreen
+- Short `USER_GUIDE.md` for first-run and backup
+
 ## 1.28.0
 
 Polish release that closes the main gaps from the product plan without more Stage-by-stage drips.

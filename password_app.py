@@ -89,7 +89,7 @@ AUTO_LOCK_OPTIONS = (
     (300, "5 minutes"),
     (900, "15 minutes"),
 )
-APP_VERSION = "1.28.0"
+APP_VERSION = "1.29.0"
 THEME_LIGHT = "light"
 THEME_DARK = "dark"
 THEME_SYSTEM = "system"
@@ -418,6 +418,7 @@ def character_pool(
     lowercase: bool = False,
     symbols: bool = False,
     exclude_ambiguous: bool = False,
+    exclude: str = "",
     letters: bool | None = None,
 ) -> str:
     """Build the alphabet. Symbols include quotes, backticks, and backslashes.
@@ -427,6 +428,7 @@ def character_pool(
     digits = _flag(digits, "Digits")
     symbols = _flag(symbols, "Symbols")
     exclude_ambiguous = _flag(exclude_ambiguous, "Exclude ambiguous")
+    exclude = generator.clean_exclude_characters(exclude)
     if letters is not None:
         letters = _flag(letters, "Letters")
         uppercase = letters
@@ -448,6 +450,7 @@ def character_pool(
     return generator.prepare_character_list(
         "".join(parts),
         exclude_ambiguous=exclude_ambiguous,
+        exclude=exclude,
     )
 
 
@@ -462,6 +465,7 @@ def generate(
     lowercase: bool = True,
     symbols: bool = True,
     exclude_ambiguous: bool = False,
+    exclude: str = "",
     letters: bool | None = None,
     separator: str = " ",
     capitalize: bool = False,
@@ -493,20 +497,27 @@ def generate(
                 "Add words to reach a strong passphrase."
             )
     elif mode == "characters":
+        exclude = generator.clean_exclude_characters(exclude)
         pool = character_pool(
             digits=digits,
             uppercase=uppercase,
             lowercase=lowercase,
             symbols=symbols,
             exclude_ambiguous=exclude_ambiguous,
+            exclude=exclude,
             letters=letters,
         )
         length = generator.require_password_length(length)
         passwords = [generator.generate_password(length, pool) for _ in range(count)]
         exact = generator.password_entropy_bits(length, len(generator.unique_characters(pool)))
         note = "" if generator.can_be_strong(length, pool) else generator.strong_line_message()
-        if exclude_ambiguous and note == "":
-            note = "Ambiguous characters (0, O, o, 1, l, I, |) are left out."
+        extras: list[str] = []
+        if exclude_ambiguous:
+            extras.append("ambiguous characters (0, O, o, 1, l, I, |)")
+        if exclude:
+            extras.append(f"extra characters ({exclude})")
+        if extras and note == "":
+            note = "Left out " + " and ".join(extras) + "."
     else:
         raise ValueError("Mode must be characters or passphrase.")
 
@@ -3287,6 +3298,21 @@ class PasswordWindow:
         self.ambiguous = self._chip("Exclude ambiguous", False)
         self.ambiguous.set_halign(gtk.Align.START)
         self.character_box.pack_start(self.ambiguous, False, False, 0)
+        exclude_box = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=4)
+        exclude_label = gtk.Label(label="Also exclude", xalign=0)
+        self.exclude_entry = gtk.Entry()
+        self.exclude_entry.set_placeholder_text("e.g. $!@")
+        self.exclude_entry.set_max_length(generator.MAX_EXCLUDE_LENGTH)
+        exclude_hint = gtk.Label(
+            label="Optional. Type characters a site rejects, such as quotes or $.",
+            xalign=0,
+        )
+        exclude_hint.set_line_wrap(True)
+        exclude_hint.get_style_context().add_class("hint")
+        exclude_box.pack_start(exclude_label, False, False, 0)
+        exclude_box.pack_start(self.exclude_entry, False, False, 0)
+        exclude_box.pack_start(exclude_hint, False, False, 0)
+        self.character_box.pack_start(exclude_box, False, False, 0)
         symbol_hint = gtk.Label(
             label=(
                 "Symbols include quotes, backticks, and backslashes. "
@@ -3892,6 +3918,7 @@ class PasswordWindow:
             "lowercase": self.lowercase.get_active(),
             "symbols": self.symbols.get_active(),
             "exclude_ambiguous": self.ambiguous.get_active(),
+            "exclude": self.exclude_entry.get_text(),
             "separator": self.separator,
             "capitalize": self.capitalize.get_active(),
         }

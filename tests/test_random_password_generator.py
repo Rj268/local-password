@@ -200,6 +200,23 @@ class PoolAndEntropyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             generator.prepare_character_list("0Ool1I|", exclude_ambiguous=True)
 
+    def test_exclude_extra_characters(self) -> None:
+        self.assertEqual(generator.clean_exclude_characters("aab$!"), "ab$!")
+        pool = generator.prepare_character_list(
+            string.ascii_letters + string.digits + "$!@",
+            exclude="$!@",
+        )
+        self.assertTrue(set(pool).isdisjoint(set("$!@")))
+        with self.assertRaises(ValueError):
+            generator.prepare_character_list("abc", exclude="abc")
+        stdout = StringIO()
+        stderr = StringIO()
+        with patch("sys.stdout", stdout), patch("sys.stderr", stderr):
+            generator.main(["--length", "24", "--digits", "--letters", "--exclude", "0O"])
+        password = stdout.getvalue().strip()
+        self.assertTrue(set(password).isdisjoint(set("0O")))
+        self.assertIn("Extra characters left out", stderr.getvalue())
+
     def test_default_symbols_leave_out_shell_metacharacters(self) -> None:
         self.assertEqual(generator.special_characters(), "%+,-./:=@^_")
         full = generator.special_characters(all_special=True)

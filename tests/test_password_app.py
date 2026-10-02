@@ -105,6 +105,33 @@ class GenerateTests(unittest.TestCase):
         for char in "0Ool1I|":
             self.assertNotIn(char, result.text)
 
+    def test_exclude_specific_characters_from_pool(self) -> None:
+        pool = password_app.character_pool(
+            digits=True,
+            uppercase=True,
+            lowercase=True,
+            symbols=True,
+            exclude="$!@",
+        )
+        for char in "$!@":
+            self.assertNotIn(char, pool)
+        result = password_app.generate(
+            mode="characters",
+            length=32,
+            words=6,
+            count=1,
+            digits=True,
+            uppercase=True,
+            lowercase=True,
+            symbols=True,
+            exclude="$!@",
+        )
+        for char in "$!@":
+            self.assertNotIn(char, result.text)
+        self.assertIn("extra characters", result.note)
+        with self.assertRaises(ValueError):
+            password_app.character_pool(digits=True, exclude="0123456789")
+
     def test_uppercase_only_pool(self) -> None:
         pool = password_app.character_pool(uppercase=True)
         self.assertTrue(set(pool) <= set(string.ascii_uppercase))

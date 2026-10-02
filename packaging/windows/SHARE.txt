@@ -9,6 +9,11 @@ Generate makes a password. Copy puts it on the clipboard. Save is optional.
 The first save asks for a passphrase and then shows a recovery key once.
 Write that key down. Either one opens the saved passwords.
 
-Dark, beside the title, switches the colors.
+Settings holds Light / Dark / System theme, clipboard clear, and auto-lock.
+Saved passwords live in:
+  %LOCALAPPDATA%\local-password\saved.vault
+Uninstall from Settings > Apps, or run uninstall.ps1 in the install folder.
+Uninstall removes the app; it does not delete your vault file.
 
 Windows may say it protected your PC. Choose More info, then Run anyway.
+That warning is normal until the .exe is signed with a code-signing certificate.

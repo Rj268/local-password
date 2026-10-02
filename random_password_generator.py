@@ -36,6 +36,7 @@ AMBIGUOUS_CHARACTERS = "0Ool1I|"
 # Metacharacters that change meaning when pasted into a shell unquoted.
 SHELL_SENSITIVE_CHARACTERS = "!\"#$&'()*;<>?\\`|[]~{}"
 PASSPHRASE_SEPARATORS = (" ", "-", "_", ".")
+MAX_EXCLUDE_LENGTH = 200
 
 
 def app_root() -> Path:
@@ -59,15 +60,39 @@ def without_ambiguous(character_list: str) -> str:
     return "".join(char for char in character_list if char not in skip)
 
 
-def prepare_character_list(character_list: str, *, exclude_ambiguous: bool = False) -> str:
+def clean_exclude_characters(value: str) -> str:
+    """Normalize a user exclusion list. Each distinct character is kept once."""
+    if "\n" in value or "\r" in value:
+        raise ValueError("Characters to exclude must be on one line.")
+    if len(value) > MAX_EXCLUDE_LENGTH:
+        raise ValueError(
+            f"Characters to exclude must be {MAX_EXCLUDE_LENGTH} characters or fewer."
+        )
+    return unique_characters(value)
+
+
+def without_characters(character_list: str, exclude: str) -> str:
+    """Drop every character listed in ``exclude`` from the pool."""
+    skip = set(exclude)
+    return "".join(char for char in character_list if char not in skip)
+
+
+def prepare_character_list(
+    character_list: str,
+    *,
+    exclude_ambiguous: bool = False,
+    exclude: str = "",
+) -> str:
     """Return the distinct characters that will actually be used."""
     pool = unique_characters(character_list)
     if exclude_ambiguous:
         pool = without_ambiguous(pool)
+    if exclude:
+        pool = without_characters(pool, clean_exclude_characters(exclude))
     if pool:
         return pool
-    if exclude_ambiguous and unique_characters(character_list):
-        raise ValueError("Excluding ambiguous characters left no characters to use.")
+    if (exclude_ambiguous or exclude) and unique_characters(character_list):
+        raise ValueError("Those exclusions left no characters to use.")
     raise ValueError("Choose at least one character type.")
 
 
@@ -577,6 +602,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help=f"Leave out easily confused characters ({AMBIGUOUS_CHARACTERS})",
     )
     parser.add_argument(
+        "--exclude",
+        default="",
+        help="Extra characters to leave out of the password alphabet",
+    )
+    parser.add_argument(
         "-n",
         "--count",
         type=int,
@@ -618,7 +648,15 @@ def _passphrase_requested(args: argparse.Namespace) -> bool:
 
 def _reject_mixed_passphrase_options(args: argparse.Namespace) -> None:
     character_options = any(
-        (args.length is not None, args.digits, args.letters, args.special, args.all_special, args.no_ambiguous)
+        (
+            args.length is not None,
+            args.digits,
+            args.letters,
+            args.special,
+            args.all_special,
+            args.no_ambiguous,
+            bool(args.exclude),
+        )
     )
     if _passphrase_requested(args) and character_options:
         print(
@@ -658,6 +696,7 @@ def _generate_values(args: argparse.Namespace) -> tuple[list[str], str]:
     character_list = prepare_character_list(
         _noninteractive_pool(args),
         exclude_ambiguous=args.no_ambiguous,
+        exclude=args.exclude,
     )
     values = [generate_password(args.length, character_list) for _ in range(count)]
     return values, describe_passwords(values, len(character_list))
@@ -694,9 +733,15 @@ def run_noninteractive(args: argparse.Namespace) -> None:
                 f"Ambiguous characters left out: {AMBIGUOUS_CHARACTERS}.",
                 file=sys.stderr,
             )
+        if args.exclude:
+            print(
+                f"Extra characters left out: {clean_exclude_characters(args.exclude)}.",
+                file=sys.stderr,
+            )
         if not _passphrase_requested(args) and not can_be_strong(args.length, prepare_character_list(
             _noninteractive_pool(args),
             exclude_ambiguous=args.no_ambiguous,
+            exclude=args.exclude,
         )):
             print(strong_line_message(), file=sys.stderr)
         print(report, file=sys.stderr)
@@ -717,6 +762,7 @@ def main(argv: list[str] | None = None) -> None:
             args.passphrase,
             args.words is not None,
             args.no_ambiguous,
+            bool(args.exclude),
             args.count is not None,
             args.copy,
             args.quiet,
