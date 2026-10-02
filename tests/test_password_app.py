@@ -779,6 +779,40 @@ class VaultTests(unittest.TestCase):
             self.assertEqual(items[0].username, "")
             self.assertFalse(items[0].favorite)
 
+    def test_rename_entry_changes_name_and_refuses_clash(self) -> None:
+        email = password_app.SavedPassword(
+            "Email",
+            "secret-value-here",
+            username="me",
+            notes="keep",
+            favorite=True,
+            created="2020-01-01T00:00:00Z",
+            modified="2020-02-01T00:00:00Z",
+            last_used="2020-03-01T00:00:00Z",
+        )
+        bank = password_app.SavedPassword("Bank", "other-secret-value")
+        same = password_app.rename_entry([email, bank], email, "Email")
+        self.assertEqual([item.name for item in same], ["Email", "Bank"])
+        self.assertEqual(same[0].modified, "2020-02-01T00:00:00Z")
+        updated = password_app.rename_entry(
+            [email, bank],
+            email,
+            "  Work email  ",
+            when="2024-05-01T00:00:00Z",
+        )
+        self.assertEqual([item.name for item in updated], ["Work email", "Bank"])
+        self.assertEqual(updated[0].username, "me")
+        self.assertEqual(updated[0].notes, "keep")
+        self.assertTrue(updated[0].favorite)
+        self.assertEqual(updated[0].created, "2020-01-01T00:00:00Z")
+        self.assertEqual(updated[0].modified, "2024-05-01T00:00:00Z")
+        self.assertEqual(updated[0].last_used, "2020-03-01T00:00:00Z")
+        with self.assertRaises(ValueError) as raised:
+            password_app.rename_entry([email, bank], email, "Bank")
+        self.assertIn("already uses that name", str(raised.exception))
+        with self.assertRaises(ValueError):
+            password_app.rename_entry([bank], email, "Mailbox")
+
     def test_upsert_can_rename_and_edit_fields(self) -> None:
         existing = [
             password_app.SavedPassword(

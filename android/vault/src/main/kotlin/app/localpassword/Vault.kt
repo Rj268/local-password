@@ -295,6 +295,24 @@ object Vault {
         return listOf(fresh) + items
     }
 
+    fun renameEntry(
+        items: List<SavedPassword>,
+        item: SavedPassword,
+        newName: String,
+        whenStamp: String = utcNow(),
+    ): List<SavedPassword> {
+        if (items.none { it.name == item.name }) {
+            throw VaultException("That saved password is gone.")
+        }
+        val label = cleanName(newName)
+        if (label == item.name) return items.toList()
+        if (items.any { it.name == label }) {
+            throw VaultException("Another saved password already uses that name.")
+        }
+        val renamed = item.copy(name = label, modified = whenStamp)
+        return listOf(renamed) + items.filter { it.name != item.name }
+    }
+
     fun removeEntry(items: List<SavedPassword>, item: SavedPassword): List<SavedPassword> {
         if (items.none { it.name == item.name }) {
             throw VaultException("That saved password is gone.")

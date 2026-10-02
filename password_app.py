@@ -711,6 +711,27 @@ def duplicate_entry(
     return [fresh] + list(existing)
 
 
+def rename_entry(
+    existing: list[SavedPassword],
+    item: SavedPassword,
+    new_name: str,
+    *,
+    when: str | None = None,
+) -> list[SavedPassword]:
+    """Rename one saved entry. Refuses a name already used by another row."""
+    taken = {entry.name for entry in existing}
+    if item.name not in taken:
+        raise ValueError("That saved password is gone.")
+    label = clean_name(new_name)
+    if label == item.name:
+        return list(existing)
+    if label in taken:
+        raise ValueError("Another saved password already uses that name.")
+    stamp = when or utc_now()
+    renamed = replace(item, name=label, modified=stamp)
+    return [renamed] + [entry for entry in existing if entry.name != item.name]
+
+
 def remove_entry(existing: list[SavedPassword], item: SavedPassword) -> list[SavedPassword]:
     """Drop one saved entry by name."""
     if all(entry.name != item.name for entry in existing):
@@ -3264,6 +3285,7 @@ class PasswordWindow:
                 "Copying a saved password marks it Recent and shows Last used on the entry. "
                 "Favorite stars or clears a row without opening Edit. "
                 "Duplicate copies a row under a new name. "
+                "Rename changes only the name without opening Edit. "
                 "Copy URL and Copy notes appear when those fields are set. "
                 "Notes show without revealing the password. "
                 "Remove can be undone with Undo on this page."
@@ -3962,6 +3984,10 @@ class PasswordWindow:
         duplicate_btn.get_style_context().add_class("secondary")
         duplicate_btn.connect("clicked", lambda *_args, entry=item: self.on_duplicate_entry(entry))
         actions.pack_start(duplicate_btn, False, False, 0)
+        rename_btn = gtk.Button(label="Rename")
+        rename_btn.get_style_context().add_class("secondary")
+        rename_btn.connect("clicked", lambda *_args, entry=item: self.on_rename_entry(entry))
+        actions.pack_start(rename_btn, False, False, 0)
         edit = gtk.Button(label="Edit")
         edit.get_style_context().add_class("secondary")
         edit.connect("clicked", lambda *_args, entry=item: self.on_edit_entry(entry))
@@ -4039,6 +4065,104 @@ class PasswordWindow:
             self._refresh_saved_rows()
         elif self.section == "dashboard":
             self._refresh_dashboard()
+
+    def on_rename_entry(self, item: SavedPassword) -> None:
+        """Change only the name on a Saved row without opening Edit."""
+        self._note_activity()
+        if self.vault_key is None:
+            self.status.set_text("Saved passwords are locked.")
+            return
+        current = next((entry for entry in self.saved if entry.name == item.name), None)
+        if current is None:
+            self.status.set_text("That saved password is gone.")
+            return
+        new_name = self._rename_entry_dialog(current)
+        if new_name is None:
+            return
+        if new_name == current.name:
+            message = f"{current.name} already uses that name."
+            self.status.set_text(message)
+            if self.section == "saved":
+                self.manager_message.set_text(message)
+                self.manager_message.show()
+            return
+        try:
+            updated = rename_entry(self.saved, current, new_name)
+            write_vault(self.vault_key, updated)
+        except ValueError as exc:
+            self.status.set_text(str(exc))
+            if self.section == "saved":
+                self.manager_message.set_text(str(exc))
+                self.manager_message.show()
+            return
+        except OSError:
+            message = "Could not rename that entry."
+            self.status.set_text(message)
+            if self.section == "saved":
+                self.manager_message.set_text(message)
+                self.manager_message.show()
+            return
+        stamped = next(entry for entry in updated if entry.name == new_name)
+        if current.name in self.revealed_names and stamped.name != current.name:
+            self.revealed_names.discard(current.name)
+            self.revealed_names.add(stamped.name)
+        self.saved = updated
+        message = f"Renamed to {stamped.name}."
+        self.status.set_text(message)
+        if self.section == "saved":
+            self.manager_message.set_text(message)
+            self.manager_message.show()
+            self._refresh_saved_rows()
+        elif self.section == "dashboard":
+            self._refresh_dashboard()
+
+    def _rename_entry_dialog(self, item: SavedPassword) -> str | None:
+        gtk = self.gtk
+        dialog = gtk.Dialog(title="Rename saved password", transient_for=self.window, modal=True)
+        self._match_dialog(dialog)
+        dialog.add_button("Cancel", gtk.ResponseType.CANCEL)
+        save = dialog.add_button("Rename", gtk.ResponseType.OK)
+        save.get_style_context().add_class("primary")
+        dialog.set_default_response(gtk.ResponseType.OK)
+        content = dialog.get_content_area()
+        content.set_spacing(8)
+        for setter in (
+            content.set_margin_top,
+            content.set_margin_bottom,
+            content.set_margin_start,
+            content.set_margin_end,
+        ):
+            setter(16)
+        hint = gtk.Label(label=f'Rename "{item.name}". Other fields stay the same.', xalign=0)
+        hint.set_line_wrap(True)
+        hint.get_style_context().add_class("hint")
+        content.pack_start(hint, False, False, 0)
+        caption = gtk.Label(label="Name", xalign=0)
+        content.pack_start(caption, False, False, 0)
+        name_entry = gtk.Entry()
+        name_entry.set_text(item.name)
+        name_entry.set_activates_default(True)
+        content.pack_start(name_entry, False, False, 0)
+        problem = gtk.Label(label="", xalign=0)
+        problem.set_line_wrap(True)
+        problem.get_style_context().add_class("danger")
+        content.pack_start(problem, False, False, 0)
+        dialog.show_all()
+        name_entry.grab_focus()
+        name_entry.select_region(0, -1)
+        while True:
+            response = dialog.run()
+            if response != gtk.ResponseType.OK:
+                dialog.destroy()
+                return None
+            try:
+                label = clean_name(name_entry.get_text())
+            except ValueError as exc:
+                problem.set_text(str(exc))
+                problem.show()
+                continue
+            dialog.destroy()
+            return label
 
     def on_replace_password(self, item: SavedPassword) -> None:
         self._note_activity()

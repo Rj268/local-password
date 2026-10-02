@@ -56,6 +56,7 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     var pendingReplace by mutableStateOf<SavedPassword?>(null)
     var historyFor by mutableStateOf<SavedPassword?>(null)
     var editing by mutableStateOf<SavedPassword?>(null)
+    var renaming by mutableStateOf<SavedPassword?>(null)
 
     private var opened: OpenVault? = null
     private var offer: VaultSync.Offer? = null
@@ -513,6 +514,48 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
 
     fun cancelEdit() {
         editing = null
+    }
+
+    fun beginRename(item: SavedPassword) {
+        error = ""
+        renaming = item
+    }
+
+    fun cancelRename() {
+        renaming = null
+        error = ""
+    }
+
+    fun confirmRename(newName: String) {
+        val currentOpen = opened ?: return
+        val current = renaming ?: return
+        viewModelScope.launch {
+            busy = true
+            error = ""
+            try {
+                val label = withContext(Dispatchers.Default) { Vault.cleanName(newName) }
+                if (label == current.name) {
+                    status = "${current.name} already uses that name."
+                    renaming = null
+                    return@launch
+                }
+                val next = withContext(Dispatchers.Default) {
+                    Vault.renameEntry(currentOpen.items, current, label)
+                }
+                val blob = withContext(Dispatchers.Default) { Vault.seal(currentOpen, next) }
+                writeAtomically(blob)
+                opened = currentOpen.copy(items = next)
+                saved = next
+                unlocked = true
+                if (revealed == current.name) revealed = label
+                renaming = null
+                status = "Renamed to $label."
+            } catch (exc: VaultException) {
+                error = exc.message ?: "Could not rename that entry."
+            } finally {
+                busy = false
+            }
+        }
     }
 
     fun saveEdit(updated: SavedPassword) {

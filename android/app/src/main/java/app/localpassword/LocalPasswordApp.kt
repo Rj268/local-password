@@ -321,9 +321,9 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
             }
             Text(
                 if (healthBits.isNotEmpty()) {
-                    "Passwords stay masked until you show one. Weak, reused, or stale passwords (unchanged for 180 days) are called out. ${healthBits.joinToString(" · ")}. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Copy URL and Copy notes appear when those fields are set. Notes show without revealing the password. Remove can be undone with Undo."
+                    "Passwords stay masked until you show one. Weak, reused, or stale passwords (unchanged for 180 days) are called out. ${healthBits.joinToString(" · ")}. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Rename changes only the name without opening Edit. Copy URL and Copy notes appear when those fields are set. Notes show without revealing the password. Remove can be undone with Undo."
                 } else {
-                    "Passwords stay masked until you show one. Weak, reused, or stale passwords (unchanged for 180 days) are called out. Needs attention filters those rows. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Copy URL and Copy notes appear when those fields are set. Notes show without revealing the password. Remove can be undone with Undo."
+                    "Passwords stay masked until you show one. Weak, reused, or stale passwords (unchanged for 180 days) are called out. Needs attention filters those rows. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Rename changes only the name without opening Edit. Copy URL and Copy notes appear when those fields are set. Notes show without revealing the password. Remove can be undone with Undo."
                 },
                 color = muted,
                 fontSize = 13.sp,
@@ -455,6 +455,9 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
                             TextButton(onClick = { model.duplicateEntry(item) }, enabled = !model.busy) {
                                 Text("Duplicate", color = Green)
                             }
+                            TextButton(onClick = { model.beginRename(item) }, enabled = !model.busy) {
+                                Text("Rename", color = Green)
+                            }
                             TextButton(onClick = { model.beginEdit(item) }) { Text("Edit", color = Green) }
                             TextButton(onClick = { model.requestRemove(item) }) { Text("Remove", color = Danger) }
                         }
@@ -462,6 +465,15 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
                 }
             }
         }
+    }
+    model.renaming?.let { item ->
+        RenameEntryDialog(
+            item = item,
+            busy = model.busy,
+            error = model.error,
+            onCancel = { model.cancelRename() },
+            onRename = { model.confirmRename(it) },
+        )
     }
     model.historyFor?.let { item ->
         AlertDialog(
@@ -540,6 +552,44 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
     model.editing?.let { item ->
         EditEntryDialog(item = item, busy = model.busy, error = model.error, onCancel = { model.cancelEdit() }, onSave = { model.saveEdit(it) })
     }
+}
+
+@Composable
+private fun RenameEntryDialog(
+    item: SavedPassword,
+    busy: Boolean,
+    error: String,
+    onCancel: () -> Unit,
+    onRename: (String) -> Unit,
+) {
+    var name by remember(item) { mutableStateOf(item.name) }
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Rename saved password") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Rename \"${item.name}\". Other fields stay the same.", color = Muted)
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (error.isNotEmpty()) {
+                    Text(error, color = Danger)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = !busy, onClick = { onRename(name) }) {
+                Text("Rename", color = Green)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel, enabled = !busy) { Text("Cancel") }
+        },
+    )
 }
 
 @Composable

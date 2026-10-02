@@ -2,7 +2,7 @@
 # Build an architecture-independent Debian package for the local window.
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-VERSION=1.22.0
+VERSION=1.23.0
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 PKG="$STAGE/local-password"

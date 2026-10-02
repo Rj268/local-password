@@ -186,6 +186,48 @@ class VaultTest {
     }
 
     @Test
+    fun renameEntryChangesNameAndRefusesClash() {
+        val email = SavedPassword(
+            "Email",
+            "secret-value-here",
+            username = "me",
+            notes = "keep",
+            favorite = true,
+            created = "2020-01-01T00:00:00Z",
+            modified = "2020-02-01T00:00:00Z",
+            lastUsed = "2020-03-01T00:00:00Z",
+        )
+        val bank = SavedPassword("Bank", "other-secret-value")
+        val same = Vault.renameEntry(listOf(email, bank), email, "Email")
+        assertEquals(listOf("Email", "Bank"), same.map { it.name })
+        assertEquals("2020-02-01T00:00:00Z", same[0].modified)
+        val updated = Vault.renameEntry(
+            listOf(email, bank),
+            email,
+            "  Work email  ",
+            whenStamp = "2024-05-01T00:00:00Z",
+        )
+        assertEquals(listOf("Work email", "Bank"), updated.map { it.name })
+        assertEquals("me", updated[0].username)
+        assertEquals("keep", updated[0].notes)
+        assert(updated[0].favorite)
+        assertEquals("2020-01-01T00:00:00Z", updated[0].created)
+        assertEquals("2024-05-01T00:00:00Z", updated[0].modified)
+        assertEquals("2020-03-01T00:00:00Z", updated[0].lastUsed)
+        try {
+            Vault.renameEntry(listOf(email, bank), email, "Bank")
+            throw AssertionError("expected clash")
+        } catch (exc: VaultException) {
+            assert(exc.message!!.contains("already uses that name"))
+        }
+        try {
+            Vault.renameEntry(listOf(bank), email, "Mailbox")
+            throw AssertionError("expected missing entry")
+        } catch (_: VaultException) {
+        }
+    }
+
+    @Test
     fun duplicateEntryCopiesFieldsAndNamesUniquely() {
         val item = SavedPassword(
             name = "Bank",
