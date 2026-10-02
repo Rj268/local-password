@@ -121,6 +121,14 @@ Be accurate if Android later gains the desktop-style HIBP breach check; then dec
 
 ## Commands cheat sheet
 
+CI / Linux agents may need:
+
+```bash
+export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+export ANDROID_HOME=/tmp/android-sdk
+export ANDROID_SDK_ROOT=/tmp/android-sdk
+```
+
 ```bash
 # One-time keystore
 cd android && bash scripts/create-release-keystore.sh
