@@ -1,5 +1,10 @@
 # Release notes
 
+## 1.30.1
+
+- Saved page declutter: short lede, one filter strip (Needs attention + All/Favorites/Archived + sort), row actions are Show / Copy / Replace / **More**
+- Page Lock button hidden while unlocked (header Lock remains)
+
 ## 1.30.0
 
 - Saved: **Check breaches** / per-row **Check breach** — optional Have I Been Pwned k-anonymity check (only a short hash prefix leaves this computer; vault never uploaded)

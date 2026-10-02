@@ -92,7 +92,7 @@ AUTO_LOCK_OPTIONS = (
     (300, "5 minutes"),
     (900, "15 minutes"),
 )
-APP_VERSION = "1.30.0"
+APP_VERSION = "1.30.1"
 THEME_LIGHT = "light"
 THEME_DARK = "dark"
 THEME_SYSTEM = "system"
@@ -3902,23 +3902,8 @@ class PasswordWindow:
         page.pack_start(self.saved_heading, False, False, 0)
         saved_lede = gtk.Label(
             label=(
-                "Passwords stay masked until you show one. Weak, reused, or stale passwords "
-                "(unchanged for 180 days) are called out. Check breaches optionally compares "
-                "hashes to a public leak list without sending the password itself. "
-                "Needs attention filters those rows. "
-                "Replace password generates a strong "
-                "one, saves it, and copies it. Previous keeps the last few passwords for that entry. "
-                "Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. "
-                "Copying a saved password marks it Recent and shows Last used on the entry. "
-                "Favorite stars or clears a row without opening Edit. "
-                "Duplicate copies a row under a new name. "
-                "Rename changes only the name without opening Edit. "
-                "Category, Username, URL, and Notes can be set without opening Edit. "
-                "Archive hides a row from the main list; Archived shows those rows. "
-                "Copy login copies username and password together when a username is set. "
-                "Copy URL and Copy notes appear when those fields are set. "
-                "Notes show without revealing the password. "
-                "Remove can be undone with Undo on this page."
+                "Passwords stay masked until you show them. "
+                "Flags mark weak, reused, stale, or breached ones."
             ),
             xalign=0,
         )
@@ -3948,15 +3933,16 @@ class PasswordWindow:
         page.pack_start(self.find_entry, False, False, 0)
 
         filter_row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
-        self.favorites_only = self._chip("Favorites", False)
-        self.favorites_only.connect("toggled", lambda *_args: self._refresh_saved_rows())
-        filter_row.pack_start(self.favorites_only, False, False, 0)
-        self.archived_only = self._chip("Archived", False)
-        self.archived_only.connect("toggled", lambda *_args: self._refresh_saved_rows())
-        filter_row.pack_start(self.archived_only, False, False, 0)
         self.needs_attention_only = self._chip("Needs attention", False)
         self.needs_attention_only.connect("toggled", lambda *_args: self._refresh_saved_rows())
         filter_row.pack_start(self.needs_attention_only, False, False, 0)
+        self.saved_view_combo = gtk.ComboBoxText()
+        self.saved_view_combo.append("all", "All")
+        self.saved_view_combo.append("favorites", "Favorites")
+        self.saved_view_combo.append("archived", "Archived")
+        self.saved_view_combo.set_active_id("all")
+        self.saved_view_combo.connect("changed", lambda *_args: self._refresh_saved_rows())
+        filter_row.pack_start(self.saved_view_combo, False, False, 0)
         self.category_combo = gtk.ComboBoxText()
         self.category_combo.append("all", "All categories")
         self.category_combo.set_active_id("all")
@@ -3964,28 +3950,19 @@ class PasswordWindow:
         self.category_combo.connect("changed", self._on_category_filter_changed)
         self.category_combo.set_hexpand(True)
         filter_row.pack_start(self.category_combo, True, True, 0)
-        page.pack_start(filter_row, False, False, 0)
-        self.filter_row = filter_row
-
-        sort_row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
-        sort_label = gtk.Label(label="Sort", xalign=0)
-        sort_label.get_style_context().add_class("hint")
-        sort_row.pack_start(sort_label, False, False, 0)
-        self.sort_name = self._chip("Name", True)
-        self.sort_recent = self._chip("Recent", False)
-        self.sort_changed = self._chip("Changed", False)
-        self._sort_chips = {
-            SAVED_SORT_NAME: self.sort_name,
-            SAVED_SORT_RECENT: self.sort_recent,
-            SAVED_SORT_CHANGED: self.sort_changed,
-        }
+        self.sort_combo = gtk.ComboBoxText()
+        self.sort_combo.append(SAVED_SORT_NAME, "Sort: Name")
+        self.sort_combo.append(SAVED_SORT_RECENT, "Sort: Recent")
+        self.sort_combo.append(SAVED_SORT_CHANGED, "Sort: Changed")
+        self.sort_combo.set_active_id(SAVED_SORT_NAME)
         self.saved_sort_mode = SAVED_SORT_NAME
         self._suppress_sort_change = False
-        for mode, chip in self._sort_chips.items():
-            chip.connect("toggled", self._on_sort_chip_toggled, mode)
-            sort_row.pack_start(chip, False, False, 0)
-        page.pack_start(sort_row, False, False, 0)
-        self.sort_row = sort_row
+        self.sort_combo.connect("changed", self._on_sort_combo_changed)
+        filter_row.pack_start(self.sort_combo, False, False, 0)
+        page.pack_start(filter_row, False, False, 0)
+        self.filter_row = filter_row
+        # One filter strip now; keep sort_row for lock/refresh show-hide paths.
+        self.sort_row = filter_row
 
         message_row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
         self.manager_message = gtk.Label(label="", xalign=0)
@@ -4441,25 +4418,13 @@ class PasswordWindow:
             return
         self._refresh_saved_rows()
 
-    def _on_sort_chip_toggled(self, button, mode: str) -> None:
+    def _on_sort_combo_changed(self, *_args) -> None:
         if self._suppress_sort_change:
             return
-        if not button.get_active():
-            # Keep one sort mode on at all times.
-            if mode == self.saved_sort_mode:
-                self._suppress_sort_change = True
-                try:
-                    button.set_active(True)
-                finally:
-                    self._suppress_sort_change = False
+        active = self.sort_combo.get_active_id()
+        if active is None or active not in SAVED_SORT_MODES:
             return
-        self.saved_sort_mode = mode
-        self._suppress_sort_change = True
-        try:
-            for key, chip in self._sort_chips.items():
-                chip.set_active(key == mode)
-        finally:
-            self._suppress_sort_change = False
+        self.saved_sort_mode = active
         self._refresh_saved_rows()
 
     def _refresh_category_filter(self) -> None:
@@ -4516,9 +4481,10 @@ class PasswordWindow:
             return
         self._refresh_category_filter()
         category = self.category_combo.get_active_id() or "all"
-        favorites_only = self.favorites_only.get_active()
+        view = self.saved_view_combo.get_active_id() or "all"
+        favorites_only = view == "favorites"
+        archived_only = view == "archived"
         attention_only = self.needs_attention_only.get_active()
-        archived_only = self.archived_only.get_active()
         pool = [item for item in self.saved if item.archived] if archived_only else active_saved_entries(self.saved)
         matches = [
             item
@@ -4581,6 +4547,104 @@ class PasswordWindow:
         for item in matches:
             self.saved_box.pack_start(self._saved_row(item), False, False, 0)
         self.saved_box.show_all()
+
+    def _menu_action(self, menu, label: str, callback) -> None:
+        item = self.gtk.MenuItem(label=label)
+        item.connect("activate", callback)
+        menu.append(item)
+
+    def _saved_row_more_menu(self, item: SavedPassword):
+        gtk = self.gtk
+        menu = gtk.Menu()
+        login_text = login_copy_text(item)
+        if login_text:
+            self._menu_action(
+                menu,
+                "Copy login",
+                lambda *_args, entry=item, text=login_text: self.on_copy_saved_secret(
+                    entry, text
+                ),
+            )
+            self._menu_action(
+                menu,
+                "Copy username",
+                lambda *_args, entry=item: self.on_copy_saved_secret(entry, entry.username),
+            )
+        for label, value in optional_copy_fields(item):
+            self._menu_action(
+                menu,
+                label,
+                lambda *_args, entry=item, text=value: self.on_copy_saved_secret(entry, text),
+            )
+            if label == "Copy URL" and browseable_url(item.url):
+                self._menu_action(
+                    menu,
+                    "Open URL",
+                    lambda *_args, entry=item: self.on_open_url(entry),
+                )
+        self._menu_action(
+            menu,
+            "Check breach",
+            lambda *_args, entry=item: self.on_check_breach_one(entry),
+        )
+        if item.history:
+            self._menu_action(
+                menu,
+                f"Previous ({len(item.history)})",
+                lambda *_args, entry=item: self.on_previous_passwords(entry),
+            )
+        self._menu_action(
+            menu,
+            "Unfavorite" if item.favorite else "Favorite",
+            lambda *_args, entry=item: self.on_toggle_favorite(entry),
+        )
+        self._menu_action(
+            menu,
+            "Unarchive" if item.archived else "Archive",
+            lambda *_args, entry=item: self.on_toggle_archived(entry),
+        )
+        self._menu_action(
+            menu,
+            "Duplicate",
+            lambda *_args, entry=item: self.on_duplicate_entry(entry),
+        )
+        self._menu_action(
+            menu,
+            "Rename",
+            lambda *_args, entry=item: self.on_rename_entry(entry),
+        )
+        self._menu_action(
+            menu,
+            "Category",
+            lambda *_args, entry=item: self.on_set_category(entry),
+        )
+        self._menu_action(
+            menu,
+            "Username",
+            lambda *_args, entry=item: self.on_set_username(entry),
+        )
+        self._menu_action(
+            menu,
+            "URL",
+            lambda *_args, entry=item: self.on_set_url(entry),
+        )
+        self._menu_action(
+            menu,
+            "Notes",
+            lambda *_args, entry=item: self.on_set_notes(entry),
+        )
+        self._menu_action(
+            menu,
+            "Edit",
+            lambda *_args, entry=item: self.on_edit_entry(entry),
+        )
+        self._menu_action(
+            menu,
+            "Remove",
+            lambda *_args, label=item.name: self.on_remove(label),
+        )
+        menu.show_all()
+        return menu
 
     def _saved_row(self, item: SavedPassword):
         gtk = self.gtk
@@ -4660,97 +4724,21 @@ class PasswordWindow:
             "clicked",
             lambda *_args, entry=item: self.on_copy_saved_secret(entry, entry.password),
         )
-        actions.pack_start(show, False, False, 0)
-        actions.pack_start(copy, False, False, 0)
-        login_text = login_copy_text(item)
-        if login_text:
-            copy_login = gtk.Button(label="Copy login")
-            copy_login.get_style_context().add_class("secondary")
-            copy_login.connect(
-                "clicked",
-                lambda *_args, entry=item, text=login_text: self.on_copy_saved_secret(
-                    entry, text
-                ),
-            )
-            actions.pack_start(copy_login, False, False, 0)
-            copy_user = gtk.Button(label="Copy username")
-            copy_user.get_style_context().add_class("secondary")
-            copy_user.connect(
-                "clicked",
-                lambda *_args, entry=item: self.on_copy_saved_secret(entry, entry.username),
-            )
-            actions.pack_start(copy_user, False, False, 0)
-        for label, value in optional_copy_fields(item):
-            copy_field = gtk.Button(label=label)
-            copy_field.get_style_context().add_class("secondary")
-            copy_field.connect(
-                "clicked",
-                lambda *_args, entry=item, text=value: self.on_copy_saved_secret(entry, text),
-            )
-            actions.pack_start(copy_field, False, False, 0)
-            if label == "Copy URL" and browseable_url(item.url):
-                open_url = gtk.Button(label="Open URL")
-                open_url.get_style_context().add_class("secondary")
-                open_url.connect("clicked", lambda *_args, entry=item: self.on_open_url(entry))
-                actions.pack_start(open_url, False, False, 0)
-        check_breach_btn = gtk.Button(label="Check breach")
-        check_breach_btn.get_style_context().add_class("secondary")
-        check_breach_btn.connect(
-            "clicked", lambda *_args, entry=item: self.on_check_breach_one(entry)
-        )
-        actions.pack_start(check_breach_btn, False, False, 0)
-        replace_btn = gtk.Button(label="Replace password")
+        replace_btn = gtk.Button(label="Replace")
         if entry_needs_attention(item, self.saved, breach_counts=self.breach_counts):
             replace_btn.get_style_context().add_class("primary")
+            copy.get_style_context().remove_class("primary")
+            copy.get_style_context().add_class("secondary")
         else:
             replace_btn.get_style_context().add_class("secondary")
         replace_btn.connect("clicked", lambda *_args, entry=item: self.on_replace_password(entry))
+        more = gtk.MenuButton(label="More")
+        more.get_style_context().add_class("secondary")
+        more.set_popup(self._saved_row_more_menu(item))
+        actions.pack_start(show, False, False, 0)
+        actions.pack_start(copy, False, False, 0)
         actions.pack_start(replace_btn, False, False, 0)
-        if item.history:
-            previous_btn = gtk.Button(label=f"Previous ({len(item.history)})")
-            previous_btn.get_style_context().add_class("secondary")
-            previous_btn.connect("clicked", lambda *_args, entry=item: self.on_previous_passwords(entry))
-            actions.pack_start(previous_btn, False, False, 0)
-        favorite_btn = gtk.Button(label="Unfavorite" if item.favorite else "Favorite")
-        favorite_btn.get_style_context().add_class("secondary")
-        favorite_btn.connect("clicked", lambda *_args, entry=item: self.on_toggle_favorite(entry))
-        actions.pack_start(favorite_btn, False, False, 0)
-        archive_btn = gtk.Button(label="Unarchive" if item.archived else "Archive")
-        archive_btn.get_style_context().add_class("secondary")
-        archive_btn.connect("clicked", lambda *_args, entry=item: self.on_toggle_archived(entry))
-        actions.pack_start(archive_btn, False, False, 0)
-        duplicate_btn = gtk.Button(label="Duplicate")
-        duplicate_btn.get_style_context().add_class("secondary")
-        duplicate_btn.connect("clicked", lambda *_args, entry=item: self.on_duplicate_entry(entry))
-        actions.pack_start(duplicate_btn, False, False, 0)
-        rename_btn = gtk.Button(label="Rename")
-        rename_btn.get_style_context().add_class("secondary")
-        rename_btn.connect("clicked", lambda *_args, entry=item: self.on_rename_entry(entry))
-        actions.pack_start(rename_btn, False, False, 0)
-        category_btn = gtk.Button(label="Category")
-        category_btn.get_style_context().add_class("secondary")
-        category_btn.connect("clicked", lambda *_args, entry=item: self.on_set_category(entry))
-        actions.pack_start(category_btn, False, False, 0)
-        username_btn = gtk.Button(label="Username")
-        username_btn.get_style_context().add_class("secondary")
-        username_btn.connect("clicked", lambda *_args, entry=item: self.on_set_username(entry))
-        actions.pack_start(username_btn, False, False, 0)
-        url_btn = gtk.Button(label="URL")
-        url_btn.get_style_context().add_class("secondary")
-        url_btn.connect("clicked", lambda *_args, entry=item: self.on_set_url(entry))
-        actions.pack_start(url_btn, False, False, 0)
-        notes_btn = gtk.Button(label="Notes")
-        notes_btn.get_style_context().add_class("secondary")
-        notes_btn.connect("clicked", lambda *_args, entry=item: self.on_set_notes(entry))
-        actions.pack_start(notes_btn, False, False, 0)
-        edit = gtk.Button(label="Edit")
-        edit.get_style_context().add_class("secondary")
-        edit.connect("clicked", lambda *_args, entry=item: self.on_edit_entry(entry))
-        remove = gtk.Button(label="Remove")
-        remove.get_style_context().add_class("secondary")
-        remove.connect("clicked", lambda *_args, label=item.name: self.on_remove(label))
-        actions.pack_start(edit, False, False, 0)
-        actions.pack_start(remove, False, False, 0)
+        actions.pack_start(more, False, False, 0)
         row.pack_start(text, True, True, 0)
         row.pack_start(actions, False, False, 0)
         shell.pack_start(row, False, False, 0)
@@ -5764,10 +5752,8 @@ class PasswordWindow:
         status.remove_class("locked")
         status.remove_class("unlocked")
         if self.vault_key is not None:
-            self.lock_button.set_label("Lock")
-            style.remove_class("primary")
-            style.add_class("secondary")
-            self.lock_button.show()
+            # Header Lock is enough when unlocked; keep the page clear.
+            self.lock_button.hide()
             self.header_lock_button.set_label("Lock")
             header.remove_class("primary")
             header.add_class("secondary")
