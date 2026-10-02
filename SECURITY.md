@@ -15,6 +15,7 @@ Local Password encrypts saved passwords on this computer. It is not a guarantee 
 - Clipboard clearing is best-effort. Other apps or the operating system may keep a copy after Local Password clears its own clipboard contents.
 - Send vault / Receive vault move an encrypted file on the local network with a short pairing code. Being on the same Wi-Fi does not by itself make the transfer private from every other device on that network.
 - Auto-lock hides decrypted entries after idle time in this app session. It does not erase residual memory the operating system may still hold.
+- Lock on open is optional and off by default. When on, the app prompts for the passphrase at startup if a vault already exists.
 - Strength labels estimate search-space size from length and alphabet (or word count). They are not a proof that a password is safe against every attacker.
 - Losing both the passphrase and the recovery key makes the vault unrecoverable by design. There is no backdoor.
 

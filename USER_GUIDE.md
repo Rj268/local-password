@@ -12,6 +12,7 @@
 - **Generate** — Characters or Words. Use **Also exclude** when a site rejects certain symbols.
 - **Saved** — Search, copy, favorite, edit fields, or replace a weak password.
 - **Lock** — Hides the vault until you unlock with the passphrase or recovery key.
+- **Settings → Lock on open** — Optional. When on, the app asks for the passphrase as soon as it starts.
 
 ## Backup
 

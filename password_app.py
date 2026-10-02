@@ -89,7 +89,7 @@ AUTO_LOCK_OPTIONS = (
     (300, "5 minutes"),
     (900, "15 minutes"),
 )
-APP_VERSION = "1.29.1"
+APP_VERSION = "1.29.2"
 THEME_LIGHT = "light"
 THEME_DARK = "dark"
 THEME_SYSTEM = "system"
@@ -1280,6 +1280,7 @@ class Preferences:
     clipboard_clear_seconds: int = DEFAULT_CLIPBOARD_CLEAR_SECONDS
     auto_lock_seconds: int = DEFAULT_AUTO_LOCK_SECONDS
     confirm_before_reveal: bool = False
+    lock_on_open: bool = False
 
 
 def preferences_path() -> Path:
@@ -1291,6 +1292,10 @@ def _normalize_choice(value: int, options: tuple[tuple[int, str], ...], default:
     return value if value in allowed else default
 
 
+def _preference_flag(text: str) -> bool:
+    return text.casefold() in ("1", "true", "yes", "on")
+
+
 def load_preferences(path: Path | None = None) -> Preferences:
     path = preferences_path() if path is None else path
     if path.is_symlink() or not path.is_file():
@@ -1298,6 +1303,7 @@ def load_preferences(path: Path | None = None) -> Preferences:
     clipboard = DEFAULT_CLIPBOARD_CLEAR_SECONDS
     auto_lock = DEFAULT_AUTO_LOCK_SECONDS
     confirm_reveal = False
+    lock_on_open = False
     for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -1306,7 +1312,10 @@ def load_preferences(path: Path | None = None) -> Preferences:
         key = key.strip()
         text = text.strip()
         if key == "confirm_before_reveal":
-            confirm_reveal = text.casefold() in ("1", "true", "yes", "on")
+            confirm_reveal = _preference_flag(text)
+            continue
+        if key == "lock_on_open":
+            lock_on_open = _preference_flag(text)
             continue
         try:
             number = int(text)
@@ -1324,11 +1333,12 @@ def load_preferences(path: Path | None = None) -> Preferences:
             auto_lock, AUTO_LOCK_OPTIONS, DEFAULT_AUTO_LOCK_SECONDS
         ),
         confirm_before_reveal=confirm_reveal,
+        lock_on_open=lock_on_open,
     )
 
 
 def store_preferences(prefs: Preferences, path: Path | None = None) -> None:
-    """Remember clipboard, auto-lock, and reveal confirmation. Holds no passwords."""
+    """Remember clipboard, auto-lock, and security toggles. Holds no passwords."""
     path = preferences_path() if path is None else path
     if path.is_symlink():
         raise ValueError("The preferences file is a link.")
@@ -1339,6 +1349,7 @@ def store_preferences(prefs: Preferences, path: Path | None = None) -> None:
         f"clipboard_clear_seconds={prefs.clipboard_clear_seconds}\n"
         f"auto_lock_seconds={prefs.auto_lock_seconds}\n"
         f"confirm_before_reveal={'1' if prefs.confirm_before_reveal else '0'}\n"
+        f"lock_on_open={'1' if prefs.lock_on_open else '0'}\n"
     ).encode("utf-8")
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
     if hasattr(os, "O_NOFOLLOW"):
@@ -2418,6 +2429,7 @@ def main() -> None:
     window.window.show_all()
     window.show_section(window.section)
     GLib.idle_add(window.maybe_show_onboarding)
+    GLib.idle_add(window.maybe_prompt_lock_on_open)
     Gtk.main()
 
 
@@ -2626,6 +2638,12 @@ class PasswordWindow:
         )
         self._persist_preferences()
 
+    def _on_lock_on_open_toggled(self, button) -> None:
+        self.preferences = replace(
+            self.preferences, lock_on_open=bool(button.get_active())
+        )
+        self._persist_preferences()
+
     def on_lock_now(self, *_args) -> None:
         """Lock the vault immediately from Settings when it is unlocked."""
         self._note_activity()
@@ -2652,6 +2670,23 @@ class PasswordWindow:
             return False
         self._onboarding_scheduled = True
         self._show_onboarding()
+        return False
+
+    def maybe_prompt_lock_on_open(self) -> bool:
+        """When Lock on open is on, ask for the passphrase as soon as the window appears."""
+        if not self.preferences.lock_on_open:
+            return False
+        if self.vault_key is not None or not self.locked:
+            return False
+        if not self._ensure_vault_key():
+            self._update_lock_button()
+            return False
+        self.revealed_names.clear()
+        self._update_lock_button()
+        if self.section == "dashboard":
+            self._refresh_dashboard()
+        else:
+            self._refresh_saved_rows()
         return False
 
     def _show_onboarding(self) -> None:
@@ -3578,6 +3613,7 @@ class PasswordWindow:
                 "Clearing is best-effort and may not reach every app on every system. "
                 "Auto-lock hides saved passwords after the window sits idle. "
                 "Confirm before reveal asks once before showing a saved password. "
+                "Lock on open asks for the passphrase when the app starts (off by default). "
                 "Change passphrase seals the vault under a new passphrase and recovery key."
             ),
             xalign=0,
@@ -3616,6 +3652,13 @@ class PasswordWindow:
         self.confirm_reveal_button.set_halign(gtk.Align.START)
         self.confirm_reveal_button.connect("toggled", self._on_confirm_reveal_toggled)
         security.pack_start(self.confirm_reveal_button, False, False, 0)
+
+        self.lock_on_open_button = self._chip(
+            "Lock on open", self.preferences.lock_on_open
+        )
+        self.lock_on_open_button.set_halign(gtk.Align.START)
+        self.lock_on_open_button.connect("toggled", self._on_lock_on_open_toggled)
+        security.pack_start(self.lock_on_open_button, False, False, 0)
 
         self.lock_now_button = gtk.Button(label="Lock vault now")
         self.lock_now_button.get_style_context().add_class("secondary")

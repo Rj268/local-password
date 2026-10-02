@@ -1147,11 +1147,13 @@ class AppearanceTests(unittest.TestCase):
                 self.assertEqual(defaults.clipboard_clear_seconds, 30)
                 self.assertEqual(defaults.auto_lock_seconds, 300)
                 self.assertFalse(defaults.confirm_before_reveal)
+                self.assertFalse(defaults.lock_on_open)
                 password_app.store_preferences(
                     password_app.Preferences(
                         clipboard_clear_seconds=15,
                         auto_lock_seconds=60,
                         confirm_before_reveal=True,
+                        lock_on_open=True,
                     )
                 )
                 path = password_app.preferences_path()
@@ -1160,14 +1162,17 @@ class AppearanceTests(unittest.TestCase):
                 self.assertEqual(loaded.clipboard_clear_seconds, 15)
                 self.assertEqual(loaded.auto_lock_seconds, 60)
                 self.assertTrue(loaded.confirm_before_reveal)
+                self.assertTrue(loaded.lock_on_open)
                 path.write_text(
-                    "clipboard_clear_seconds=999\nauto_lock_seconds=abc\nconfirm_before_reveal=yes\n",
+                    "clipboard_clear_seconds=999\nauto_lock_seconds=abc\n"
+                    "confirm_before_reveal=yes\nlock_on_open=on\n",
                     encoding="utf-8",
                 )
                 repaired = password_app.load_preferences()
                 self.assertEqual(repaired.clipboard_clear_seconds, 30)
                 self.assertEqual(repaired.auto_lock_seconds, 300)
                 self.assertTrue(repaired.confirm_before_reveal)
+                self.assertTrue(repaired.lock_on_open)
                 path.unlink()
                 path.symlink_to(path.with_name("other"))
                 with self.assertRaises(ValueError):

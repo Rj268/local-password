@@ -1,5 +1,9 @@
 # Release notes
 
+## 1.29.2
+
+- Settings: optional **Lock on open** — when on, ask for the passphrase as soon as the app starts (off by default)
+
 ## 1.29.1
 
 - Settings, Dashboard, and Generate controls scroll on short windows so About and other sections stay reachable
