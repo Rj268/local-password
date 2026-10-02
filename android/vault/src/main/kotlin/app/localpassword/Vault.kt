@@ -330,6 +330,21 @@ object Vault {
         return listOf(renamed) + items.filter { it.name != item.name }
     }
 
+    fun setEntryCategory(
+        items: List<SavedPassword>,
+        item: SavedPassword,
+        category: String,
+        whenStamp: String = utcNow(),
+    ): List<SavedPassword> {
+        if (items.none { it.name == item.name }) {
+            throw VaultException("That saved password is gone.")
+        }
+        val label = cleanCategory(category)
+        if (label == item.category) return items.toList()
+        val updated = item.copy(category = label, modified = whenStamp)
+        return items.map { entry -> if (entry.name == item.name) updated else entry }
+    }
+
     fun removeEntry(items: List<SavedPassword>, item: SavedPassword): List<SavedPassword> {
         if (items.none { it.name == item.name }) {
             throw VaultException("That saved password is gone.")

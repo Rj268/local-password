@@ -58,6 +58,7 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     var historyFor by mutableStateOf<SavedPassword?>(null)
     var editing by mutableStateOf<SavedPassword?>(null)
     var renaming by mutableStateOf<SavedPassword?>(null)
+    var categorizing by mutableStateOf<SavedPassword?>(null)
 
     private var opened: OpenVault? = null
     private var offer: VaultSync.Offer? = null
@@ -553,6 +554,56 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
                 status = "Renamed to $label."
             } catch (exc: VaultException) {
                 error = exc.message ?: "Could not rename that entry."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    fun beginCategory(item: SavedPassword) {
+        error = ""
+        categorizing = item
+    }
+
+    fun cancelCategory() {
+        categorizing = null
+        error = ""
+    }
+
+    fun confirmCategory(category: String) {
+        val currentOpen = opened ?: return
+        val current = categorizing ?: return
+        viewModelScope.launch {
+            busy = true
+            error = ""
+            try {
+                val label = withContext(Dispatchers.Default) { Vault.cleanCategory(category) }
+                if (label == current.category) {
+                    status = if (current.category.isNotEmpty()) {
+                        "${current.name} already uses that category."
+                    } else {
+                        "${current.name} has no category."
+                    }
+                    categorizing = null
+                    return@launch
+                }
+                val next = withContext(Dispatchers.Default) {
+                    Vault.setEntryCategory(currentOpen.items, current, label)
+                }
+                val blob = withContext(Dispatchers.Default) { Vault.seal(currentOpen, next) }
+                writeAtomically(blob)
+                opened = currentOpen.copy(items = next)
+                saved = next
+                unlocked = true
+                categorizing = null
+                val stamped = next.first { it.name == current.name }
+                status = if (stamped.category.isNotEmpty()) {
+                    "Set category on ${stamped.name} to ${stamped.category}."
+                } else {
+                    "Cleared category on ${stamped.name}."
+                }
+            } catch (exc: VaultException) {
+                error = exc.message ?: "Could not update that category."
             } finally {
                 busy = false
             }

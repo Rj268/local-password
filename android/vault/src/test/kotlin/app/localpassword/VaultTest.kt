@@ -217,6 +217,56 @@ class VaultTest {
     }
 
     @Test
+    fun setEntryCategorySetsClearsAndRefusesMissing() {
+        val email = SavedPassword(
+            "Email",
+            "secret-value-here",
+            username = "me",
+            category = "Mail",
+            favorite = true,
+            created = "2020-01-01T00:00:00Z",
+            modified = "2020-02-01T00:00:00Z",
+            lastUsed = "2020-03-01T00:00:00Z",
+        )
+        val bank = SavedPassword("Bank", "other-secret-value")
+        val same = Vault.setEntryCategory(listOf(email, bank), email, "Mail")
+        assertEquals("Mail", same[0].category)
+        assertEquals("2020-02-01T00:00:00Z", same[0].modified)
+        val updated = Vault.setEntryCategory(
+            listOf(email, bank),
+            email,
+            "  Work  ",
+            whenStamp = "2024-05-01T00:00:00Z",
+        )
+        assertEquals("Work", updated[0].category)
+        assertEquals("me", updated[0].username)
+        assert(updated[0].favorite)
+        assertEquals("2020-01-01T00:00:00Z", updated[0].created)
+        assertEquals("2024-05-01T00:00:00Z", updated[0].modified)
+        assertEquals("2020-03-01T00:00:00Z", updated[0].lastUsed)
+        val cleared = Vault.setEntryCategory(
+            updated,
+            updated[0],
+            "   ",
+            whenStamp = "2024-06-01T00:00:00Z",
+        )
+        assertEquals("", cleared[0].category)
+        assertEquals("2024-06-01T00:00:00Z", cleared[0].modified)
+        try {
+            Vault.setEntryCategory(listOf(bank), email, "Mail")
+            throw AssertionError("expected missing entry to fail")
+        } catch (exc: VaultException) {
+            assert(exc.message!!.contains("gone"))
+        }
+        try {
+            Vault.setEntryCategory(listOf(email), email, "x".repeat(41))
+            throw AssertionError("expected long category to fail")
+        } catch (exc: VaultException) {
+            assert(exc.message!!.contains("40 characters"))
+        }
+    }
+
+    @Test
     fun renameEntryChangesNameAndRefusesClash() {
         val email = SavedPassword(
             "Email",

@@ -321,9 +321,9 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
             }
             Text(
                 if (healthBits.isNotEmpty()) {
-                    "Passwords stay masked until you show one. Weak, reused, or stale passwords (unchanged for 180 days) are called out. ${healthBits.joinToString(" · ")}. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Rename changes only the name without opening Edit. Archive hides a row from the main list; Archived shows those rows. Copy URL and Copy notes appear when those fields are set. Notes show without revealing the password. Remove can be undone with Undo."
+                    "Passwords stay masked until you show one. Weak, reused, or stale passwords (unchanged for 180 days) are called out. ${healthBits.joinToString(" · ")}. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Rename changes only the name without opening Edit. Category sets or clears the category without opening Edit. Archive hides a row from the main list; Archived shows those rows. Copy URL and Copy notes appear when those fields are set. Notes show without revealing the password. Remove can be undone with Undo."
                 } else {
-                    "Passwords stay masked until you show one. Weak, reused, or stale passwords (unchanged for 180 days) are called out. Needs attention filters those rows. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Rename changes only the name without opening Edit. Archive hides a row from the main list; Archived shows those rows. Copy URL and Copy notes appear when those fields are set. Notes show without revealing the password. Remove can be undone with Undo."
+                    "Passwords stay masked until you show one. Weak, reused, or stale passwords (unchanged for 180 days) are called out. Needs attention filters those rows. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Rename changes only the name without opening Edit. Category sets or clears the category without opening Edit. Archive hides a row from the main list; Archived shows those rows. Copy URL and Copy notes appear when those fields are set. Notes show without revealing the password. Remove can be undone with Undo."
                 },
                 color = muted,
                 fontSize = 13.sp,
@@ -472,6 +472,9 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
                             TextButton(onClick = { model.beginRename(item) }, enabled = !model.busy) {
                                 Text("Rename", color = Green)
                             }
+                            TextButton(onClick = { model.beginCategory(item) }, enabled = !model.busy) {
+                                Text("Category", color = Green)
+                            }
                             TextButton(onClick = { model.beginEdit(item) }) { Text("Edit", color = Green) }
                             TextButton(onClick = { model.requestRemove(item) }) { Text("Remove", color = Danger) }
                         }
@@ -487,6 +490,15 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
             error = model.error,
             onCancel = { model.cancelRename() },
             onRename = { model.confirmRename(it) },
+        )
+    }
+    model.categorizing?.let { item ->
+        CategoryEntryDialog(
+            item = item,
+            busy = model.busy,
+            error = model.error,
+            onCancel = { model.cancelCategory() },
+            onSave = { model.confirmCategory(it) },
         )
     }
     model.historyFor?.let { item ->
@@ -598,6 +610,47 @@ private fun RenameEntryDialog(
         confirmButton = {
             TextButton(enabled = !busy, onClick = { onRename(name) }) {
                 Text("Rename", color = Green)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel, enabled = !busy) { Text("Cancel") }
+        },
+    )
+}
+
+@Composable
+private fun CategoryEntryDialog(
+    item: SavedPassword,
+    busy: Boolean,
+    error: String,
+    onCancel: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var category by remember(item) { mutableStateOf(item.category) }
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Category") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Category for \"${item.name}\". Leave blank to clear. Other fields stay the same.",
+                    color = Muted,
+                )
+                OutlinedTextField(
+                    value = category,
+                    onValueChange = { category = it },
+                    label = { Text("Category") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (error.isNotEmpty()) {
+                    Text(error, color = Danger)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = !busy, onClick = { onSave(category) }) {
+                Text("Save", color = Green)
             }
         },
         dismissButton = {
