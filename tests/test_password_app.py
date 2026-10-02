@@ -909,6 +909,47 @@ class VaultTests(unittest.TestCase):
             password_app.set_entry_category([email], email, "x" * 41)
         self.assertIn("40 characters", str(raised.exception))
 
+    def test_set_entry_username_sets_clears_and_refuses_missing(self) -> None:
+        email = password_app.SavedPassword(
+            "Email",
+            "secret-value-here",
+            username="me",
+            category="Mail",
+            favorite=True,
+            created="2020-01-01T00:00:00Z",
+            modified="2020-02-01T00:00:00Z",
+            last_used="2020-03-01T00:00:00Z",
+        )
+        bank = password_app.SavedPassword("Bank", "other-secret-value")
+        same = password_app.set_entry_username([email, bank], email, "me")
+        self.assertEqual(same[0].username, "me")
+        self.assertEqual(same[0].modified, "2020-02-01T00:00:00Z")
+        updated = password_app.set_entry_username(
+            [email, bank],
+            email,
+            "  me@example.com  ",
+            when="2024-05-01T00:00:00Z",
+        )
+        self.assertEqual(updated[0].username, "me@example.com")
+        self.assertEqual(updated[0].category, "Mail")
+        self.assertTrue(updated[0].favorite)
+        self.assertEqual(updated[0].created, "2020-01-01T00:00:00Z")
+        self.assertEqual(updated[0].modified, "2024-05-01T00:00:00Z")
+        self.assertEqual(updated[0].last_used, "2020-03-01T00:00:00Z")
+        cleared = password_app.set_entry_username(
+            updated,
+            updated[0],
+            "   ",
+            when="2024-06-01T00:00:00Z",
+        )
+        self.assertEqual(cleared[0].username, "")
+        self.assertEqual(cleared[0].modified, "2024-06-01T00:00:00Z")
+        with self.assertRaises(ValueError):
+            password_app.set_entry_username([bank], email, "other")
+        with self.assertRaises(ValueError) as raised:
+            password_app.set_entry_username([email], email, "x" * 201)
+        self.assertIn("200 characters", str(raised.exception))
+
     def test_upsert_can_rename_and_edit_fields(self) -> None:
         existing = [
             password_app.SavedPassword(

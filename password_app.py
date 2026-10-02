@@ -777,6 +777,24 @@ def set_entry_category(
     return [updated if entry.name == item.name else entry for entry in existing]
 
 
+def set_entry_username(
+    existing: list[SavedPassword],
+    item: SavedPassword,
+    username: str,
+    *,
+    when: str | None = None,
+) -> list[SavedPassword]:
+    """Set or clear username on one entry without opening Edit."""
+    if all(entry.name != item.name for entry in existing):
+        raise ValueError("That saved password is gone.")
+    label = clean_username(username)
+    if label == item.username:
+        return list(existing)
+    stamp = when or utc_now()
+    updated = replace(item, username=label, modified=stamp)
+    return [updated if entry.name == item.name else entry for entry in existing]
+
+
 def remove_entry(existing: list[SavedPassword], item: SavedPassword) -> list[SavedPassword]:
     """Drop one saved entry by name."""
     if all(entry.name != item.name for entry in existing):
@@ -3352,6 +3370,7 @@ class PasswordWindow:
                 "Duplicate copies a row under a new name. "
                 "Rename changes only the name without opening Edit. "
                 "Category sets or clears the category without opening Edit. "
+                "Username sets or clears the username without opening Edit. "
                 "Archive hides a row from the main list; Archived shows those rows. "
                 "Copy login copies username and password together when a username is set. "
                 "Copy URL and Copy notes appear when those fields are set. "
@@ -4093,6 +4112,10 @@ class PasswordWindow:
         category_btn.get_style_context().add_class("secondary")
         category_btn.connect("clicked", lambda *_args, entry=item: self.on_set_category(entry))
         actions.pack_start(category_btn, False, False, 0)
+        username_btn = gtk.Button(label="Username")
+        username_btn.get_style_context().add_class("secondary")
+        username_btn.connect("clicked", lambda *_args, entry=item: self.on_set_username(entry))
+        actions.pack_start(username_btn, False, False, 0)
         edit = gtk.Button(label="Edit")
         edit.get_style_context().add_class("secondary")
         edit.connect("clicked", lambda *_args, entry=item: self.on_edit_entry(entry))
@@ -4393,6 +4416,110 @@ class PasswordWindow:
                 return None
             try:
                 label = clean_category(category_entry.get_text())
+            except ValueError as exc:
+                problem.set_text(str(exc))
+                problem.show()
+                continue
+            dialog.destroy()
+            return label
+
+    def on_set_username(self, item: SavedPassword) -> None:
+        """Set or clear username on a Saved row without opening Edit."""
+        self._note_activity()
+        if self.vault_key is None:
+            self.status.set_text("Saved passwords are locked.")
+            return
+        current = next((entry for entry in self.saved if entry.name == item.name), None)
+        if current is None:
+            self.status.set_text("That saved password is gone.")
+            return
+        new_username = self._username_entry_dialog(current)
+        if new_username is None:
+            return
+        if new_username == current.username:
+            if current.username:
+                message = f"{current.name} already uses that username."
+            else:
+                message = f"{current.name} has no username."
+            self.status.set_text(message)
+            if self.section == "saved":
+                self.manager_message.set_text(message)
+                self.manager_message.show()
+            return
+        try:
+            updated = set_entry_username(self.saved, current, new_username)
+            write_vault(self.vault_key, updated)
+        except ValueError as exc:
+            self.status.set_text(str(exc))
+            if self.section == "saved":
+                self.manager_message.set_text(str(exc))
+                self.manager_message.show()
+            return
+        except OSError:
+            message = "Could not update that username."
+            self.status.set_text(message)
+            if self.section == "saved":
+                self.manager_message.set_text(message)
+                self.manager_message.show()
+            return
+        self.saved = updated
+        stamped = next(entry for entry in updated if entry.name == current.name)
+        if stamped.username:
+            message = f"Set username on {stamped.name} to {stamped.username}."
+        else:
+            message = f"Cleared username on {stamped.name}."
+        self.status.set_text(message)
+        if self.section == "saved":
+            self.manager_message.set_text(message)
+            self.manager_message.show()
+            self._refresh_saved_rows()
+        elif self.section == "dashboard":
+            self._refresh_dashboard()
+
+    def _username_entry_dialog(self, item: SavedPassword) -> str | None:
+        gtk = self.gtk
+        dialog = gtk.Dialog(title="Username", transient_for=self.window, modal=True)
+        self._match_dialog(dialog)
+        dialog.add_button("Cancel", gtk.ResponseType.CANCEL)
+        save = dialog.add_button("Save", gtk.ResponseType.OK)
+        save.get_style_context().add_class("primary")
+        dialog.set_default_response(gtk.ResponseType.OK)
+        content = dialog.get_content_area()
+        content.set_spacing(8)
+        for setter in (
+            content.set_margin_top,
+            content.set_margin_bottom,
+            content.set_margin_start,
+            content.set_margin_end,
+        ):
+            setter(16)
+        hint = gtk.Label(
+            label=f'Username for "{item.name}". Leave blank to clear. Other fields stay the same.',
+            xalign=0,
+        )
+        hint.set_line_wrap(True)
+        hint.get_style_context().add_class("hint")
+        content.pack_start(hint, False, False, 0)
+        caption = gtk.Label(label="Username", xalign=0)
+        content.pack_start(caption, False, False, 0)
+        username_entry = gtk.Entry()
+        username_entry.set_text(item.username)
+        username_entry.set_activates_default(True)
+        content.pack_start(username_entry, False, False, 0)
+        problem = gtk.Label(label="", xalign=0)
+        problem.set_line_wrap(True)
+        problem.get_style_context().add_class("danger")
+        content.pack_start(problem, False, False, 0)
+        dialog.show_all()
+        username_entry.grab_focus()
+        username_entry.select_region(0, -1)
+        while True:
+            response = dialog.run()
+            if response != gtk.ResponseType.OK:
+                dialog.destroy()
+                return None
+            try:
+                label = clean_username(username_entry.get_text())
             except ValueError as exc:
                 problem.set_text(str(exc))
                 problem.show()

@@ -59,6 +59,7 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     var editing by mutableStateOf<SavedPassword?>(null)
     var renaming by mutableStateOf<SavedPassword?>(null)
     var categorizing by mutableStateOf<SavedPassword?>(null)
+    var editingUsername by mutableStateOf<SavedPassword?>(null)
 
     private var opened: OpenVault? = null
     private var offer: VaultSync.Offer? = null
@@ -604,6 +605,56 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (exc: VaultException) {
                 error = exc.message ?: "Could not update that category."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    fun beginUsername(item: SavedPassword) {
+        error = ""
+        editingUsername = item
+    }
+
+    fun cancelUsername() {
+        editingUsername = null
+        error = ""
+    }
+
+    fun confirmUsername(username: String) {
+        val currentOpen = opened ?: return
+        val current = editingUsername ?: return
+        viewModelScope.launch {
+            busy = true
+            error = ""
+            try {
+                val label = withContext(Dispatchers.Default) { Vault.cleanUsername(username) }
+                if (label == current.username) {
+                    status = if (current.username.isNotEmpty()) {
+                        "${current.name} already uses that username."
+                    } else {
+                        "${current.name} has no username."
+                    }
+                    editingUsername = null
+                    return@launch
+                }
+                val next = withContext(Dispatchers.Default) {
+                    Vault.setEntryUsername(currentOpen.items, current, label)
+                }
+                val blob = withContext(Dispatchers.Default) { Vault.seal(currentOpen, next) }
+                writeAtomically(blob)
+                opened = currentOpen.copy(items = next)
+                saved = next
+                unlocked = true
+                editingUsername = null
+                val stamped = next.first { it.name == current.name }
+                status = if (stamped.username.isNotEmpty()) {
+                    "Set username on ${stamped.name} to ${stamped.username}."
+                } else {
+                    "Cleared username on ${stamped.name}."
+                }
+            } catch (exc: VaultException) {
+                error = exc.message ?: "Could not update that username."
             } finally {
                 busy = false
             }

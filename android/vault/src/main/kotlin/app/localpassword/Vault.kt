@@ -345,6 +345,21 @@ object Vault {
         return items.map { entry -> if (entry.name == item.name) updated else entry }
     }
 
+    fun setEntryUsername(
+        items: List<SavedPassword>,
+        item: SavedPassword,
+        username: String,
+        whenStamp: String = utcNow(),
+    ): List<SavedPassword> {
+        if (items.none { it.name == item.name }) {
+            throw VaultException("That saved password is gone.")
+        }
+        val label = cleanUsername(username)
+        if (label == item.username) return items.toList()
+        val updated = item.copy(username = label, modified = whenStamp)
+        return items.map { entry -> if (entry.name == item.name) updated else entry }
+    }
+
     fun removeEntry(items: List<SavedPassword>, item: SavedPassword): List<SavedPassword> {
         if (items.none { it.name == item.name }) {
             throw VaultException("That saved password is gone.")
