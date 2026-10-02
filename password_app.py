@@ -92,7 +92,7 @@ AUTO_LOCK_OPTIONS = (
     (300, "5 minutes"),
     (900, "15 minutes"),
 )
-APP_VERSION = "1.30.4"
+APP_VERSION = "1.30.5"
 THEME_LIGHT = "light"
 THEME_DARK = "dark"
 THEME_SYSTEM = "system"
@@ -2786,6 +2786,7 @@ class PasswordWindow:
             self._update_lock_button()
             return False
         self.revealed_names.clear()
+        self._clear_stale_lock_status()
         self._update_lock_button()
         if self.section == "dashboard":
             self._refresh_dashboard()
@@ -3472,7 +3473,7 @@ class PasswordWindow:
         self.exclude_entry.set_placeholder_text("e.g. $!@")
         self.exclude_entry.set_max_length(generator.MAX_EXCLUDE_LENGTH)
         exclude_hint = gtk.Label(
-            label="Optional. Type characters a site rejects, such as quotes or $.",
+            label="Characters a site rejects. Exclude ambiguous drops 0/O/1/l lookalikes.",
             xalign=0,
         )
         exclude_hint.set_line_wrap(True)
@@ -3481,16 +3482,6 @@ class PasswordWindow:
         exclude_box.pack_start(self.exclude_entry, False, False, 0)
         exclude_box.pack_start(exclude_hint, False, False, 0)
         self.character_box.pack_start(exclude_box, False, False, 0)
-        symbol_hint = gtk.Label(
-            label=(
-                "Symbols include quotes, backticks, and backslashes. "
-                "Exclude ambiguous drops 0, O, o, 1, l, I, and |."
-            ),
-            xalign=0,
-        )
-        symbol_hint.set_line_wrap(True)
-        symbol_hint.get_style_context().add_class("hint")
-        self.character_box.pack_start(symbol_hint, False, False, 0)
 
         self.word_box = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=8)
         self.word_box.set_no_show_all(True)
@@ -3524,10 +3515,7 @@ class PasswordWindow:
         self.capitalize.set_halign(gtk.Align.START)
         self.word_box.pack_start(self.capitalize, False, False, 0)
         word_hint = gtk.Label(
-            label=(
-                "Six EFF words are about 78 bits and easier to type than a long character string. "
-                "Five words stay under the strong line."
-            ),
+            label="Six words are about 78 bits; five stay under the strong line.",
             xalign=0,
         )
         word_hint.set_line_wrap(True)
@@ -3538,14 +3526,7 @@ class PasswordWindow:
         self.count = gtk.SpinButton.new_with_range(1, generator.MAX_PASSWORD_COUNT, 1)
         self.count.set_value(1)
         self.count.set_numeric(True)
-        count_box = self._labeled("Number of passwords", self.count)
-        count_hint = gtk.Label(
-            label="Each password can be named and saved on its own.",
-            xalign=0,
-        )
-        count_hint.get_style_context().add_class("hint")
-        count_box.pack_start(count_hint, False, False, 0)
-        controls.pack_start(count_box, False, False, 0)
+        controls.pack_start(self._labeled("Number of passwords", self.count), False, False, 0)
 
         self.generate_button = gtk.Button(label="Generate")
         self.generate_button.get_style_context().add_class("primary")
@@ -3569,10 +3550,7 @@ class PasswordWindow:
         self.meter.set_fraction(0)
         result.pack_start(self.meter, False, False, 0)
         caption = gtk.Label(
-            label=(
-                "Estimate of search-space size, not a guarantee. "
-                "The bar fills toward 256 bits. Strong starts at 75."
-            ),
+            label="Search-space estimate. Strong starts at about 75 bits.",
             xalign=0,
         )
         caption.set_line_wrap(True)
@@ -3609,12 +3587,8 @@ class PasswordWindow:
         self.name_entry.set_placeholder_text("Email, bank, router")
         self.name_entry.set_max_length(MAX_NAME_LENGTH)
         self.name_entry.connect("activate", self.on_save)
-        name_hint = gtk.Label(label="What this password is for.", xalign=0)
-        name_hint.set_line_wrap(True)
-        name_hint.get_style_context().add_class("hint")
         name_box.pack_start(name_label, False, False, 0)
         name_box.pack_start(self.name_entry, False, False, 0)
-        name_box.pack_start(name_hint, False, False, 0)
 
         actions = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
         actions.set_homogeneous(True)
@@ -3660,11 +3634,6 @@ class PasswordWindow:
         self.batch_scroll.add(self.batch_box)
         result.pack_start(self.batch_scroll, True, True, 0)
         self.batch: list[str] = []
-
-        recovery = gtk.Label(label=PASSPHRASE_LOSS_WARNING, xalign=0)
-        recovery.set_line_wrap(True)
-        recovery.get_style_context().add_class("danger")
-        result.pack_start(recovery, False, False, 0)
 
         self.status = gtk.Label(
             label="Generate a password. Name it, then save it.",
@@ -6115,6 +6084,14 @@ class PasswordWindow:
             self.status.set_text("Could not lock the saved passwords.")
             return False
 
+    def _clear_stale_lock_status(self) -> None:
+        """Drop Generate status text that still says locked after a successful unlock."""
+        if self.status.get_text() in (
+            "Saved passwords are locked.",
+            "Saved passwords locked after sitting idle.",
+        ):
+            self.status.set_text("Generate a password. Name it, then save it.")
+
     def on_lock_toggle(self, _button) -> None:
         if self.vault_key is not None:
             self._lock_saved()
@@ -6123,6 +6100,7 @@ class PasswordWindow:
             self._update_lock_button()
             return
         self.revealed_names.clear()
+        self._clear_stale_lock_status()
         self._update_lock_button()
         if self.section == "dashboard":
             self._refresh_dashboard()

@@ -1,5 +1,9 @@
 # Release notes
 
+## 1.30.5
+
+- Generate declutter: shorter hints, recovery warning only at passphrase prompts, clear stale “locked” status after unlock
+
 ## 1.30.4
 
 - Dashboard locked state: one unlock path (header), hide empty stats and the extra Open vault / unlock hint
