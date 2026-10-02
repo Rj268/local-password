@@ -1,5 +1,9 @@
 # Release notes
 
+## 1.30.4
+
+- Dashboard locked state: one unlock path (header), hide empty stats and the extra Open vault / unlock hint
+
 ## 1.30.3
 
 - Settings declutter: drop the page lede and long section essays; one short line per block, About stays detailed

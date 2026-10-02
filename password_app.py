@@ -92,7 +92,7 @@ AUTO_LOCK_OPTIONS = (
     (300, "5 minutes"),
     (900, "15 minutes"),
 )
-APP_VERSION = "1.30.3"
+APP_VERSION = "1.30.4"
 THEME_LIGHT = "light"
 THEME_DARK = "dark"
 THEME_SYSTEM = "system"
@@ -3276,6 +3276,7 @@ class PasswordWindow:
         status_inner.pack_start(self.dashboard_lock_value, False, False, 0)
         status_inner.pack_start(lock_caption, False, False, 0)
         stats.pack_start(status_card, True, True, 0)
+        self.dashboard_stats = stats
         page.pack_start(stats, False, False, 0)
 
         actions = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
@@ -3285,7 +3286,7 @@ class PasswordWindow:
         self.dashboard_add = gtk.Button(label="Add password")
         self.dashboard_add.get_style_context().add_class("secondary")
         self.dashboard_add.connect("clicked", self.on_add_password)
-        self.dashboard_open_saved = gtk.Button(label="Open vault")
+        self.dashboard_open_saved = gtk.Button(label="Open Saved")
         self.dashboard_open_saved.get_style_context().add_class("secondary")
         self.dashboard_open_saved.connect("clicked", lambda *_: self.show_section("saved"))
         actions.pack_start(self.dashboard_generate, False, False, 0)
@@ -3316,18 +3317,17 @@ class PasswordWindow:
         if self.locked and self.vault_key is None:
             self.dashboard_welcome.set_text("Your vault is locked")
             self.dashboard_lede.set_text(
-                "Enter your passphrase or recovery key to open saved passwords. "
-                "Generate still works while the vault stays locked."
+                "Unlock from the header. Generate still works while the vault stays locked."
             )
-            self.dashboard_count.set_text("—")
-            self.dashboard_favorites.set_text("—")
-            self.dashboard_lock_value.set_text("Locked")
-            self.dashboard_empty.set_text(
-                "Unlock from the header, or open Saved, to see the names you have kept."
-            )
-            self.dashboard_empty.show()
+            # One unlock path (header). Hide empty stats and the extra unlock CTA.
+            self.dashboard_stats.hide()
+            self.dashboard_open_saved.hide()
+            self.dashboard_recent_label.hide()
+            self.dashboard_empty.hide()
             self.dashboard_recent.hide()
             return
+        self.dashboard_stats.show()
+        self.dashboard_open_saved.show()
         active = active_saved_entries(self.saved)
         count = len(active)
         favorites = sum(1 for item in active if item.favorite)
@@ -3345,6 +3345,7 @@ class PasswordWindow:
                 "you already have. A passphrase will lock the vault."
             )
             self.dashboard_empty.show()
+            self.dashboard_recent_label.hide()
             self.dashboard_recent.hide()
             return
         weak_count, reuse_count, stale_count, breached_count, attention_count = (
@@ -3381,6 +3382,7 @@ class PasswordWindow:
             )
         self.dashboard_lock_value.set_text("Unlocked")
         self.dashboard_empty.hide()
+        self.dashboard_recent_label.show()
         self.dashboard_recent.show()
         if any(item.last_used for item in self.saved):
             self.dashboard_recent_label.set_text("Recently used")
