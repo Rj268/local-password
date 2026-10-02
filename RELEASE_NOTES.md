@@ -84,9 +84,7 @@ See `uploads/APPLY_1_28.md`.
 
 ## Still later (not required for daily use)
 
-- Exclude user-chosen characters beyond ambiguous
 - Global header search
 - Sidebar icon navigation
-- Breach checking
 - Signed installers and monetization
 - Independent security review
