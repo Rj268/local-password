@@ -92,7 +92,7 @@ AUTO_LOCK_OPTIONS = (
     (300, "5 minutes"),
     (900, "15 minutes"),
 )
-APP_VERSION = "1.30.5"
+APP_VERSION = "1.31.0"
 THEME_LIGHT = "light"
 THEME_DARK = "dark"
 THEME_SYSTEM = "system"
@@ -3803,16 +3803,24 @@ class PasswordWindow:
             label=(
                 "A local password manager and generator for this computer. "
                 "Passwords stay in an encrypted vault you unlock with a passphrase "
-                "or recovery key. Nothing is uploaded for analytics or advertising. "
-                "Optional breach checks send only a short password-hash prefix to "
-                "Have I Been Pwned — never the password or the vault. "
-                "Read SECURITY.md in the project for known limits before a public release."
+                "or recovery key. No account, analytics, or advertising telemetry."
             ),
             xalign=0,
         )
         about_body.set_line_wrap(True)
         about_body.get_style_context().add_class("hint")
         about.pack_start(about_body, False, False, 0)
+        about_privacy = gtk.Label(
+            label=(
+                "Privacy: the vault stays on this device. Optional breach checks send "
+                "only a short password-hash prefix to Have I Been Pwned — never the "
+                "password or vault. Full text: PRIVACY.md. Limits: SECURITY.md."
+            ),
+            xalign=0,
+        )
+        about_privacy.set_line_wrap(True)
+        about_privacy.get_style_context().add_class("hint")
+        about.pack_start(about_privacy, False, False, 0)
         about_credit = gtk.Label(
             label=(
                 "Passphrases use the EFF large wordlist, created by Joseph Bonneau "

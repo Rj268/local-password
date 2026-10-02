@@ -15,5 +15,9 @@ Saved passwords live in:
 Uninstall from Settings > Apps, or run uninstall.ps1 in the install folder.
 Uninstall removes the app; it does not delete your vault file.
 
+Privacy: no account, no analytics. Optional breach checks send only a short
+hash prefix to Have I Been Pwned — never the password or vault.
+See PRIVACY.md and SECURITY.md in the project (or beside this build when included).
+
 Windows may say it protected your PC. Choose More info, then Run anyway.
 That warning is normal until the .exe is signed with a code-signing certificate.

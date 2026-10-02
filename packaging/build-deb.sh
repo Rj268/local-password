@@ -2,7 +2,7 @@
 # Build an architecture-independent Debian package for the local window.
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-VERSION=1.30.5
+VERSION=1.31.0
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 PKG="$STAGE/local-password"
@@ -20,6 +20,7 @@ install -m 0755 "$ROOT/packaging/random-password-generator" "$PKG/usr/bin/random
 install -m 0644 \
   "$ROOT/password_app.py" \
   "$ROOT/random_password_generator.py" \
+  "$ROOT/vault_sync.py" \
   "$ROOT/eff_large_wordlist.txt" \
   "$ROOT/eff_large_wordlist.LICENSE.txt" \
   "$ROOT/packaging/local-password.svg" \
@@ -29,23 +30,26 @@ install -m 0644 "$ROOT/packaging/local-password.svg" \
   "$PKG/usr/share/icons/hicolor/scalable/apps/local-password.svg"
 install -m 0644 "$ROOT/eff_large_wordlist.LICENSE.txt" \
   "$PKG/usr/share/doc/local-password/eff_large_wordlist.LICENSE.txt"
+install -m 0644 "$ROOT/PRIVACY.md" "$PKG/usr/share/doc/local-password/PRIVACY.md"
+install -m 0644 "$ROOT/SECURITY.md" "$PKG/usr/share/doc/local-password/SECURITY.md"
+install -m 0644 "$ROOT/USER_GUIDE.md" "$PKG/usr/share/doc/local-password/USER_GUIDE.md"
+install -m 0644 "$ROOT/LICENSE" "$PKG/usr/share/doc/local-password/LICENSE"
 
 cat > "$PKG/usr/share/doc/local-password/copyright" <<'EOF'
-Local Password generates a password in a local window.
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 
-The Debian package installs that window. Dark, beside the title, switches the colors.
-Copy places a password on the clipboard.
-Save keeps a named password, locked with a passphrase, after the window closes.
-A recovery key is shown once and can open the vault if the passphrase is lost.
-If both are lost, the saved passwords cannot be recovered.
-Each generated password can be saved on its own. The others stay unsaved.
-A password that was not saved is gone when the window closes.
+Files: *
+Copyright: 2026 Ronnie Samuel
+License: MIT
+ See /usr/share/doc/local-password/LICENSE
 
-The EFF large wordlist is included unmodified.
-Joseph Bonneau and the Electronic Frontier Foundation created it.
-It is used under CC BY 3.0 US.
-https://creativecommons.org/licenses/by/3.0/us/
-The EFF does not endorse this project.
+Files: usr/share/local-password/eff_large_wordlist.txt
+       usr/share/doc/local-password/eff_large_wordlist.LICENSE.txt
+Copyright: Joseph Bonneau and the Electronic Frontier Foundation
+License: CC-BY-3.0-US
+ The EFF large wordlist is included unmodified under CC BY 3.0 US.
+ https://creativecommons.org/licenses/by/3.0/us/
+ The EFF does not endorse this project.
 EOF
 
 cat > "$PKG/DEBIAN/control" <<EOF

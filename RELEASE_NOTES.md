@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.31.0
+
+- Public-release prep: `PRIVACY.md`, `LICENSE` (MIT), `PUBLIC_RELEASE.md` checklist
+- About summarizes the privacy policy; Debian package includes `vault_sync.py` and docs
+- Windows build bundles privacy/security docs and imports `vault_sync` explicitly
+
 ## 1.30.5
 
 - Generate declutter: shorter hints, recovery warning only at passphrase prompts, clear stale “locked” status after unlock

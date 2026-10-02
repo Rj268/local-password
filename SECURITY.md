@@ -1,6 +1,6 @@
 # Security notes for Local Password
 
-Local Password encrypts saved passwords on this computer. It is not a guarantee of absolute security. Treat this document as an honest summary of what the app does and does not do before a public release.
+Local Password encrypts saved passwords on this computer. It is not a guarantee of absolute security. Treat this document as an honest summary of what the app does and does not do.
 
 ## What is protected
 
@@ -20,13 +20,16 @@ Local Password encrypts saved passwords on this computer. It is not a guarantee 
 - Breach checks need a network request to api.pwnedpasswords.com when you choose Check breaches. Turning the machine offline simply means that check cannot run; the vault still works.
 - Strength labels estimate search-space size from length and alphabet (or word count). They are not a proof that a password is safe against every attacker.
 - Losing both the passphrase and the recovery key makes the vault unrecoverable by design. There is no backdoor.
+- This project has not yet published an independent security audit. Treat that as an open item before relying on it for high-risk use.
 
-## Before public distribution
+## Public distribution status
 
-1. Have an independent security review of the vault format, transfer protocol, and desktop/Android clients.
-2. Ship a privacy policy that states there is no analytics or advertising telemetry in the free core.
-3. Code-sign Windows and macOS builds when certificates are available.
-4. Keep recovery and import overwrite warnings visible in the UI.
+See `PUBLIC_RELEASE.md` for the full checklist. In short:
+
+1. Privacy policy: shipped as `PRIVACY.md` and summarized in Settings → About.
+2. Independent security review: still needed before claiming an audit.
+3. Code-sign Windows (and macOS when applicable) when certificates are available.
+4. Recovery and import overwrite warnings remain visible in the UI.
 
 ## Reporting issues
 

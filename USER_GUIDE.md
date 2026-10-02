@@ -23,4 +23,4 @@
 
 ## Privacy
 
-Nothing is uploaded for analytics or advertising. Passwords stay on this computer. See `SECURITY.md` before a public release.
+Nothing is uploaded for analytics or advertising. Passwords stay on this computer. See `PRIVACY.md` and `SECURITY.md`.

@@ -44,8 +44,13 @@ MSYS2_ARG_CONV_EXCL='*' python -m PyInstaller --noconfirm --windowed --onedir --
   --workpath "$WINROOT/build/windows" \
   --specpath "$WINROOT/build/windows" \
   --runtime-hook "$WINROOT/packaging/windows/pyi_rth_gtk.py" \
+  --hidden-import vault_sync \
   --add-data "$WINROOT/eff_large_wordlist.txt;." \
   --add-data "$WINROOT/eff_large_wordlist.LICENSE.txt;." \
+  --add-data "$WINROOT/PRIVACY.md;." \
+  --add-data "$WINROOT/SECURITY.md;." \
+  --add-data "$WINROOT/USER_GUIDE.md;." \
+  --add-data "$WINROOT/LICENSE;." \
   --icon "$WINROOT/packaging/windows/local-password.ico" \
   --add-data "$WINROOT/packaging/local-password.svg;." \
   --add-data "$WINROOT/packaging/windows/local-password.png;." \
