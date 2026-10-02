@@ -92,7 +92,7 @@ AUTO_LOCK_OPTIONS = (
     (300, "5 minutes"),
     (900, "15 minutes"),
 )
-APP_VERSION = "1.30.2"
+APP_VERSION = "1.30.3"
 THEME_LIGHT = "light"
 THEME_DARK = "dark"
 THEME_SYSTEM = "system"
@@ -3677,28 +3677,9 @@ class PasswordWindow:
         heading = gtk.Label(label="Settings", xalign=0)
         heading.get_style_context().add_class("section-title")
         page.pack_start(heading, False, False, 0)
-        lede = gtk.Label(
-            label="Appearance, clipboard and lock timing, passphrase change, and vault file transfer.",
-            xalign=0,
-        )
-        lede.set_line_wrap(True)
-        lede.get_style_context().add_class("hint")
-        page.pack_start(lede, False, False, 0)
-
         appearance = gtk.Label(label="APPEARANCE", xalign=0)
         appearance.get_style_context().add_class("eyebrow")
         page.pack_start(appearance, False, False, 0)
-        appearance_hint = gtk.Label(
-            label=(
-                "Light keeps the warm off-white look. Dark softens the window. "
-                "System follows this computer's theme when it can be read. "
-                "The choice stays on this computer."
-            ),
-            xalign=0,
-        )
-        appearance_hint.set_line_wrap(True)
-        appearance_hint.get_style_context().add_class("hint")
-        page.pack_start(appearance_hint, False, False, 0)
         theme_row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
         self.theme_buttons: dict[str, object] = {}
         for mode, label in (
@@ -3722,16 +3703,7 @@ class PasswordWindow:
         security_label.get_style_context().add_class("eyebrow")
         security.pack_start(security_label, False, False, 0)
         security_hint = gtk.Label(
-            label=(
-                "Clear the clipboard after a copy so a password does not linger. "
-                "Clearing is best-effort and may not reach every app on every system. "
-                "Auto-lock hides saved passwords after the window sits idle. "
-                "Confirm before reveal asks once before showing a saved password. "
-                "Lock on open asks for the passphrase when the app starts (off by default). "
-                "Check breaches on Saved compares password hashes to a public leak list "
-                "using k-anonymity — only a short hash prefix leaves this computer. "
-                "Change passphrase seals the vault under a new passphrase and recovery key."
-            ),
+            label="Clipboard clear is best-effort. Breach checks are on Saved.",
             xalign=0,
         )
         security_hint.set_line_wrap(True)
@@ -3795,13 +3767,7 @@ class PasswordWindow:
         files_label.get_style_context().add_class("eyebrow")
         files.pack_start(files_label, False, False, 0)
         files_hint = gtk.Label(
-            label=(
-                "Export copies the encrypted vault to a file you choose. "
-                "Import vault replaces the vault on this computer with that file. "
-                "Import CSV adds password rows from another manager into the unlocked vault. "
-                "Export CSV writes those rows as plaintext — keep that file private. "
-                "The passphrase is not inside either export."
-            ),
+            label="Vault exports stay encrypted. CSV export is plaintext — keep it private.",
             xalign=0,
         )
         files_hint.set_line_wrap(True)
@@ -3833,11 +3799,7 @@ class PasswordWindow:
         transfer_label.get_style_context().add_class("eyebrow")
         transfer.pack_start(transfer_label, False, False, 0)
         sync_hint = gtk.Label(
-            label=(
-                "Send vault shares the encrypted file with another device on the same Wi-Fi. "
-                "The passphrase stays here. Being on the same network does not by itself "
-                "make the transfer private to you alone."
-            ),
+            label="Moves the encrypted vault on the same Wi-Fi. The passphrase stays here.",
             xalign=0,
         )
         sync_hint.set_line_wrap(True)

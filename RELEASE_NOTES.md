@@ -1,5 +1,9 @@
 # Release notes
 
+## 1.30.3
+
+- Settings declutter: drop the page lede and long section essays; one short line per block, About stays detailed
+
 ## 1.30.2
 
 - EFF wordlist credit lives only in Settings → About; removed the always-on window footer
