@@ -1,5 +1,9 @@
 # Release notes
 
+## 1.29.1
+
+- Settings, Dashboard, and Generate controls scroll on short windows so About and other sections stay reachable
+
 ## 1.29.0
 
 - Generate: **Also exclude** — leave out specific characters a site rejects

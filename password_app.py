@@ -89,7 +89,7 @@ AUTO_LOCK_OPTIONS = (
     (300, "5 minutes"),
     (900, "15 minutes"),
 )
-APP_VERSION = "1.29.0"
+APP_VERSION = "1.29.1"
 THEME_LIGHT = "light"
 THEME_DARK = "dark"
 THEME_SYSTEM = "system"
@@ -2511,22 +2511,22 @@ class PasswordWindow:
         self.settings_tab.connect("clicked", lambda *_args: self.show_section("settings"))
         root.pack_start(nav, False, False, 0)
 
-        dashboard_frame, dashboard_inner = self._card()
+        dashboard_frame, dashboard_shell = self._card()
         self.dashboard_view = dashboard_frame
         self.dashboard_view.set_vexpand(True)
         self.dashboard_view.set_no_show_all(True)
         self.dashboard_view.hide()
         root.pack_start(self.dashboard_view, True, True, 0)
-        self._build_dashboard(dashboard_inner)
+        self._build_dashboard(self._scroll_page(dashboard_shell))
 
         columns = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=14)
         columns.set_vexpand(True)
         self.create_view = columns
         root.pack_start(self.create_view, True, True, 0)
 
-        controls_frame, controls = self._card()
+        controls_frame, controls_shell = self._card()
         columns.pack_start(controls_frame, True, True, 0)
-        self._build_controls(controls)
+        self._build_controls(self._scroll_page(controls_shell))
 
         result_frame, result = self._card()
         columns.pack_start(result_frame, True, True, 0)
@@ -2539,13 +2539,13 @@ class PasswordWindow:
         self.saved_view.hide()
         root.pack_start(self.saved_view, True, True, 0)
 
-        settings_frame, settings_inner = self._card()
+        settings_frame, settings_shell = self._card()
         self.settings_view = settings_frame
         self.settings_view.set_vexpand(True)
         self.settings_view.set_no_show_all(True)
         self.settings_view.hide()
         root.pack_start(self.settings_view, True, True, 0)
-        self._build_settings(settings_inner)
+        self._build_settings(self._scroll_page(settings_shell))
         self.apply_dark()
         self._build_manager(saved_inner)
         self.window.connect("key-press-event", self._note_activity)
@@ -3048,6 +3048,23 @@ class PasswordWindow:
             setter(18)
         outer.pack_start(inner, True, True, 0)
         return outer, inner
+
+    def _scroll_page(self, page):
+        """Wrap page content so short windows can scroll to the bottom."""
+        gtk = self.gtk
+        scroller = gtk.ScrolledWindow()
+        scroller.set_policy(gtk.PolicyType.NEVER, gtk.PolicyType.AUTOMATIC)
+        scroller.set_vexpand(True)
+        scroller.set_hexpand(True)
+        # Keep the scrollbar from covering labels on narrow widths.
+        try:
+            scroller.set_overlay_scrolling(True)
+        except AttributeError:
+            pass
+        inner = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=12)
+        scroller.add(inner)
+        page.pack_start(scroller, True, True, 0)
+        return inner
 
     def _brand_logo(self):
         gtk = self.gtk
