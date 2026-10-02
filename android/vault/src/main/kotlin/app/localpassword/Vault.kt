@@ -360,6 +360,56 @@ object Vault {
         return items.map { entry -> if (entry.name == item.name) updated else entry }
     }
 
+    fun setEntryUrl(
+        items: List<SavedPassword>,
+        item: SavedPassword,
+        url: String,
+        whenStamp: String = utcNow(),
+    ): List<SavedPassword> {
+        if (items.none { it.name == item.name }) {
+            throw VaultException("That saved password is gone.")
+        }
+        val label = cleanUrl(url)
+        if (label == item.url) return items.toList()
+        val updated = item.copy(url = label, modified = whenStamp)
+        return items.map { entry -> if (entry.name == item.name) updated else entry }
+    }
+
+    fun setEntryNotes(
+        items: List<SavedPassword>,
+        item: SavedPassword,
+        notes: String,
+        whenStamp: String = utcNow(),
+    ): List<SavedPassword> {
+        if (items.none { it.name == item.name }) {
+            throw VaultException("That saved password is gone.")
+        }
+        val label = cleanNotes(notes)
+        if (label == item.notes) return items.toList()
+        val updated = item.copy(notes = label, modified = whenStamp)
+        return items.map { entry -> if (entry.name == item.name) updated else entry }
+    }
+
+    val DEFAULT_CATEGORIES: List<String> = listOf(
+        "Personal",
+        "Work",
+        "Banking",
+        "Social Media",
+        "Shopping",
+        "Entertainment",
+        "Other",
+    )
+
+    fun categoryChoices(existing: List<SavedPassword> = emptyList()): List<String> {
+        val labels = DEFAULT_CATEGORIES.toMutableList()
+        for (item in existing) {
+            if (item.category.isNotEmpty() && item.category !in labels) {
+                labels.add(item.category)
+            }
+        }
+        return labels
+    }
+
     fun removeEntry(items: List<SavedPassword>, item: SavedPassword): List<SavedPassword> {
         if (items.none { it.name == item.name }) {
             throw VaultException("That saved password is gone.")

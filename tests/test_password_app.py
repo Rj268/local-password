@@ -950,6 +950,62 @@ class VaultTests(unittest.TestCase):
             password_app.set_entry_username([email], email, "x" * 201)
         self.assertIn("200 characters", str(raised.exception))
 
+    def test_set_entry_url_and_notes_set_clear_and_refuse_missing(self) -> None:
+        email = password_app.SavedPassword(
+            "Email",
+            "secret-value-here",
+            url="https://mail.example",
+            notes="work inbox",
+            created="2020-01-01T00:00:00Z",
+            modified="2020-02-01T00:00:00Z",
+        )
+        bank = password_app.SavedPassword("Bank", "other-secret-value")
+        same = password_app.set_entry_url([email, bank], email, "https://mail.example")
+        self.assertEqual(same[0].url, "https://mail.example")
+        updated = password_app.set_entry_url(
+            [email, bank],
+            email,
+            "  https://new.example  ",
+            when="2024-05-01T00:00:00Z",
+        )
+        self.assertEqual(updated[0].url, "https://new.example")
+        self.assertEqual(updated[0].modified, "2024-05-01T00:00:00Z")
+        cleared = password_app.set_entry_url(
+            updated, updated[0], "  ", when="2024-06-01T00:00:00Z"
+        )
+        self.assertEqual(cleared[0].url, "")
+        noted = password_app.set_entry_notes(
+            [email, bank],
+            email,
+            "  keep private  ",
+            when="2024-07-01T00:00:00Z",
+        )
+        self.assertEqual(noted[0].notes, "keep private")
+        cleared_notes = password_app.set_entry_notes(
+            noted, noted[0], "\n", when="2024-08-01T00:00:00Z"
+        )
+        self.assertEqual(cleared_notes[0].notes, "")
+        with self.assertRaises(ValueError):
+            password_app.set_entry_url([bank], email, "https://x")
+        self.assertEqual(
+            list(password_app.DEFAULT_CATEGORIES),
+            [
+                "Personal",
+                "Work",
+                "Banking",
+                "Social Media",
+                "Shopping",
+                "Entertainment",
+                "Other",
+            ],
+        )
+        self.assertIn(
+            "Custom",
+            password_app.category_choices(
+                [password_app.SavedPassword("X", "secret", category="Custom")]
+            ),
+        )
+
     def test_upsert_can_rename_and_edit_fields(self) -> None:
         existing = [
             password_app.SavedPassword(
@@ -1063,21 +1119,28 @@ class AppearanceTests(unittest.TestCase):
                 defaults = password_app.load_preferences()
                 self.assertEqual(defaults.clipboard_clear_seconds, 30)
                 self.assertEqual(defaults.auto_lock_seconds, 300)
+                self.assertFalse(defaults.confirm_before_reveal)
                 password_app.store_preferences(
-                    password_app.Preferences(clipboard_clear_seconds=15, auto_lock_seconds=60)
+                    password_app.Preferences(
+                        clipboard_clear_seconds=15,
+                        auto_lock_seconds=60,
+                        confirm_before_reveal=True,
+                    )
                 )
                 path = password_app.preferences_path()
                 self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
                 loaded = password_app.load_preferences()
                 self.assertEqual(loaded.clipboard_clear_seconds, 15)
                 self.assertEqual(loaded.auto_lock_seconds, 60)
+                self.assertTrue(loaded.confirm_before_reveal)
                 path.write_text(
-                    "clipboard_clear_seconds=999\nauto_lock_seconds=abc\n",
+                    "clipboard_clear_seconds=999\nauto_lock_seconds=abc\nconfirm_before_reveal=yes\n",
                     encoding="utf-8",
                 )
                 repaired = password_app.load_preferences()
                 self.assertEqual(repaired.clipboard_clear_seconds, 30)
                 self.assertEqual(repaired.auto_lock_seconds, 300)
+                self.assertTrue(repaired.confirm_before_reveal)
                 path.unlink()
                 path.symlink_to(path.with_name("other"))
                 with self.assertRaises(ValueError):
@@ -1107,12 +1170,15 @@ class AppearanceTests(unittest.TestCase):
             try:
                 password_app.install_styles(Gtk, Gdk)
                 window = password_app.PasswordWindow(Gtk, Gdk)
-                self.assertEqual(window.dark_button.get_label(), "Dark    Off")
+                self.assertEqual(window.theme_mode, password_app.THEME_LIGHT)
                 self.assertFalse(window.window.get_style_context().has_class("dark"))
                 window.on_toggle_dark()
-                self.assertEqual(window.dark_button.get_label(), "Dark    On")
+                self.assertEqual(window.theme_mode, password_app.THEME_DARK)
                 self.assertTrue(window.window.get_style_context().has_class("dark"))
                 self.assertTrue(password_app.load_dark_mode())
+                self.assertEqual(password_app.load_appearance_mode(), password_app.THEME_DARK)
+                window.set_theme_mode(password_app.THEME_SYSTEM)
+                self.assertEqual(password_app.load_appearance_mode(), password_app.THEME_SYSTEM)
                 window.window.destroy()
                 while Gtk.events_pending():
                     Gtk.main_iteration_do(False)

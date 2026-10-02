@@ -60,6 +60,8 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     var renaming by mutableStateOf<SavedPassword?>(null)
     var categorizing by mutableStateOf<SavedPassword?>(null)
     var editingUsername by mutableStateOf<SavedPassword?>(null)
+    var editingUrl by mutableStateOf<SavedPassword?>(null)
+    var editingNotes by mutableStateOf<SavedPassword?>(null)
 
     private var opened: OpenVault? = null
     private var offer: VaultSync.Offer? = null
@@ -655,6 +657,106 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
                 }
             } catch (exc: VaultException) {
                 error = exc.message ?: "Could not update that username."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    fun beginUrl(item: SavedPassword) {
+        error = ""
+        editingUrl = item
+    }
+
+    fun cancelUrl() {
+        editingUrl = null
+        error = ""
+    }
+
+    fun confirmUrl(url: String) {
+        val currentOpen = opened ?: return
+        val current = editingUrl ?: return
+        viewModelScope.launch {
+            busy = true
+            error = ""
+            try {
+                val label = withContext(Dispatchers.Default) { Vault.cleanUrl(url) }
+                if (label == current.url) {
+                    status = if (current.url.isNotEmpty()) {
+                        "${current.name} already uses that URL."
+                    } else {
+                        "${current.name} has no URL."
+                    }
+                    editingUrl = null
+                    return@launch
+                }
+                val next = withContext(Dispatchers.Default) {
+                    Vault.setEntryUrl(currentOpen.items, current, label)
+                }
+                val blob = withContext(Dispatchers.Default) { Vault.seal(currentOpen, next) }
+                writeAtomically(blob)
+                opened = currentOpen.copy(items = next)
+                saved = next
+                unlocked = true
+                editingUrl = null
+                val stamped = next.first { it.name == current.name }
+                status = if (stamped.url.isNotEmpty()) {
+                    "Set URL on ${stamped.name}."
+                } else {
+                    "Cleared URL on ${stamped.name}."
+                }
+            } catch (exc: VaultException) {
+                error = exc.message ?: "Could not update that URL."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    fun beginNotes(item: SavedPassword) {
+        error = ""
+        editingNotes = item
+    }
+
+    fun cancelNotes() {
+        editingNotes = null
+        error = ""
+    }
+
+    fun confirmNotes(notes: String) {
+        val currentOpen = opened ?: return
+        val current = editingNotes ?: return
+        viewModelScope.launch {
+            busy = true
+            error = ""
+            try {
+                val label = withContext(Dispatchers.Default) { Vault.cleanNotes(notes) }
+                if (label == current.notes) {
+                    status = if (current.notes.isNotEmpty()) {
+                        "${current.name} already uses those notes."
+                    } else {
+                        "${current.name} has no notes."
+                    }
+                    editingNotes = null
+                    return@launch
+                }
+                val next = withContext(Dispatchers.Default) {
+                    Vault.setEntryNotes(currentOpen.items, current, label)
+                }
+                val blob = withContext(Dispatchers.Default) { Vault.seal(currentOpen, next) }
+                writeAtomically(blob)
+                opened = currentOpen.copy(items = next)
+                saved = next
+                unlocked = true
+                editingNotes = null
+                val stamped = next.first { it.name == current.name }
+                status = if (stamped.notes.isNotEmpty()) {
+                    "Updated notes on ${stamped.name}."
+                } else {
+                    "Cleared notes on ${stamped.name}."
+                }
+            } catch (exc: VaultException) {
+                error = exc.message ?: "Could not update those notes."
             } finally {
                 busy = false
             }

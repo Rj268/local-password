@@ -89,6 +89,20 @@ AUTO_LOCK_OPTIONS = (
     (300, "5 minutes"),
     (900, "15 minutes"),
 )
+APP_VERSION = "1.28.0"
+THEME_LIGHT = "light"
+THEME_DARK = "dark"
+THEME_SYSTEM = "system"
+THEME_OPTIONS = (THEME_LIGHT, THEME_DARK, THEME_SYSTEM)
+DEFAULT_CATEGORIES = (
+    "Personal",
+    "Work",
+    "Banking",
+    "Social Media",
+    "Shopping",
+    "Entertainment",
+    "Other",
+)
 
 STYLES = """
 window.app {
@@ -795,6 +809,42 @@ def set_entry_username(
     return [updated if entry.name == item.name else entry for entry in existing]
 
 
+def set_entry_url(
+    existing: list[SavedPassword],
+    item: SavedPassword,
+    url: str,
+    *,
+    when: str | None = None,
+) -> list[SavedPassword]:
+    """Set or clear website URL on one entry without opening Edit."""
+    if all(entry.name != item.name for entry in existing):
+        raise ValueError("That saved password is gone.")
+    label = clean_url(url)
+    if label == item.url:
+        return list(existing)
+    stamp = when or utc_now()
+    updated = replace(item, url=label, modified=stamp)
+    return [updated if entry.name == item.name else entry for entry in existing]
+
+
+def set_entry_notes(
+    existing: list[SavedPassword],
+    item: SavedPassword,
+    notes: str,
+    *,
+    when: str | None = None,
+) -> list[SavedPassword]:
+    """Set or clear notes on one entry without opening Edit."""
+    if all(entry.name != item.name for entry in existing):
+        raise ValueError("That saved password is gone.")
+    label = clean_notes(notes)
+    if label == item.notes:
+        return list(existing)
+    stamp = when or utc_now()
+    updated = replace(item, notes=label, modified=stamp)
+    return [updated if entry.name == item.name else entry for entry in existing]
+
+
 def remove_entry(existing: list[SavedPassword], item: SavedPassword) -> list[SavedPassword]:
     """Drop one saved entry by name."""
     if all(entry.name != item.name for entry in existing):
@@ -1088,26 +1138,114 @@ def saved_passwords_path() -> Path:
 
 
 def appearance_path() -> Path:
-    """This computer's light or dark choice. It holds no passwords."""
+    """This computer's light, dark, or system theme choice. It holds no passwords."""
     return data_directory() / "local-password" / "appearance"
 
 
-def load_dark_mode(path: Path | None = None) -> bool:
-    path = appearance_path() if path is None else path
+def onboarding_path() -> Path:
+    """Marks that the short first-run tour was finished or skipped."""
+    return data_directory() / "local-password" / "onboarding"
+
+
+def load_onboarding_done(path: Path | None = None) -> bool:
+    path = onboarding_path() if path is None else path
     if path.is_symlink() or not path.is_file():
         return False
-    return path.read_text(encoding="utf-8").strip() == "dark"
+    return path.read_text(encoding="utf-8").strip().casefold() == "done"
 
 
-def store_appearance(dark: bool, path: Path | None = None) -> None:
-    """Remember Dark on this computer. The file is readable only by this user."""
+def store_onboarding_done(path: Path | None = None) -> None:
+    path = onboarding_path() if path is None else path
+    if path.is_symlink():
+        raise ValueError("The onboarding file is a link.")
+    directory = path.parent
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(directory, 0o700)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        os.write(descriptor, b"done\n")
+    finally:
+        os.close(descriptor)
+    os.chmod(path, 0o600)
+
+
+def system_prefers_dark() -> bool:
+    """Best-effort read of the desktop or Windows app theme."""
+    if sys.platform == "win32":
+        try:
+            import winreg
+
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+            ) as key:
+                value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+            return int(value) == 0
+        except Exception:
+            return False
+    try:
+        scheme = subprocess.run(
+            ["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=1,
+        )
+        if scheme.returncode == 0 and "dark" in scheme.stdout.casefold():
+            return True
+        theme = subprocess.run(
+            ["gsettings", "get", "org.gnome.desktop.interface", "gtk-theme"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=1,
+        )
+        if theme.returncode == 0 and "dark" in theme.stdout.casefold():
+            return True
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return False
+
+
+def load_appearance_mode(path: Path | None = None) -> str:
+    path = appearance_path() if path is None else path
+    if path.is_symlink() or not path.is_file():
+        return THEME_LIGHT
+    text = path.read_text(encoding="utf-8").strip().casefold()
+    if text in THEME_OPTIONS:
+        return text
+    return THEME_LIGHT
+
+
+def resolve_dark_mode(mode: str | None = None) -> bool:
+    chosen = load_appearance_mode() if mode is None else mode
+    if chosen == THEME_DARK:
+        return True
+    if chosen == THEME_SYSTEM:
+        return system_prefers_dark()
+    return False
+
+
+def load_dark_mode(path: Path | None = None) -> bool:
+    """True when the resolved theme is dark. Kept for older call sites and tests."""
+    return resolve_dark_mode(load_appearance_mode(path))
+
+
+def store_appearance_mode(mode: str, path: Path | None = None) -> None:
+    """Remember light, dark, or system on this computer. The file holds no passwords."""
+    chosen = mode.casefold().strip()
+    if chosen not in THEME_OPTIONS:
+        raise ValueError("Choose light, dark, or system.")
     path = appearance_path() if path is None else path
     if path.is_symlink():
         raise ValueError("The appearance file is a link.")
     directory = path.parent
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(directory, 0o700)
-    payload = b"dark\n" if dark else b"light\n"
+    payload = f"{chosen}\n".encode("utf-8")
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
@@ -1119,12 +1257,18 @@ def store_appearance(dark: bool, path: Path | None = None) -> None:
     os.chmod(path, 0o600)
 
 
+def store_appearance(dark: bool, path: Path | None = None) -> None:
+    """Remember Dark on this computer. The file is readable only by this user."""
+    store_appearance_mode(THEME_DARK if dark else THEME_LIGHT, path=path)
+
+
 @dataclass(frozen=True)
 class Preferences:
     """Security choices that stay on this computer. They hold no passwords."""
 
     clipboard_clear_seconds: int = DEFAULT_CLIPBOARD_CLEAR_SECONDS
     auto_lock_seconds: int = DEFAULT_AUTO_LOCK_SECONDS
+    confirm_before_reveal: bool = False
 
 
 def preferences_path() -> Path:
@@ -1142,6 +1286,7 @@ def load_preferences(path: Path | None = None) -> Preferences:
         return Preferences()
     clipboard = DEFAULT_CLIPBOARD_CLEAR_SECONDS
     auto_lock = DEFAULT_AUTO_LOCK_SECONDS
+    confirm_reveal = False
     for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -1149,6 +1294,9 @@ def load_preferences(path: Path | None = None) -> Preferences:
         key, text = line.split("=", 1)
         key = key.strip()
         text = text.strip()
+        if key == "confirm_before_reveal":
+            confirm_reveal = text.casefold() in ("1", "true", "yes", "on")
+            continue
         try:
             number = int(text)
         except ValueError:
@@ -1164,11 +1312,12 @@ def load_preferences(path: Path | None = None) -> Preferences:
         auto_lock_seconds=_normalize_choice(
             auto_lock, AUTO_LOCK_OPTIONS, DEFAULT_AUTO_LOCK_SECONDS
         ),
+        confirm_before_reveal=confirm_reveal,
     )
 
 
 def store_preferences(prefs: Preferences, path: Path | None = None) -> None:
-    """Remember clipboard and auto-lock choices. The file is readable only by this user."""
+    """Remember clipboard, auto-lock, and reveal confirmation. Holds no passwords."""
     path = preferences_path() if path is None else path
     if path.is_symlink():
         raise ValueError("The preferences file is a link.")
@@ -1178,6 +1327,7 @@ def store_preferences(prefs: Preferences, path: Path | None = None) -> None:
     payload = (
         f"clipboard_clear_seconds={prefs.clipboard_clear_seconds}\n"
         f"auto_lock_seconds={prefs.auto_lock_seconds}\n"
+        f"confirm_before_reveal={'1' if prefs.confirm_before_reveal else '0'}\n"
     ).encode("utf-8")
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
     if hasattr(os, "O_NOFOLLOW"):
@@ -1188,6 +1338,16 @@ def store_preferences(prefs: Preferences, path: Path | None = None) -> None:
     finally:
         os.close(descriptor)
     os.chmod(path, 0o600)
+
+
+def category_choices(existing: list[SavedPassword] | None = None) -> list[str]:
+    """Default categories plus any custom labels already in the vault."""
+    labels = list(DEFAULT_CATEGORIES)
+    if existing:
+        for item in existing:
+            if item.category and item.category not in labels:
+                labels.append(item.category)
+    return labels
 
 
 def is_vault_blob(blob: bytes) -> bool:
@@ -2240,10 +2400,13 @@ def main() -> None:
 
     install_styles(Gtk, Gdk)
 
+    from gi.repository import GLib
+
     window = PasswordWindow(Gtk, Gdk)
     window.window.connect("destroy", Gtk.main_quit)
     window.window.show_all()
     window.show_section(window.section)
+    GLib.idle_add(window.maybe_show_onboarding)
     Gtk.main()
 
 
@@ -2275,7 +2438,8 @@ class PasswordWindow:
         root.set_margin_end(20)
         self.window.add(root)
 
-        self.dark = load_dark_mode()
+        self.theme_mode = load_appearance_mode()
+        self.dark = resolve_dark_mode(self.theme_mode)
         self.preferences = load_preferences()
         self.revealed_names: set[str] = set()
         self._clipboard_generation = 0
@@ -2283,6 +2447,7 @@ class PasswordWindow:
         self._clipboard_clear_source = 0
         self._last_activity = time.monotonic()
         self._auto_lock_source = 0
+        self._onboarding_scheduled = False
 
         header = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=6)
         header.get_style_context().add_class("header-bar")
@@ -2388,13 +2553,35 @@ class PasswordWindow:
         footer.get_style_context().add_class("footer")
         root.pack_start(footer, False, False, 0)
 
-    def on_toggle_dark(self, *_args) -> None:
-        self.dark = not self.dark
+    def set_theme_mode(self, mode: str) -> None:
+        chosen = mode.casefold().strip()
+        if chosen not in THEME_OPTIONS:
+            return
+        self.theme_mode = chosen
+        self.dark = resolve_dark_mode(chosen)
         self.apply_dark()
+        self._style_theme_buttons()
         try:
-            store_appearance(self.dark)
+            store_appearance_mode(chosen)
         except OSError:
             pass
+
+    def on_toggle_dark(self, *_args) -> None:
+        """Legacy toggle: flips between light and dark (clears system)."""
+        self.set_theme_mode(THEME_LIGHT if self.dark else THEME_DARK)
+
+    def _style_theme_buttons(self) -> None:
+        buttons = getattr(self, "theme_buttons", None)
+        if not buttons:
+            return
+        for mode, button in buttons.items():
+            style = button.get_style_context()
+            if mode == self.theme_mode:
+                style.add_class("on")
+                style.remove_class("off")
+            else:
+                style.add_class("off")
+                style.remove_class("on")
 
     def _persist_preferences(self) -> None:
         try:
@@ -2421,6 +2608,79 @@ class PasswordWindow:
         self._persist_preferences()
         self._note_activity()
         self._arm_auto_lock_timer()
+
+    def _on_confirm_reveal_toggled(self, button) -> None:
+        self.preferences = replace(
+            self.preferences, confirm_before_reveal=bool(button.get_active())
+        )
+        self._persist_preferences()
+
+    def on_lock_now(self, *_args) -> None:
+        """Lock the vault immediately from Settings when it is unlocked."""
+        self._note_activity()
+        if self.vault_key is None:
+            self._sync_note("The vault is already locked, or there is no vault yet.")
+            return
+        self._lock_saved()
+        self._sync_note("Vault locked.")
+
+    def on_clear_search(self, *_args) -> None:
+        self.find_entry.set_text("")
+        self._refresh_saved_rows()
+
+    def _show_clear_search(self) -> None:
+        self.clear_search_button.set_no_show_all(False)
+        self.clear_search_button.show()
+
+    def _hide_clear_search(self) -> None:
+        self.clear_search_button.hide()
+        self.clear_search_button.set_no_show_all(True)
+
+    def maybe_show_onboarding(self) -> bool:
+        if self._onboarding_scheduled or load_onboarding_done():
+            return False
+        self._onboarding_scheduled = True
+        self._show_onboarding()
+        return False
+
+    def _show_onboarding(self) -> None:
+        gtk = self.gtk
+        dialog = gtk.Dialog(title="Welcome to Local Password", transient_for=self.window, modal=True)
+        self._match_dialog(dialog)
+        skip = dialog.add_button("Skip", gtk.ResponseType.CANCEL)
+        skip.get_style_context().add_class("secondary")
+        start = dialog.add_button("Get started", gtk.ResponseType.OK)
+        start.get_style_context().add_class("primary")
+        dialog.set_default_response(gtk.ResponseType.OK)
+        content = dialog.get_content_area()
+        content.set_spacing(10)
+        for setter in (
+            content.set_margin_top,
+            content.set_margin_bottom,
+            content.set_margin_start,
+            content.set_margin_end,
+        ):
+            setter(18)
+        title = gtk.Label(label="Passwords stay on this computer", xalign=0)
+        title.get_style_context().add_class("section-title")
+        content.pack_start(title, False, False, 0)
+        for line in (
+            "Generate a strong password or word passphrase, then save it under a name.",
+            "The first save asks for a passphrase and shows a recovery key once. Write that key down.",
+            "Saved passwords stay encrypted. Unlock with the passphrase or recovery key.",
+            "Use Dashboard for shortcuts, Saved to search and manage, and Settings for backups.",
+        ):
+            label = gtk.Label(label=line, xalign=0)
+            label.set_line_wrap(True)
+            label.get_style_context().add_class("hint")
+            content.pack_start(label, False, False, 0)
+        dialog.show_all()
+        dialog.run()
+        dialog.destroy()
+        try:
+            store_onboarding_done()
+        except OSError:
+            pass
 
     def _note_activity(self, *_args) -> bool:
         self._last_activity = time.monotonic()
@@ -2751,16 +3011,11 @@ class PasswordWindow:
 
     def apply_dark(self) -> None:
         context = self.window.get_style_context()
-        button = self.dark_button.get_style_context()
         if self.dark:
             context.add_class("dark")
-            button.remove_class("off")
-            button.add_class("on")
         else:
             context.remove_class("dark")
-            button.remove_class("on")
-            button.add_class("off")
-        self.dark_button.set_label(chip_label("Dark", self.dark))
+        self._style_theme_buttons()
 
     def _match_dialog(self, dialog) -> None:
         context = dialog.get_style_context()
@@ -2833,6 +3088,17 @@ class PasswordWindow:
         saved_inner.pack_start(saved_caption, False, False, 0)
         stats.pack_start(saved_card, True, True, 0)
 
+        favorite_card, favorite_inner = self._card()
+        favorite_card.get_style_context().remove_class("card")
+        favorite_card.get_style_context().add_class("entry-card")
+        self.dashboard_favorites = gtk.Label(label="0", xalign=0)
+        self.dashboard_favorites.get_style_context().add_class("stat-value")
+        favorite_caption = gtk.Label(label="Favorites", xalign=0)
+        favorite_caption.get_style_context().add_class("stat-label")
+        favorite_inner.pack_start(self.dashboard_favorites, False, False, 0)
+        favorite_inner.pack_start(favorite_caption, False, False, 0)
+        stats.pack_start(favorite_card, True, True, 0)
+
         status_card, status_inner = self._card()
         status_card.get_style_context().remove_class("card")
         status_card.get_style_context().add_class("entry-card")
@@ -2849,10 +3115,14 @@ class PasswordWindow:
         self.dashboard_generate = gtk.Button(label="Generate password")
         self.dashboard_generate.get_style_context().add_class("primary")
         self.dashboard_generate.connect("clicked", lambda *_: self.show_section("generate"))
+        self.dashboard_add = gtk.Button(label="Add password")
+        self.dashboard_add.get_style_context().add_class("secondary")
+        self.dashboard_add.connect("clicked", self.on_add_password)
         self.dashboard_open_saved = gtk.Button(label="Open vault")
         self.dashboard_open_saved.get_style_context().add_class("secondary")
         self.dashboard_open_saved.connect("clicked", lambda *_: self.show_section("saved"))
         actions.pack_start(self.dashboard_generate, False, False, 0)
+        actions.pack_start(self.dashboard_add, False, False, 0)
         actions.pack_start(self.dashboard_open_saved, False, False, 0)
         page.pack_start(actions, False, False, 0)
 
@@ -2883,6 +3153,7 @@ class PasswordWindow:
                 "Generate still works while the vault stays locked."
             )
             self.dashboard_count.set_text("—")
+            self.dashboard_favorites.set_text("—")
             self.dashboard_lock_value.set_text("Locked")
             self.dashboard_empty.set_text(
                 "Unlock from the header, or open Saved, to see the names you have kept."
@@ -2892,7 +3163,9 @@ class PasswordWindow:
             return
         active = active_saved_entries(self.saved)
         count = len(active)
+        favorites = sum(1 for item in active if item.favorite)
         self.dashboard_count.set_text(str(count))
+        self.dashboard_favorites.set_text(str(favorites))
         if count == 0:
             self.dashboard_welcome.set_text("Welcome to Local Password")
             self.dashboard_lede.set_text(
@@ -2901,8 +3174,8 @@ class PasswordWindow:
             )
             self.dashboard_lock_value.set_text("No vault" if not vault_path().is_file() else "Empty")
             self.dashboard_empty.set_text(
-                "No passwords are saved yet. Open Generate, create one, give it a name, "
-                "then Save. A passphrase will lock the vault."
+                "No passwords are saved yet. Generate one, or Add password for an account "
+                "you already have. A passphrase will lock the vault."
             )
             self.dashboard_empty.show()
             self.dashboard_recent.hide()
@@ -3224,17 +3497,32 @@ class PasswordWindow:
         appearance.get_style_context().add_class("eyebrow")
         page.pack_start(appearance, False, False, 0)
         appearance_hint = gtk.Label(
-            label="Dark mode softens the window. The choice stays on this computer.",
+            label=(
+                "Light keeps the warm off-white look. Dark softens the window. "
+                "System follows this computer's theme when it can be read. "
+                "The choice stays on this computer."
+            ),
             xalign=0,
         )
         appearance_hint.set_line_wrap(True)
         appearance_hint.get_style_context().add_class("hint")
         page.pack_start(appearance_hint, False, False, 0)
-        self.dark_button = gtk.Button(label=chip_label("Dark", self.dark))
-        self.dark_button.get_style_context().add_class("chip")
-        self.dark_button.set_halign(gtk.Align.START)
-        self.dark_button.connect("clicked", self.on_toggle_dark)
-        page.pack_start(self.dark_button, False, False, 0)
+        theme_row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
+        self.theme_buttons: dict[str, object] = {}
+        for mode, label in (
+            (THEME_LIGHT, "Light"),
+            (THEME_DARK, "Dark"),
+            (THEME_SYSTEM, "System"),
+        ):
+            button = gtk.Button(label=label)
+            button.get_style_context().add_class("mode")
+            button.connect("clicked", lambda *_args, chosen=mode: self.set_theme_mode(chosen))
+            theme_row.pack_start(button, False, False, 0)
+            self.theme_buttons[mode] = button
+        # Keep a dark_button alias for older tests that flip Dark.
+        self.dark_button = self.theme_buttons[THEME_DARK]
+        page.pack_start(theme_row, False, False, 0)
+        self._style_theme_buttons()
 
         security = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=10)
         security.get_style_context().add_class("settings-block")
@@ -3244,7 +3532,9 @@ class PasswordWindow:
         security_hint = gtk.Label(
             label=(
                 "Clear the clipboard after a copy so a password does not linger. "
+                "Clearing is best-effort and may not reach every app on every system. "
                 "Auto-lock hides saved passwords after the window sits idle. "
+                "Confirm before reveal asks once before showing a saved password. "
                 "Change passphrase seals the vault under a new passphrase and recovery key."
             ),
             xalign=0,
@@ -3276,6 +3566,19 @@ class PasswordWindow:
         self.auto_lock_combo.connect("changed", self._on_auto_lock_changed)
         lock_row.pack_start(self.auto_lock_combo, False, False, 0)
         security.pack_start(lock_row, False, False, 0)
+
+        self.confirm_reveal_button = self._chip(
+            "Confirm before reveal", self.preferences.confirm_before_reveal
+        )
+        self.confirm_reveal_button.set_halign(gtk.Align.START)
+        self.confirm_reveal_button.connect("toggled", self._on_confirm_reveal_toggled)
+        security.pack_start(self.confirm_reveal_button, False, False, 0)
+
+        self.lock_now_button = gtk.Button(label="Lock vault now")
+        self.lock_now_button.get_style_context().add_class("secondary")
+        self.lock_now_button.set_halign(gtk.Align.START)
+        self.lock_now_button.connect("clicked", self.on_lock_now)
+        security.pack_start(self.lock_now_button, False, False, 0)
 
         self.change_passphrase_button = gtk.Button(label="Change passphrase")
         self.change_passphrase_button.get_style_context().add_class("secondary")
@@ -3353,6 +3656,29 @@ class PasswordWindow:
         transfer.pack_start(self.sync_status, False, False, 0)
         page.pack_start(transfer, False, False, 0)
 
+        about = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=10)
+        about.get_style_context().add_class("settings-block")
+        about_label = gtk.Label(label="ABOUT", xalign=0)
+        about_label.get_style_context().add_class("eyebrow")
+        about.pack_start(about_label, False, False, 0)
+        about_title = gtk.Label(label=f"Local Password {APP_VERSION}", xalign=0)
+        about_title.get_style_context().add_class("saved-name")
+        about.pack_start(about_title, False, False, 0)
+        about_body = gtk.Label(
+            label=(
+                "A local password manager and generator for this computer. "
+                "Passwords stay in an encrypted vault you unlock with a passphrase "
+                "or recovery key. Nothing is uploaded for analytics or advertising. "
+                "Read SECURITY.md in the project for known limits before a public release. "
+                "Passphrases use the EFF large wordlist (CC BY 3.0 US)."
+            ),
+            xalign=0,
+        )
+        about_body.set_line_wrap(True)
+        about_body.get_style_context().add_class("hint")
+        about.pack_start(about_body, False, False, 0)
+        page.pack_start(about, False, False, 0)
+
     def _build_manager(self, page) -> None:
         gtk = self.gtk
         self.saved_heading = gtk.Label(label="Saved", xalign=0)
@@ -3369,8 +3695,7 @@ class PasswordWindow:
                 "Favorite stars or clears a row without opening Edit. "
                 "Duplicate copies a row under a new name. "
                 "Rename changes only the name without opening Edit. "
-                "Category sets or clears the category without opening Edit. "
-                "Username sets or clears the username without opening Edit. "
+                "Category, Username, URL, and Notes can be set without opening Edit. "
                 "Archive hides a row from the main list; Archived shows those rows. "
                 "Copy login copies username and password together when a username is set. "
                 "Copy URL and Copy notes appear when those fields are set. "
@@ -3382,6 +3707,18 @@ class PasswordWindow:
         saved_lede.set_line_wrap(True)
         saved_lede.get_style_context().add_class("hint")
         page.pack_start(saved_lede, False, False, 0)
+
+        saved_actions = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
+        self.add_password_button = gtk.Button(label="Add password")
+        self.add_password_button.get_style_context().add_class("secondary")
+        self.add_password_button.connect("clicked", self.on_add_password)
+        self.saved_generate_button = gtk.Button(label="Generate password")
+        self.saved_generate_button.get_style_context().add_class("primary")
+        self.saved_generate_button.connect("clicked", lambda *_: self.show_section("generate"))
+        saved_actions.pack_start(self.saved_generate_button, False, False, 0)
+        saved_actions.pack_start(self.add_password_button, False, False, 0)
+        page.pack_start(saved_actions, False, False, 0)
+        self.saved_actions_row = saved_actions
 
         self.find_entry = gtk.Entry()
         self.find_entry.set_placeholder_text("Search name, username, URL, notes, category")
@@ -3434,6 +3771,12 @@ class PasswordWindow:
         self.manager_message.set_hexpand(True)
         self.manager_message.get_style_context().add_class("hint")
         message_row.pack_start(self.manager_message, True, True, 0)
+        self.clear_search_button = gtk.Button(label="Clear search")
+        self.clear_search_button.get_style_context().add_class("secondary")
+        self.clear_search_button.set_no_show_all(True)
+        self.clear_search_button.hide()
+        self.clear_search_button.connect("clicked", self.on_clear_search)
+        message_row.pack_start(self.clear_search_button, False, False, 0)
         self.undo_remove_button = gtk.Button(label="Undo")
         self.undo_remove_button.get_style_context().add_class("secondary")
         self.undo_remove_button.set_no_show_all(True)
@@ -3725,6 +4068,12 @@ class PasswordWindow:
         secret.set_selectable(False)
         secret.set_max_width_chars(42)
         secret.get_style_context().add_class("saved-name")
+        bits = entry_strength_bits(password)
+        tier = generator.strength_tier(bits)
+        strength = gtk.Label(label=f"{tier} · about {round(bits)} bits", xalign=0)
+        strength.get_style_context().add_class("strength")
+        key = tier.casefold().replace(" ", "-")
+        strength.get_style_context().add_class(key)
         name = gtk.Entry()
         name.set_placeholder_text("Name this one")
         name.set_max_length(MAX_NAME_LENGTH)
@@ -3735,6 +4084,21 @@ class PasswordWindow:
 
         def current_password() -> str:
             return state["password"]
+
+        def paint_strength() -> None:
+            value = entry_strength_bits(state["password"])
+            label = generator.strength_tier(value)
+            strength.set_text(f"{label} · about {round(value)} bits")
+            style = strength.get_style_context()
+            for old in (
+                "very-weak",
+                "weak",
+                "fair",
+                "strong",
+                "very-strong",
+            ):
+                style.remove_class(old)
+            style.add_class(label.casefold().replace(" ", "-"))
 
         def paint_secret() -> None:
             if state["revealed"]:
@@ -3765,6 +4129,7 @@ class PasswordWindow:
             self.batch[index] = fresh
             self.current = "\n".join(self.batch)
             paint_secret()
+            paint_strength()
             note.set_text("Regenerated.")
             self.status.set_text("Regenerated one password. Name and save the ones you want.")
 
@@ -3790,6 +4155,7 @@ class PasswordWindow:
         for button in (show, copy, again, save):
             actions.pack_start(button, True, True, 0)
         row.pack_start(secret, False, False, 0)
+        row.pack_start(strength, False, False, 0)
         row.pack_start(name, False, False, 0)
         row.pack_start(actions, False, False, 0)
         row.pack_start(note, False, False, 0)
@@ -3900,7 +4266,9 @@ class PasswordWindow:
             self.find_entry.hide()
             self.filter_row.hide()
             self.sort_row.hide()
+            self.saved_actions_row.hide()
             self.saved_scroll.hide()
+            self._hide_clear_search()
             self.saved_heading.set_text("Saved")
             self.saved_heading.show()
             self.manager_message.set_text(
@@ -3912,12 +4280,14 @@ class PasswordWindow:
         self.find_entry.show()
         self.filter_row.show()
         self.sort_row.show()
+        self.saved_actions_row.show()
         if not self.saved:
             self.saved_scroll.hide()
+            self._hide_clear_search()
             self.saved_heading.set_text("Saved")
             self.saved_heading.show()
             self.manager_message.set_text(
-                "Nothing saved yet. Open Generate, create a password, name it, and save it."
+                "Nothing saved yet. Generate a password, or Add password for an account you already use."
             )
             self.manager_message.show()
             return
@@ -3964,9 +4334,14 @@ class PasswordWindow:
             else:
                 self.manager_message.set_text("No saved password matches that search.")
             self.manager_message.show()
+            if query.strip():
+                self._show_clear_search()
+            else:
+                self._hide_clear_search()
             return
         self.manager_message.set_text("")
         self.manager_message.hide()
+        self._hide_clear_search()
         self.saved_scroll.show()
         for item in matches:
             self.saved_box.pack_start(self._saved_row(item), False, False, 0)
@@ -4116,6 +4491,14 @@ class PasswordWindow:
         username_btn.get_style_context().add_class("secondary")
         username_btn.connect("clicked", lambda *_args, entry=item: self.on_set_username(entry))
         actions.pack_start(username_btn, False, False, 0)
+        url_btn = gtk.Button(label="URL")
+        url_btn.get_style_context().add_class("secondary")
+        url_btn.connect("clicked", lambda *_args, entry=item: self.on_set_url(entry))
+        actions.pack_start(url_btn, False, False, 0)
+        notes_btn = gtk.Button(label="Notes")
+        notes_btn.get_style_context().add_class("secondary")
+        notes_btn.connect("clicked", lambda *_args, entry=item: self.on_set_notes(entry))
+        actions.pack_start(notes_btn, False, False, 0)
         edit = gtk.Button(label="Edit")
         edit.get_style_context().add_class("secondary")
         edit.connect("clicked", lambda *_args, entry=item: self.on_edit_entry(entry))
@@ -4390,7 +4773,10 @@ class PasswordWindow:
         ):
             setter(16)
         hint = gtk.Label(
-            label=f'Category for "{item.name}". Leave blank to clear. Other fields stay the same.',
+            label=(
+                f'Category for "{item.name}". Pick a preset or type your own. '
+                "Leave blank to clear. Other fields stay the same."
+            ),
             xalign=0,
         )
         hint.set_line_wrap(True)
@@ -4402,6 +4788,20 @@ class PasswordWindow:
         category_entry.set_text(item.category)
         category_entry.set_activates_default(True)
         content.pack_start(category_entry, False, False, 0)
+        presets = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=6)
+        presets.set_homogeneous(False)
+        for label in category_choices(self.saved):
+            chip = gtk.Button(label=label)
+            chip.get_style_context().add_class("secondary")
+            chip.connect(
+                "clicked",
+                lambda *_args, chosen=label: category_entry.set_text(chosen),
+            )
+            presets.pack_start(chip, False, False, 0)
+        scroller = gtk.ScrolledWindow()
+        scroller.set_policy(gtk.PolicyType.AUTOMATIC, gtk.PolicyType.NEVER)
+        scroller.add(presets)
+        content.pack_start(scroller, False, False, 0)
         problem = gtk.Label(label="", xalign=0)
         problem.set_line_wrap(True)
         problem.get_style_context().add_class("danger")
@@ -4520,6 +4920,220 @@ class PasswordWindow:
                 return None
             try:
                 label = clean_username(username_entry.get_text())
+            except ValueError as exc:
+                problem.set_text(str(exc))
+                problem.show()
+                continue
+            dialog.destroy()
+            return label
+
+    def on_set_url(self, item: SavedPassword) -> None:
+        """Set or clear website URL on a Saved row without opening Edit."""
+        self._note_activity()
+        if self.vault_key is None:
+            self.status.set_text("Saved passwords are locked.")
+            return
+        current = next((entry for entry in self.saved if entry.name == item.name), None)
+        if current is None:
+            self.status.set_text("That saved password is gone.")
+            return
+        new_url = self._url_entry_dialog(current)
+        if new_url is None:
+            return
+        if new_url == current.url:
+            if current.url:
+                message = f"{current.name} already uses that URL."
+            else:
+                message = f"{current.name} has no URL."
+            self.status.set_text(message)
+            if self.section == "saved":
+                self.manager_message.set_text(message)
+                self.manager_message.show()
+            return
+        try:
+            updated = set_entry_url(self.saved, current, new_url)
+            write_vault(self.vault_key, updated)
+        except ValueError as exc:
+            self.status.set_text(str(exc))
+            if self.section == "saved":
+                self.manager_message.set_text(str(exc))
+                self.manager_message.show()
+            return
+        except OSError:
+            message = "Could not update that URL."
+            self.status.set_text(message)
+            if self.section == "saved":
+                self.manager_message.set_text(message)
+                self.manager_message.show()
+            return
+        self.saved = updated
+        stamped = next(entry for entry in updated if entry.name == current.name)
+        if stamped.url:
+            message = f"Set URL on {stamped.name}."
+        else:
+            message = f"Cleared URL on {stamped.name}."
+        self.status.set_text(message)
+        if self.section == "saved":
+            self.manager_message.set_text(message)
+            self.manager_message.show()
+            self._refresh_saved_rows()
+        elif self.section == "dashboard":
+            self._refresh_dashboard()
+
+    def _url_entry_dialog(self, item: SavedPassword) -> str | None:
+        gtk = self.gtk
+        dialog = gtk.Dialog(title="Website URL", transient_for=self.window, modal=True)
+        self._match_dialog(dialog)
+        dialog.add_button("Cancel", gtk.ResponseType.CANCEL)
+        save = dialog.add_button("Save", gtk.ResponseType.OK)
+        save.get_style_context().add_class("primary")
+        dialog.set_default_response(gtk.ResponseType.OK)
+        content = dialog.get_content_area()
+        content.set_spacing(8)
+        for setter in (
+            content.set_margin_top,
+            content.set_margin_bottom,
+            content.set_margin_start,
+            content.set_margin_end,
+        ):
+            setter(16)
+        hint = gtk.Label(
+            label=f'Website for "{item.name}". Leave blank to clear. Other fields stay the same.',
+            xalign=0,
+        )
+        hint.set_line_wrap(True)
+        hint.get_style_context().add_class("hint")
+        content.pack_start(hint, False, False, 0)
+        caption = gtk.Label(label="URL", xalign=0)
+        content.pack_start(caption, False, False, 0)
+        url_entry = gtk.Entry()
+        url_entry.set_text(item.url)
+        url_entry.set_activates_default(True)
+        url_entry.set_placeholder_text("https://example.com")
+        content.pack_start(url_entry, False, False, 0)
+        problem = gtk.Label(label="", xalign=0)
+        problem.set_line_wrap(True)
+        problem.get_style_context().add_class("danger")
+        content.pack_start(problem, False, False, 0)
+        dialog.show_all()
+        url_entry.grab_focus()
+        url_entry.select_region(0, -1)
+        while True:
+            response = dialog.run()
+            if response != gtk.ResponseType.OK:
+                dialog.destroy()
+                return None
+            try:
+                label = clean_url(url_entry.get_text())
+            except ValueError as exc:
+                problem.set_text(str(exc))
+                problem.show()
+                continue
+            dialog.destroy()
+            return label
+
+    def on_set_notes(self, item: SavedPassword) -> None:
+        """Set or clear notes on a Saved row without opening Edit."""
+        self._note_activity()
+        if self.vault_key is None:
+            self.status.set_text("Saved passwords are locked.")
+            return
+        current = next((entry for entry in self.saved if entry.name == item.name), None)
+        if current is None:
+            self.status.set_text("That saved password is gone.")
+            return
+        new_notes = self._notes_entry_dialog(current)
+        if new_notes is None:
+            return
+        if new_notes == current.notes:
+            if current.notes:
+                message = f"{current.name} already uses those notes."
+            else:
+                message = f"{current.name} has no notes."
+            self.status.set_text(message)
+            if self.section == "saved":
+                self.manager_message.set_text(message)
+                self.manager_message.show()
+            return
+        try:
+            updated = set_entry_notes(self.saved, current, new_notes)
+            write_vault(self.vault_key, updated)
+        except ValueError as exc:
+            self.status.set_text(str(exc))
+            if self.section == "saved":
+                self.manager_message.set_text(str(exc))
+                self.manager_message.show()
+            return
+        except OSError:
+            message = "Could not update those notes."
+            self.status.set_text(message)
+            if self.section == "saved":
+                self.manager_message.set_text(message)
+                self.manager_message.show()
+            return
+        self.saved = updated
+        stamped = next(entry for entry in updated if entry.name == current.name)
+        if stamped.notes:
+            message = f"Updated notes on {stamped.name}."
+        else:
+            message = f"Cleared notes on {stamped.name}."
+        self.status.set_text(message)
+        if self.section == "saved":
+            self.manager_message.set_text(message)
+            self.manager_message.show()
+            self._refresh_saved_rows()
+        elif self.section == "dashboard":
+            self._refresh_dashboard()
+
+    def _notes_entry_dialog(self, item: SavedPassword) -> str | None:
+        gtk = self.gtk
+        dialog = gtk.Dialog(title="Notes", transient_for=self.window, modal=True)
+        self._match_dialog(dialog)
+        dialog.add_button("Cancel", gtk.ResponseType.CANCEL)
+        save = dialog.add_button("Save", gtk.ResponseType.OK)
+        save.get_style_context().add_class("primary")
+        dialog.set_default_response(gtk.ResponseType.OK)
+        content = dialog.get_content_area()
+        content.set_spacing(8)
+        for setter in (
+            content.set_margin_top,
+            content.set_margin_bottom,
+            content.set_margin_start,
+            content.set_margin_end,
+        ):
+            setter(16)
+        hint = gtk.Label(
+            label=(
+                f'Notes for "{item.name}". Leave blank to clear. '
+                "Notes do not reveal the password. Other fields stay the same."
+            ),
+            xalign=0,
+        )
+        hint.set_line_wrap(True)
+        hint.get_style_context().add_class("hint")
+        content.pack_start(hint, False, False, 0)
+        caption = gtk.Label(label="Notes", xalign=0)
+        content.pack_start(caption, False, False, 0)
+        view = gtk.TextView()
+        view.set_wrap_mode(gtk.WrapMode.WORD_CHAR)
+        view.get_buffer().set_text(item.notes)
+        view.set_size_request(-1, 96)
+        content.pack_start(view, False, False, 0)
+        problem = gtk.Label(label="", xalign=0)
+        problem.set_line_wrap(True)
+        problem.get_style_context().add_class("danger")
+        content.pack_start(problem, False, False, 0)
+        dialog.show_all()
+        view.grab_focus()
+        while True:
+            response = dialog.run()
+            if response != gtk.ResponseType.OK:
+                dialog.destroy()
+                return None
+            buffer = view.get_buffer()
+            text = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
+            try:
+                label = clean_notes(text)
             except ValueError as exc:
                 problem.set_text(str(exc))
                 problem.show()
@@ -4732,8 +5346,27 @@ class PasswordWindow:
         if name in self.revealed_names:
             self.revealed_names.remove(name)
         else:
+            if self.preferences.confirm_before_reveal and not self._confirm_reveal(name):
+                return
             self.revealed_names.add(name)
         self._refresh_saved_rows()
+
+    def _confirm_reveal(self, name: str) -> bool:
+        gtk = self.gtk
+        dialog = gtk.MessageDialog(
+            transient_for=self.window,
+            modal=True,
+            message_type=gtk.MessageType.QUESTION,
+            buttons=gtk.ButtonsType.OK_CANCEL,
+            text="Show this password?",
+        )
+        dialog.format_secondary_text(
+            f'"{name}" will be visible on screen until you hide it or lock the vault.'
+        )
+        self._match_dialog(dialog)
+        answer = dialog.run()
+        dialog.destroy()
+        return answer == gtk.ResponseType.OK
 
     def _update_lock_button(self) -> None:
         style = self.lock_button.get_style_context()
@@ -5349,6 +5982,38 @@ class PasswordWindow:
         dialog.destroy()
         return response == gtk.ResponseType.OK
 
+    def on_add_password(self, *_args) -> None:
+        """Add a password manually without generating one first."""
+        self._note_activity()
+        if not self._ensure_vault_key():
+            return
+        blank = SavedPassword("", "")
+        created = self._edit_entry_dialog(blank, title="Add password", require_password=True)
+        if created is None:
+            return
+        stamp = utc_now()
+        created = replace(created, created=stamp, modified=stamp)
+        try:
+            updated = upsert_entry(self.saved, created)
+            write_vault(self.vault_key, updated)
+        except ValueError as exc:
+            self.status.set_text(str(exc))
+            if self.section == "saved":
+                self.manager_message.set_text(str(exc))
+                self.manager_message.show()
+            return
+        except OSError:
+            self.status.set_text("Could not save the password.")
+            return
+        self.saved = updated
+        self.locked = False
+        self._update_lock_button()
+        message = f"Saved {created.name}."
+        self.status.set_text(message)
+        self.show_section("saved")
+        self.manager_message.set_text(message)
+        self.manager_message.show()
+
     def on_edit_entry(self, item: SavedPassword) -> None:
         if self.vault_key is None:
             self.status.set_text("Saved passwords are locked.")
@@ -5394,9 +6059,15 @@ class PasswordWindow:
         if self.section == "dashboard":
             self._refresh_dashboard()
 
-    def _edit_entry_dialog(self, item: SavedPassword) -> SavedPassword | None:
+    def _edit_entry_dialog(
+        self,
+        item: SavedPassword,
+        *,
+        title: str = "Edit saved password",
+        require_password: bool = False,
+    ) -> SavedPassword | None:
         gtk = self.gtk
-        dialog = gtk.Dialog(title="Edit saved password", transient_for=self.window, modal=True)
+        dialog = gtk.Dialog(title=title, transient_for=self.window, modal=True)
         self._match_dialog(dialog)
         dialog.add_button("Cancel", gtk.ResponseType.CANCEL)
         save = dialog.add_button("Save", gtk.ResponseType.OK)
@@ -5438,6 +6109,19 @@ class PasswordWindow:
         url_entry = field("URL", item.url)
         password_entry = field("Password", item.password, password=True)
         category_entry = field("Category", item.category)
+        presets = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=6)
+        for label in DEFAULT_CATEGORIES:
+            chip = gtk.Button(label=label)
+            chip.get_style_context().add_class("secondary")
+            chip.connect(
+                "clicked",
+                lambda *_args, chosen=label: category_entry.set_text(chosen),
+            )
+            presets.pack_start(chip, False, False, 0)
+        scroller = gtk.ScrolledWindow()
+        scroller.set_policy(gtk.PolicyType.AUTOMATIC, gtk.PolicyType.NEVER)
+        scroller.add(presets)
+        content.pack_start(scroller, False, False, 0)
         notes_view = field("Notes", item.notes, multiline=True)
         favorite = gtk.CheckButton(label="Favorite")
         favorite.set_active(item.favorite)
@@ -5459,9 +6143,12 @@ class PasswordWindow:
             buffer = notes_view.get_buffer()
             notes = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
             try:
+                raw_password = password_entry.get_text()
+                if require_password and not raw_password.strip():
+                    raise ValueError("Enter a password to save.")
                 edited = SavedPassword(
                     clean_name(name_entry.get_text()),
-                    _password_line(password_entry.get_text()),
+                    _password_line(raw_password),
                     username=clean_username(username_entry.get_text()),
                     url=clean_url(url_entry.get_text()),
                     notes=clean_notes(notes),

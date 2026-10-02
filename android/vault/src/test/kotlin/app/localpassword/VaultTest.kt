@@ -281,6 +281,56 @@ class VaultTest {
     }
 
     @Test
+    fun setEntryUrlAndNotesSetClearAndRefuseMissing() {
+        val email = SavedPassword(
+            "Email",
+            "secret-value-here",
+            url = "https://mail.example",
+            notes = "work inbox",
+            created = "2020-01-01T00:00:00Z",
+            modified = "2020-02-01T00:00:00Z",
+        )
+        val bank = SavedPassword("Bank", "other-secret-value")
+        val sameUrl = Vault.setEntryUrl(listOf(email, bank), email, "https://mail.example")
+        assertEquals("https://mail.example", sameUrl[0].url)
+        val updatedUrl = Vault.setEntryUrl(
+            listOf(email, bank),
+            email,
+            "  https://new.example  ",
+            whenStamp = "2024-05-01T00:00:00Z",
+        )
+        assertEquals("https://new.example", updatedUrl[0].url)
+        assertEquals("2024-05-01T00:00:00Z", updatedUrl[0].modified)
+        val clearedUrl = Vault.setEntryUrl(updatedUrl, updatedUrl[0], "  ", whenStamp = "2024-06-01T00:00:00Z")
+        assertEquals("", clearedUrl[0].url)
+        val updatedNotes = Vault.setEntryNotes(
+            listOf(email, bank),
+            email,
+            "  keep private  ",
+            whenStamp = "2024-07-01T00:00:00Z",
+        )
+        assertEquals("keep private", updatedNotes[0].notes)
+        val clearedNotes = Vault.setEntryNotes(
+            updatedNotes,
+            updatedNotes[0],
+            "\n",
+            whenStamp = "2024-08-01T00:00:00Z",
+        )
+        assertEquals("", clearedNotes[0].notes)
+        try {
+            Vault.setEntryUrl(listOf(bank), email, "https://x")
+            throw AssertionError("expected missing entry to fail")
+        } catch (exc: VaultException) {
+            assert(exc.message!!.contains("gone"))
+        }
+        assertEquals(
+            listOf("Personal", "Work", "Banking", "Social Media", "Shopping", "Entertainment", "Other"),
+            Vault.DEFAULT_CATEGORIES,
+        )
+        assert(Vault.categoryChoices(listOf(email.copy(category = "Custom"))).contains("Custom"))
+    }
+
+    @Test
     fun setEntryUsernameSetsClearsAndRefusesMissing() {
         val email = SavedPassword(
             "Email",
