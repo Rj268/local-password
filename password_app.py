@@ -62,6 +62,7 @@ KNOWN_ENTRY_KEYS = frozenset(
         "notes",
         "category",
         "favorite",
+        "archived",
         "created",
         "modified",
         "history",
@@ -523,6 +524,7 @@ class SavedPassword:
     notes: str = ""
     category: str = ""
     favorite: bool = False
+    archived: bool = False
     created: str = ""
     modified: str = ""
     last_used: str = ""
@@ -651,6 +653,7 @@ def entry_dates_label(item: SavedPassword) -> str:
 
 def recently_used_entries(items: list[SavedPassword], limit: int = 5) -> list[SavedPassword]:
     """Top entries for the Dashboard: last used first, else last changed."""
+    items = active_saved_entries(items)
     if limit <= 0:
         return []
     used = [item for item in items if item.last_used]
@@ -682,6 +685,29 @@ def toggle_entry_favorite(
     return set_entry_favorite(existing, item, not item.favorite)
 
 
+def active_saved_entries(items: list[SavedPassword]) -> list[SavedPassword]:
+    """Entries that are not archived."""
+    return [item for item in items if not item.archived]
+
+
+def set_entry_archived(
+    existing: list[SavedPassword],
+    item: SavedPassword,
+    archived: bool,
+) -> list[SavedPassword]:
+    """Archive or unarchive without changing the password or timestamps."""
+    updated = replace(item, archived=bool(archived))
+    return [updated if entry.name == item.name else entry for entry in existing]
+
+
+def toggle_entry_archived(
+    existing: list[SavedPassword],
+    item: SavedPassword,
+) -> list[SavedPassword]:
+    """Flip Archive on one entry without changing the password or timestamps."""
+    return set_entry_archived(existing, item, not item.archived)
+
+
 def duplicate_entry(
     existing: list[SavedPassword],
     item: SavedPassword,
@@ -702,6 +728,7 @@ def duplicate_entry(
         notes=item.notes,
         category=item.category,
         favorite=item.favorite,
+        archived=False,
         created=stamp,
         modified=stamp,
         last_used="",
@@ -904,11 +931,15 @@ def password_health_summary(
     *,
     today: date | None = None,
 ) -> tuple[int, int, int, int]:
-    """Return (weak_count, reuse_count, stale_count, attention_count)."""
-    weak_count = len(weak_password_names(items))
-    reuse_count = len(reused_password_groups(items))
-    stale_count = len(stale_password_names(items, today=today))
-    attention_count = sum(1 for item in items if entry_needs_attention(item, items, today=today))
+    """Return (weak_count, reuse_count, stale_count, attention_count).
+
+    Archived entries are ignored so they do not keep Needs attention lit.
+    """
+    active = active_saved_entries(items)
+    weak_count = len(weak_password_names(active))
+    reuse_count = len(reused_password_groups(active))
+    stale_count = len(stale_password_names(active, today=today))
+    attention_count = sum(1 for item in active if entry_needs_attention(item, active, today=today))
     return weak_count, reuse_count, stale_count, attention_count
 
 
@@ -1313,6 +1344,7 @@ def remember_named(
             notes=previous.notes,
             category=previous.category,
             favorite=previous.favorite,
+            archived=previous.archived,
             created=previous.created if previous.created else now,
             modified=now,
             last_used=previous.last_used,
@@ -1506,6 +1538,8 @@ def _entry_to_json(item: SavedPassword) -> dict[str, object]:
         payload["category"] = clean_category(item.category)
     if item.favorite:
         payload["favorite"] = True
+    if item.archived:
+        payload["archived"] = True
     if item.created:
         payload["created"] = item.created
     if item.modified:
@@ -1564,6 +1598,7 @@ def _entry_from_json(entry: dict) -> SavedPassword:
     notes = entry.get("notes", "")
     category = entry.get("category", "")
     favorite = entry.get("favorite", False)
+    archived = entry.get("archived", False)
     created = entry.get("created", "")
     modified = entry.get("modified", "")
     last_used = entry.get("last_used", "")
@@ -1587,7 +1622,7 @@ def _entry_from_json(entry: dict) -> SavedPassword:
         raise ValueError("The saved password file is damaged.")
     if not isinstance(last_used, str):
         raise ValueError("The saved password file is damaged.")
-    if not isinstance(favorite, bool):
+    if not isinstance(favorite, bool) or not isinstance(archived, bool):
         raise ValueError("The saved password file is damaged.")
     history = _history_from_json(entry.get("history"))
     extras = {
@@ -1603,6 +1638,7 @@ def _entry_from_json(entry: dict) -> SavedPassword:
         notes=clean_notes(notes),
         category=clean_category(category),
         favorite=favorite,
+        archived=archived,
         created=created.strip(),
         modified=modified.strip(),
         last_used=last_used.strip(),
@@ -1668,6 +1704,7 @@ def _merge_histories(
 def _merge_matching_entry(local: SavedPassword, incoming: SavedPassword) -> SavedPassword:
     """Same password: keep one row and fill empty optional fields from the other copy."""
     favorites = local.favorite or incoming.favorite
+    archived = local.archived and incoming.archived
     extras = dict(local.extras)
     for key, value in incoming.extras.items():
         extras.setdefault(key, value)
@@ -1686,6 +1723,7 @@ def _merge_matching_entry(local: SavedPassword, incoming: SavedPassword) -> Save
         notes=_prefer_text(local.notes, incoming.notes),
         category=_prefer_text(local.category, incoming.category),
         favorite=favorites,
+        archived=archived,
         created=created,
         modified=modified,
         last_used=last_used,
@@ -2808,7 +2846,8 @@ class PasswordWindow:
             self.dashboard_empty.show()
             self.dashboard_recent.hide()
             return
-        count = len(self.saved)
+        active = active_saved_entries(self.saved)
+        count = len(active)
         self.dashboard_count.set_text(str(count))
         if count == 0:
             self.dashboard_welcome.set_text("Welcome to Local Password")
@@ -3286,6 +3325,7 @@ class PasswordWindow:
                 "Favorite stars or clears a row without opening Edit. "
                 "Duplicate copies a row under a new name. "
                 "Rename changes only the name without opening Edit. "
+                "Archive hides a row from the main list; Archived shows those rows. "
                 "Copy URL and Copy notes appear when those fields are set. "
                 "Notes show without revealing the password. "
                 "Remove can be undone with Undo on this page."
@@ -3305,6 +3345,9 @@ class PasswordWindow:
         self.favorites_only = self._chip("Favorites", False)
         self.favorites_only.connect("toggled", lambda *_args: self._refresh_saved_rows())
         filter_row.pack_start(self.favorites_only, False, False, 0)
+        self.archived_only = self._chip("Archived", False)
+        self.archived_only.connect("toggled", lambda *_args: self._refresh_saved_rows())
+        filter_row.pack_start(self.archived_only, False, False, 0)
         self.needs_attention_only = self._chip("Needs attention", False)
         self.needs_attention_only.connect("toggled", lambda *_args: self._refresh_saved_rows())
         filter_row.pack_start(self.needs_attention_only, False, False, 0)
@@ -3835,29 +3878,41 @@ class PasswordWindow:
         category = self.category_combo.get_active_id() or "all"
         favorites_only = self.favorites_only.get_active()
         attention_only = self.needs_attention_only.get_active()
+        archived_only = self.archived_only.get_active()
+        pool = [item for item in self.saved if item.archived] if archived_only else active_saved_entries(self.saved)
         matches = [
             item
-            for item in self.saved
+            for item in pool
             if entry_matches(item, query)
             and (not favorites_only or item.favorite)
-            and (not attention_only or entry_needs_attention(item, self.saved))
+            and (not attention_only or entry_needs_attention(item, pool))
             and (category == "all" or item.category == category)
         ]
-        matches = sorted_saved_entries(matches, self.saved_sort_mode, all_items=self.saved)
-        count = len(self.saved)
+        matches = sorted_saved_entries(matches, self.saved_sort_mode, all_items=pool)
+        active = active_saved_entries(self.saved)
+        archived_count = len(self.saved) - len(active)
         weak_count, reuse_count, stale_count, _attention = password_health_summary(self.saved)
-        heading = "1 saved" if count == 1 else f"{count} saved"
-        if weak_count:
-            heading += f" · {weak_count} weak"
-        if reuse_count:
-            heading += f" · {reuse_count} reused"
-        if stale_count:
-            heading += f" · {stale_count} stale"
+        if archived_only:
+            count = archived_count
+            heading = "1 archived" if count == 1 else f"{count} archived"
+        else:
+            count = len(active)
+            heading = "1 saved" if count == 1 else f"{count} saved"
+            if weak_count:
+                heading += f" · {weak_count} weak"
+            if reuse_count:
+                heading += f" · {reuse_count} reused"
+            if stale_count:
+                heading += f" · {stale_count} stale"
+            if archived_count:
+                heading += f" · {archived_count} archived"
         self.saved_heading.set_text(heading)
         self.saved_heading.show()
         if not matches:
             self.saved_scroll.hide()
-            if attention_only:
+            if archived_only:
+                self.manager_message.set_text("No archived password matches that search.")
+            elif attention_only:
                 self.manager_message.set_text("No saved password needs attention for that filter.")
             else:
                 self.manager_message.set_text("No saved password matches that search.")
@@ -3883,7 +3938,11 @@ class PasswordWindow:
         ):
             setter(10)
         text = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=2)
-        title = f"★ {item.name}" if item.favorite else item.name
+        title = item.name
+        if item.favorite:
+            title = f"★ {title}"
+        if item.archived:
+            title = f"{title} (archived)"
         name = gtk.Label(label=title, xalign=0)
         name.set_halign(gtk.Align.START)
         name.get_style_context().add_class("saved-name")
@@ -3980,6 +4039,10 @@ class PasswordWindow:
         favorite_btn.get_style_context().add_class("secondary")
         favorite_btn.connect("clicked", lambda *_args, entry=item: self.on_toggle_favorite(entry))
         actions.pack_start(favorite_btn, False, False, 0)
+        archive_btn = gtk.Button(label="Unarchive" if item.archived else "Archive")
+        archive_btn.get_style_context().add_class("secondary")
+        archive_btn.connect("clicked", lambda *_args, entry=item: self.on_toggle_archived(entry))
+        actions.pack_start(archive_btn, False, False, 0)
         duplicate_btn = gtk.Button(label="Duplicate")
         duplicate_btn.get_style_context().add_class("secondary")
         duplicate_btn.connect("clicked", lambda *_args, entry=item: self.on_duplicate_entry(entry))
@@ -4031,6 +4094,33 @@ class PasswordWindow:
         self.saved = updated
         stamped = next(entry for entry in updated if entry.name == current.name)
         message = f"Favorited {stamped.name}." if stamped.favorite else f"Cleared favorite on {stamped.name}."
+        self.status.set_text(message)
+        if self.section == "saved":
+            self.manager_message.set_text(message)
+            self.manager_message.show()
+            self._refresh_saved_rows()
+        elif self.section == "dashboard":
+            self._refresh_dashboard()
+
+    def on_toggle_archived(self, item: SavedPassword) -> None:
+        """Archive or unarchive a Saved row without opening Edit."""
+        self._note_activity()
+        if self.vault_key is None:
+            self.status.set_text("Saved passwords are locked.")
+            return
+        current = next((entry for entry in self.saved if entry.name == item.name), None)
+        if current is None:
+            self.status.set_text("That saved password is gone.")
+            return
+        try:
+            updated = toggle_entry_archived(self.saved, current)
+            write_vault(self.vault_key, updated)
+        except (OSError, ValueError) as exc:
+            self.status.set_text(str(exc) or "Could not update Archive.")
+            return
+        self.saved = updated
+        stamped = next(entry for entry in updated if entry.name == current.name)
+        message = f"Archived {stamped.name}." if stamped.archived else f"Unarchived {stamped.name}."
         self.status.set_text(message)
         if self.section == "saved":
             self.manager_message.set_text(message)
@@ -5003,6 +5093,7 @@ class PasswordWindow:
                     notes=edited.notes,
                     category=edited.category,
                     favorite=edited.favorite,
+                    archived=edited.archived,
                     last_used=edited.last_used,
                     extras=dict(edited.extras),
                 ),
@@ -5078,6 +5169,9 @@ class PasswordWindow:
         favorite = gtk.CheckButton(label="Favorite")
         favorite.set_active(item.favorite)
         content.pack_start(favorite, False, False, 0)
+        archived = gtk.CheckButton(label="Archived")
+        archived.set_active(item.archived)
+        content.pack_start(archived, False, False, 0)
         problem = gtk.Label(label="", xalign=0)
         problem.set_line_wrap(True)
         problem.get_style_context().add_class("danger")
@@ -5100,6 +5194,7 @@ class PasswordWindow:
                     notes=clean_notes(notes),
                     category=clean_category(category_entry.get_text()),
                     favorite=favorite.get_active(),
+                    archived=archived.get_active(),
                     created=item.created,
                     modified=item.modified,
                     last_used=item.last_used,

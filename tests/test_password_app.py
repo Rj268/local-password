@@ -779,6 +779,42 @@ class VaultTests(unittest.TestCase):
             self.assertEqual(items[0].username, "")
             self.assertFalse(items[0].favorite)
 
+    def test_archive_hides_from_active_health_and_recent(self) -> None:
+        from datetime import date
+
+        today = date(2024, 12, 1)
+        recent = "2024-11-15T00:00:00Z"
+        active = password_app.SavedPassword(
+            "Email",
+            "correct-horse-battery-staple-extra",
+            modified=recent,
+            last_used="2024-11-20T00:00:00Z",
+        )
+        archived = password_app.SavedPassword(
+            "Old",
+            "abc123",
+            archived=True,
+            modified="2020-01-01T00:00:00Z",
+            last_used="2024-11-21T00:00:00Z",
+        )
+        items = [active, archived]
+        self.assertEqual(
+            [item.name for item in password_app.active_saved_entries(items)],
+            ["Email"],
+        )
+        toggled = password_app.toggle_entry_archived(items, active)
+        self.assertTrue(toggled[0].archived)
+        restored = password_app.toggle_entry_archived(toggled, toggled[0])
+        self.assertFalse(restored[0].archived)
+        health = password_app.password_health_summary(items, today=today)
+        self.assertEqual(health, (0, 0, 0, 0))
+        recent_names = [item.name for item in password_app.recently_used_entries(items)]
+        self.assertEqual(recent_names, ["Email"])
+        sealed = password_app._entry_to_json(archived)
+        self.assertTrue(sealed["archived"])
+        round_trip = password_app._entry_from_json(sealed)
+        self.assertTrue(round_trip.archived)
+
     def test_rename_entry_changes_name_and_refuses_clash(self) -> None:
         email = password_app.SavedPassword(
             "Email",

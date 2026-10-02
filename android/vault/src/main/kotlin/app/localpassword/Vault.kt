@@ -34,6 +34,7 @@ data class SavedPassword(
     val notes: String = "",
     val category: String = "",
     val favorite: Boolean = false,
+    val archived: Boolean = false,
     val created: String = "",
     val modified: String = "",
     val lastUsed: String = "",
@@ -180,6 +181,7 @@ object Vault {
             notes = local.notes.ifBlank { incoming.notes },
             category = local.category.ifBlank { incoming.category },
             favorite = local.favorite || incoming.favorite,
+            archived = local.archived && incoming.archived,
             created = local.created.ifEmpty { incoming.created },
             modified = modified,
             lastUsed = when {
@@ -247,17 +249,21 @@ object Vault {
         return bits.joinToString(" · ")
     }
 
+    fun activeSavedEntries(items: List<SavedPassword>): List<SavedPassword> =
+        items.filter { !it.archived }
+
     fun recentlyUsedEntries(items: List<SavedPassword>, limit: Int = 5): List<SavedPassword> {
         if (limit <= 0) return emptyList()
-        val used = items.filter { it.lastUsed.isNotEmpty() }
+        val active = activeSavedEntries(items)
+        val used = active.filter { it.lastUsed.isNotEmpty() }
         if (used.isNotEmpty()) {
             return used
                 .sortedWith(compareByDescending<SavedPassword> { it.lastUsed }.thenBy { it.name.lowercase(Locale.ROOT) })
                 .take(limit)
         }
-        val stamped = items.filter { it.modified.isNotEmpty() }
+        val stamped = active.filter { it.modified.isNotEmpty() }
             .sortedWith(compareByDescending<SavedPassword> { it.modified }.thenBy { it.name.lowercase(Locale.ROOT) })
-        val plain = items.filter { it.modified.isEmpty() }
+        val plain = active.filter { it.modified.isEmpty() }
             .sortedBy { it.name.lowercase(Locale.ROOT) }
         return (stamped + plain).take(limit)
     }
@@ -270,6 +276,16 @@ object Vault {
 
     fun toggleEntryFavorite(items: List<SavedPassword>, item: SavedPassword): List<SavedPassword> {
         return setEntryFavorite(items, item, !item.favorite)
+    }
+
+    fun setEntryArchived(items: List<SavedPassword>, item: SavedPassword, archived: Boolean): List<SavedPassword> {
+        return items.map { entry ->
+            if (entry.name == item.name) entry.copy(archived = archived) else entry
+        }
+    }
+
+    fun toggleEntryArchived(items: List<SavedPassword>, item: SavedPassword): List<SavedPassword> {
+        return setEntryArchived(items, item, !item.archived)
     }
 
     fun duplicateEntry(items: List<SavedPassword>, item: SavedPassword, whenStamp: String = utcNow()): List<SavedPassword> {
@@ -286,6 +302,7 @@ object Vault {
             notes = item.notes,
             category = item.category,
             favorite = item.favorite,
+            archived = false,
             created = whenStamp,
             modified = whenStamp,
             lastUsed = "",
@@ -630,10 +647,11 @@ object Vault {
             entryIsStale(item, today = today)
 
     fun passwordHealthSummary(items: List<SavedPassword>, today: LocalDate? = null): PasswordHealth {
-        val weakCount = weakPasswordNames(items).size
-        val reuseCount = reusedPasswordGroups(items).size
-        val staleCount = stalePasswordNames(items, today = today).size
-        val attentionCount = items.count { entryNeedsAttention(it, items, today = today) }
+        val active = activeSavedEntries(items)
+        val weakCount = weakPasswordNames(active).size
+        val reuseCount = reusedPasswordGroups(active).size
+        val staleCount = stalePasswordNames(active, today = today).size
+        val attentionCount = active.count { entryNeedsAttention(it, active, today = today) }
         return PasswordHealth(weakCount, reuseCount, staleCount, attentionCount)
     }
 
@@ -922,6 +940,7 @@ object Vault {
         if (item.notes.isNotEmpty()) obj.put("notes", cleanNotes(item.notes))
         if (item.category.isNotEmpty()) obj.put("category", cleanCategory(item.category))
         if (item.favorite) obj.put("favorite", true)
+        if (item.archived) obj.put("archived", true)
         if (item.created.isNotEmpty()) obj.put("created", item.created)
         if (item.modified.isNotEmpty()) obj.put("modified", item.modified)
         if (item.lastUsed.isNotEmpty()) obj.put("last_used", item.lastUsed)
@@ -992,6 +1011,7 @@ object Vault {
                 notes = obj.optString("notes", ""),
                 category = obj.optString("category", ""),
                 favorite = obj.optBoolean("favorite", false),
+                archived = obj.optBoolean("archived", false),
                 created = obj.optString("created", ""),
                 modified = obj.optString("modified", ""),
                 lastUsed = obj.optString("last_used", ""),
@@ -1021,7 +1041,7 @@ object Vault {
     }
 
     private val KNOWN_ENTRY_KEYS = setOf(
-        "name", "password", "username", "url", "notes", "category", "favorite", "created", "modified", "history", "last_used",
+        "name", "password", "username", "url", "notes", "category", "favorite", "archived", "created", "modified", "history", "last_used",
     )
 }
 

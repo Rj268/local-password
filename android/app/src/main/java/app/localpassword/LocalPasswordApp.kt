@@ -321,9 +321,9 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
             }
             Text(
                 if (healthBits.isNotEmpty()) {
-                    "Passwords stay masked until you show one. Weak, reused, or stale passwords (unchanged for 180 days) are called out. ${healthBits.joinToString(" · ")}. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Rename changes only the name without opening Edit. Copy URL and Copy notes appear when those fields are set. Notes show without revealing the password. Remove can be undone with Undo."
+                    "Passwords stay masked until you show one. Weak, reused, or stale passwords (unchanged for 180 days) are called out. ${healthBits.joinToString(" · ")}. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Rename changes only the name without opening Edit. Archive hides a row from the main list; Archived shows those rows. Copy URL and Copy notes appear when those fields are set. Notes show without revealing the password. Remove can be undone with Undo."
                 } else {
-                    "Passwords stay masked until you show one. Weak, reused, or stale passwords (unchanged for 180 days) are called out. Needs attention filters those rows. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Rename changes only the name without opening Edit. Copy URL and Copy notes appear when those fields are set. Notes show without revealing the password. Remove can be undone with Undo."
+                    "Passwords stay masked until you show one. Weak, reused, or stale passwords (unchanged for 180 days) are called out. Needs attention filters those rows. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Rename changes only the name without opening Edit. Archive hides a row from the main list; Archived shows those rows. Copy URL and Copy notes appear when those fields are set. Notes show without revealing the password. Remove can be undone with Undo."
                 },
                 color = muted,
                 fontSize = 13.sp,
@@ -350,6 +350,9 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { model.favoritesOnly = !model.favoritesOnly }) {
                     Text(if (model.favoritesOnly) "Favorites On" else "Favorites", color = if (model.favoritesOnly) Green else muted)
+                }
+                TextButton(onClick = { model.archivedOnly = !model.archivedOnly }) {
+                    Text(if (model.archivedOnly) "Archived On" else "Archived", color = if (model.archivedOnly) Green else muted)
                 }
                 TextButton(onClick = { model.needsAttentionOnly = !model.needsAttentionOnly }) {
                     Text(
@@ -389,7 +392,15 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
             } else {
                 matches.forEach { item ->
                     Column(modifier = Modifier.fillMaxWidth().background(if (dark) Night else Cream, RoundedCornerShape(12.dp)).padding(12.dp)) {
-                        Text(if (item.favorite) "★ ${item.name}" else item.name, color = ink, fontWeight = FontWeight.Bold)
+                        Text(
+                            buildString {
+                                if (item.favorite) append("★ ")
+                                append(item.name)
+                                if (item.archived) append(" (archived)")
+                            },
+                            color = ink,
+                            fontWeight = FontWeight.Bold,
+                        )
                         val meta = listOf(item.username, item.category, item.url).filter { it.isNotEmpty() }
                         if (meta.isNotEmpty()) {
                             Text(meta.joinToString(" · "), color = muted, fontSize = 13.sp)
@@ -451,6 +462,9 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
                             }
                             TextButton(onClick = { model.toggleFavorite(item) }, enabled = !model.busy) {
                                 Text(if (item.favorite) "Unfavorite" else "Favorite", color = Green)
+                            }
+                            TextButton(onClick = { model.toggleArchived(item) }, enabled = !model.busy) {
+                                Text(if (item.archived) "Unarchive" else "Archive", color = Green)
                             }
                             TextButton(onClick = { model.duplicateEntry(item) }, enabled = !model.busy) {
                                 Text("Duplicate", color = Green)
@@ -607,6 +621,7 @@ private fun EditEntryDialog(
     var category by remember(item) { mutableStateOf(item.category) }
     var notes by remember(item) { mutableStateOf(item.notes) }
     var favorite by remember(item) { mutableStateOf(item.favorite) }
+    var archived by remember(item) { mutableStateOf(item.archived) }
     val history = item.history
     AlertDialog(
         onDismissRequest = onCancel,
@@ -629,6 +644,9 @@ private fun EditEntryDialog(
                 TextButton(onClick = { favorite = !favorite }) {
                     Text(if (favorite) "Favorite On" else "Favorite Off", color = if (favorite) Green else Muted)
                 }
+                TextButton(onClick = { archived = !archived }) {
+                    Text(if (archived) "Archived On" else "Archived Off", color = if (archived) Green else Muted)
+                }
                 if (error.isNotEmpty()) {
                     Text(error, color = Danger)
                 }
@@ -647,6 +665,7 @@ private fun EditEntryDialog(
                             category = category,
                             notes = notes,
                             favorite = favorite,
+                            archived = archived,
                             history = history,
                         ),
                     )

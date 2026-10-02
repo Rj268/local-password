@@ -186,6 +186,37 @@ class VaultTest {
     }
 
     @Test
+    fun archiveHidesFromActiveHealthAndRecent() {
+        val today = java.time.LocalDate.of(2024, 12, 1)
+        val recent = "2024-11-15T00:00:00Z"
+        val active = SavedPassword(
+            "Email",
+            "correct-horse-battery-staple-extra",
+            modified = recent,
+            lastUsed = "2024-11-20T00:00:00Z",
+        )
+        val archived = SavedPassword(
+            "Old",
+            "abc123",
+            archived = true,
+            modified = "2020-01-01T00:00:00Z",
+            lastUsed = "2024-11-21T00:00:00Z",
+        )
+        val items = listOf(active, archived)
+        assertEquals(listOf("Email"), Vault.activeSavedEntries(items).map { it.name })
+        val toggled = Vault.toggleEntryArchived(items, active)
+        assert(toggled[0].archived)
+        val restored = Vault.toggleEntryArchived(toggled, toggled[0])
+        assert(!restored[0].archived)
+        val health = Vault.passwordHealthSummary(items, today = today)
+        assertEquals(0, health.weakCount)
+        assertEquals(0, health.reuseCount)
+        assertEquals(0, health.staleCount)
+        assertEquals(0, health.attentionCount)
+        assertEquals(listOf("Email"), Vault.recentlyUsedEntries(items).map { it.name })
+    }
+
+    @Test
     fun renameEntryChangesNameAndRefusesClash() {
         val email = SavedPassword(
             "Email",

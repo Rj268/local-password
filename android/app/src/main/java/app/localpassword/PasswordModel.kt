@@ -48,6 +48,7 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     var askIncomingPassphrase by mutableStateOf(false)
     var savedQuery by mutableStateOf("")
     var favoritesOnly by mutableStateOf(false)
+    var archivedOnly by mutableStateOf(false)
     var needsAttentionOnly by mutableStateOf(false)
     var categoryFilter by mutableStateOf("all")
     var savedSortMode by mutableStateOf(Vault.SAVED_SORT_NAME)
@@ -573,6 +574,7 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
                     notes = updated.notes,
                     category = updated.category,
                     favorite = updated.favorite,
+                    archived = updated.archived,
                     created = previous.created.ifEmpty { now },
                     lastUsed = previous.lastUsed,
                     extras = previous.extras,
@@ -606,16 +608,49 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
 
     fun filteredSaved(): List<SavedPassword> {
         val needle = savedQuery.trim().lowercase(Locale.getDefault())
-        val matches = saved.filter { item ->
+        val pool = if (archivedOnly) saved.filter { it.archived } else Vault.activeSavedEntries(saved)
+        val matches = pool.filter { item ->
             val matchesQuery = needle.isEmpty() || listOf(
                 item.name, item.username, item.url, item.notes, item.category,
             ).any { it.lowercase(Locale.getDefault()).contains(needle) }
             val matchesFavorite = !favoritesOnly || item.favorite
-            val matchesAttention = !needsAttentionOnly || Vault.entryNeedsAttention(item, saved)
+            val matchesAttention = !needsAttentionOnly || Vault.entryNeedsAttention(item, pool)
             val matchesCategory = categoryFilter == "all" || item.category == categoryFilter
             matchesQuery && matchesFavorite && matchesAttention && matchesCategory
         }
-        return Vault.sortedSavedEntries(matches, savedSortMode, allItems = saved)
+        return Vault.sortedSavedEntries(matches, savedSortMode, allItems = pool)
+    }
+
+    fun toggleArchived(item: SavedPassword) {
+        val currentOpen = opened ?: return
+        val current = currentOpen.items.firstOrNull { it.name == item.name } ?: run {
+            error = "That saved password is gone."
+            return
+        }
+        viewModelScope.launch {
+            busy = true
+            error = ""
+            try {
+                val next = withContext(Dispatchers.Default) {
+                    Vault.toggleEntryArchived(currentOpen.items, current)
+                }
+                val blob = withContext(Dispatchers.Default) { Vault.seal(currentOpen, next) }
+                writeAtomically(blob)
+                opened = currentOpen.copy(items = next)
+                saved = next
+                unlocked = true
+                val stamped = next.first { it.name == current.name }
+                status = if (stamped.archived) {
+                    "Archived ${stamped.name}."
+                } else {
+                    "Unarchived ${stamped.name}."
+                }
+            } catch (exc: VaultException) {
+                error = exc.message ?: "Could not update Archive."
+            } finally {
+                busy = false
+            }
+        }
     }
 
     fun reuseWarning(item: SavedPassword): String = Vault.reuseWarningFor(item, saved)
