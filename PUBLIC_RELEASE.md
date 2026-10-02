@@ -50,14 +50,18 @@ sh packaging/build-deb.sh
 
 Share `dist/local-password_1.31.0_all.deb`.
 
-### 4. Android (optional for the first public cut)
+### 4. Android / Google Play
+
+See [`PLAY_STORE.md`](PLAY_STORE.md) for the Play Console checklist, upload keystore, and App Bundle build.
 
 ```bash
 cd android
-./gradlew :vault:test :app:assembleDebug
+bash scripts/create-release-keystore.sh   # once; keep offline backup
+./gradlew :vault:test :app:bundleRelease
 ```
 
-Ship `dist/local-password.apk` only if you are ready to support sideloading and the same vault story.
+Upload `app/build/outputs/bundle/release/app-release.aab` in Play Console.
+Ship a sideload APK from GitHub Releases only if you want that channel too.
 
 ### 5. Public page copy
 

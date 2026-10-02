@@ -107,7 +107,16 @@ export ANDROID_HOME=/path/to/android-sdk
 ./gradlew :vault:test :app:assembleDebug
 ```
 
-The installable package is `dist/local-password.apk`. Copy it to the phone, open it, and allow installation from that source. The vault on the phone stays in the app's private storage until you export it.
+For Google Play, follow [`PLAY_STORE.md`](PLAY_STORE.md): create an upload keystore, then build the App Bundle with `./gradlew :app:bundleRelease` from `android/`.
+
+For sideloading a debug build during development:
+
+```bash
+cd android
+./gradlew :app:assembleDebug
+```
+
+Copy the APK from `app/build/outputs/apk/debug/` to the phone and allow installation from that source. The vault on the phone stays in the app's private storage until you export it.
 
 ## Privacy and security
 

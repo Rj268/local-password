@@ -6,3 +6,9 @@ local.properties
 .idea/
 app/build/
 vault/build/
+# Play upload signing — never commit these
+keystore.properties
+release.keystore
+*.jks
+*.keystore
+!**/src/**/keystore
