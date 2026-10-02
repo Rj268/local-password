@@ -1,5 +1,9 @@
 # Release notes
 
+## 1.30.2
+
+- EFF wordlist credit lives only in Settings → About; removed the always-on window footer
+
 ## 1.30.1
 
 - Saved page declutter: short lede, one filter strip (Needs attention + All/Favorites/Archived + sort), row actions are Show / Copy / Replace / **More**

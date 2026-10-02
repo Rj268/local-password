@@ -92,7 +92,7 @@ AUTO_LOCK_OPTIONS = (
     (300, "5 minutes"),
     (900, "15 minutes"),
 )
-APP_VERSION = "1.30.1"
+APP_VERSION = "1.30.2"
 THEME_LIGHT = "light"
 THEME_DARK = "dark"
 THEME_SYSTEM = "system"
@@ -2680,18 +2680,6 @@ class PasswordWindow:
         self.window.connect("button-press-event", self._note_activity)
         self._arm_auto_lock_timer()
 
-        footer = gtk.Label(
-            label=(
-                "Passphrases use the EFF large wordlist, created by Joseph Bonneau "
-                "and the Electronic Frontier Foundation, under CC BY 3.0 US. "
-                "The EFF does not endorse this project."
-            ),
-            xalign=0,
-        )
-        footer.set_line_wrap(True)
-        footer.get_style_context().add_class("footer")
-        root.pack_start(footer, False, False, 0)
-
     def set_theme_mode(self, mode: str) -> None:
         chosen = mode.casefold().strip()
         if chosen not in THEME_OPTIONS:
@@ -3885,14 +3873,24 @@ class PasswordWindow:
                 "or recovery key. Nothing is uploaded for analytics or advertising. "
                 "Optional breach checks send only a short password-hash prefix to "
                 "Have I Been Pwned — never the password or the vault. "
-                "Read SECURITY.md in the project for known limits before a public release. "
-                "Passphrases use the EFF large wordlist (CC BY 3.0 US)."
+                "Read SECURITY.md in the project for known limits before a public release."
             ),
             xalign=0,
         )
         about_body.set_line_wrap(True)
         about_body.get_style_context().add_class("hint")
         about.pack_start(about_body, False, False, 0)
+        about_credit = gtk.Label(
+            label=(
+                "Passphrases use the EFF large wordlist, created by Joseph Bonneau "
+                "and the Electronic Frontier Foundation, under CC BY 3.0 US. "
+                "The EFF does not endorse this project."
+            ),
+            xalign=0,
+        )
+        about_credit.set_line_wrap(True)
+        about_credit.get_style_context().add_class("hint")
+        about.pack_start(about_credit, False, False, 0)
         page.pack_start(about, False, False, 0)
 
     def _build_manager(self, page) -> None:
