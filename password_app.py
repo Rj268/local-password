@@ -833,6 +833,14 @@ def browseable_url(url: str) -> str | None:
     return "https://" + text
 
 
+def login_copy_text(item: SavedPassword) -> str:
+    """Username and password joined with a tab for one clipboard paste, or empty."""
+    user = item.username.strip()
+    if not user:
+        return ""
+    return f"{user}\t{item.password}"
+
+
 def optional_copy_fields(item: SavedPassword) -> list[tuple[str, str]]:
     """Copy URL and Copy notes labels with values when those fields are set."""
     fields: list[tuple[str, str]] = []
@@ -3345,6 +3353,7 @@ class PasswordWindow:
                 "Rename changes only the name without opening Edit. "
                 "Category sets or clears the category without opening Edit. "
                 "Archive hides a row from the main list; Archived shows those rows. "
+                "Copy login copies username and password together when a username is set. "
                 "Copy URL and Copy notes appear when those fields are set. "
                 "Notes show without revealing the password. "
                 "Remove can be undone with Undo on this page."
@@ -4021,7 +4030,17 @@ class PasswordWindow:
         )
         actions.pack_start(show, False, False, 0)
         actions.pack_start(copy, False, False, 0)
-        if item.username:
+        login_text = login_copy_text(item)
+        if login_text:
+            copy_login = gtk.Button(label="Copy login")
+            copy_login.get_style_context().add_class("secondary")
+            copy_login.connect(
+                "clicked",
+                lambda *_args, entry=item, text=login_text: self.on_copy_saved_secret(
+                    entry, text
+                ),
+            )
+            actions.pack_start(copy_login, False, False, 0)
             copy_user = gtk.Button(label="Copy username")
             copy_user.get_style_context().add_class("secondary")
             copy_user.connect(

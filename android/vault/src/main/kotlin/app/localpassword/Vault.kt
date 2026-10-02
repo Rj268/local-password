@@ -596,6 +596,12 @@ object Vault {
         return "https://$text"
     }
 
+    fun loginCopyText(item: SavedPassword): String {
+        val user = item.username.trim()
+        if (user.isEmpty()) return ""
+        return "$user\t${item.password}"
+    }
+
     fun optionalCopyFields(item: SavedPassword): List<Pair<String, String>> {
         val fields = mutableListOf<Pair<String, String>>()
         val url = item.url.trim()

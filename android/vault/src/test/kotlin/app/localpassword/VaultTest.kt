@@ -96,6 +96,20 @@ class VaultTest {
     }
 
     @Test
+    fun loginCopyTextJoinsUsernameAndPassword() {
+        val bare = SavedPassword("Bare", "secret-value-here")
+        assertEquals("", Vault.loginCopyText(bare))
+        val whitespaceUser = SavedPassword("Empty", "secret-value-here", username = "   ")
+        assertEquals("", Vault.loginCopyText(whitespaceUser))
+        val withUser = SavedPassword(
+            "Mail",
+            "secret-value-here",
+            username = "  me@example.com  ",
+        )
+        assertEquals("me@example.com\tsecret-value-here", Vault.loginCopyText(withUser))
+    }
+
+    @Test
     fun weakPasswordHealthAndNeedsAttention() {
         val today = java.time.LocalDate.of(2024, 12, 1)
         val recent = "2024-11-15T00:00:00Z"

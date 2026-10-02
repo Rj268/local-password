@@ -321,9 +321,9 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
             }
             Text(
                 if (healthBits.isNotEmpty()) {
-                    "Passwords stay masked until you show one. Weak, reused, or stale passwords (unchanged for 180 days) are called out. ${healthBits.joinToString(" · ")}. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Rename changes only the name without opening Edit. Category sets or clears the category without opening Edit. Archive hides a row from the main list; Archived shows those rows. Copy URL and Copy notes appear when those fields are set. Notes show without revealing the password. Remove can be undone with Undo."
+                    "Passwords stay masked until you show one. Weak, reused, or stale passwords (unchanged for 180 days) are called out. ${healthBits.joinToString(" · ")}. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Rename changes only the name without opening Edit. Category sets or clears the category without opening Edit. Archive hides a row from the main list; Archived shows those rows. Copy login copies username and password together when a username is set. Copy URL and Copy notes appear when those fields are set. Notes show without revealing the password. Remove can be undone with Undo."
                 } else {
-                    "Passwords stay masked until you show one. Weak, reused, or stale passwords (unchanged for 180 days) are called out. Needs attention filters those rows. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Rename changes only the name without opening Edit. Category sets or clears the category without opening Edit. Archive hides a row from the main list; Archived shows those rows. Copy URL and Copy notes appear when those fields are set. Notes show without revealing the password. Remove can be undone with Undo."
+                    "Passwords stay masked until you show one. Weak, reused, or stale passwords (unchanged for 180 days) are called out. Needs attention filters those rows. Sort by Name, Recent, or Changed. Each entry shows Created and Changed dates. Copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Rename changes only the name without opening Edit. Category sets or clears the category without opening Edit. Archive hides a row from the main list; Archived shows those rows. Copy login copies username and password together when a username is set. Copy URL and Copy notes appear when those fields are set. Notes show without revealing the password. Remove can be undone with Undo."
                 },
                 color = muted,
                 fontSize = 13.sp,
@@ -437,7 +437,11 @@ private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Colo
                             TextButton(onClick = { model.copySavedSecret(item, item.password) }) {
                                 Text("Copy password", color = Green)
                             }
-                            if (item.username.isNotEmpty()) {
+                            val loginText = Vault.loginCopyText(item)
+                            if (loginText.isNotEmpty()) {
+                                TextButton(onClick = { model.copySavedSecret(item, loginText) }) {
+                                    Text("Copy login", color = Green)
+                                }
                                 TextButton(onClick = { model.copySavedSecret(item, item.username) }) {
                                     Text("Copy username", color = Green)
                                 }

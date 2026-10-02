@@ -345,6 +345,25 @@ class VaultTests(unittest.TestCase):
         )
         self.assertEqual(password_app.optional_copy_fields(whitespace_only), [])
 
+    def test_login_copy_text_joins_username_and_password(self) -> None:
+        bare = password_app.SavedPassword("Bare", "secret-value-here")
+        self.assertEqual(password_app.login_copy_text(bare), "")
+        whitespace_user = password_app.SavedPassword(
+            "Empty",
+            "secret-value-here",
+            username="   ",
+        )
+        self.assertEqual(password_app.login_copy_text(whitespace_user), "")
+        with_user = password_app.SavedPassword(
+            "Mail",
+            "secret-value-here",
+            username="  me@example.com  ",
+        )
+        self.assertEqual(
+            password_app.login_copy_text(with_user),
+            "me@example.com\tsecret-value-here",
+        )
+
     def test_password_health_flags_weak_and_reused(self) -> None:
         from datetime import date
 
