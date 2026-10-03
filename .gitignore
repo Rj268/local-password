@@ -8,6 +8,8 @@ uploads/
 *.deb
 *.apk
 *.zip
+play-store-assets/
+play-store-assets.zip
 .DS_Store
 Thumbs.db
 .gradle/
