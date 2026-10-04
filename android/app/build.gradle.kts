@@ -21,7 +21,7 @@ android {
         minSdk = 26
         targetSdk = 36
         // Keep in step with desktop APP_VERSION (1.31.0 → 13101 after Play targetSdk bump).
-        versionCode = 13101
+        versionCode = 13102
         versionName = "1.31.0"
     }
 
