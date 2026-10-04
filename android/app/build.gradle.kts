@@ -14,14 +14,14 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "app.localpassword"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "app.localpassword"
         minSdk = 26
-        targetSdk = 35
-        // Keep in step with desktop APP_VERSION (1.31.0 → 13100).
-        versionCode = 13100
+        targetSdk = 36
+        // Keep in step with desktop APP_VERSION (1.31.0 → 13101 after Play targetSdk bump).
+        versionCode = 13101
         versionName = "1.31.0"
     }
 
