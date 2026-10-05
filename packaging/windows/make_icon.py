@@ -32,7 +32,7 @@ def draw_icon(size: int) -> Image.Image:
 
     radius = max(1, round(2.5 * scale))
     # Shaft starts inside the ring so it joins cleanly
-    pen.rounded_rectangle(box(22, 27, 56, 37), radius=radius, fill=CREAM)
+    pen.rounded_rectangle(box(22, 27, 58, 37), radius=radius, fill=CREAM)
     # Teeth grow out of the shaft (overlap the shaft bottom)
     pen.rounded_rectangle(box(38, 33, 46, 49), radius=radius, fill=CREAM)
     pen.rounded_rectangle(box(49, 33, 57, 44), radius=radius, fill=CREAM)
