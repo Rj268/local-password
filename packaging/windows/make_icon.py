@@ -7,39 +7,36 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-GREEN = (0x08, 0x77, 0x5B, 255)
+GREEN = (0x0E, 0x6B, 0x52, 255)
 CREAM = (0xF5, 0xF4, 0xEF, 255)
 SIZES = (16, 24, 32, 48, 64, 128, 256)
 HERE = Path(__file__).resolve().parent
 
 
 def draw_icon(size: int) -> Image.Image:
-    """Key on a green rounded square. Coordinates match the 64px SVG."""
+    """Classic key on a green rounded square — bow, shaft, and two teeth."""
     scale = size / 64
     image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     pen = ImageDraw.Draw(image)
-    radius = max(2, round(16 * scale))
-    pen.rounded_rectangle((0, 0, size - 1, size - 1), radius=radius, fill=GREEN)
-    stroke = max(1, round(3 * scale))
-    cx = 32 * scale
-    cy = 26 * scale
-    radius_key = 8 * scale
-    pen.ellipse(
-        (cx - radius_key, cy - radius_key, cx + radius_key, cy + radius_key),
-        outline=CREAM,
-        width=stroke,
-    )
-    shaft_radius = max(1, round(1.5 * scale))
-    pen.rounded_rectangle(
-        (30 * scale, 32 * scale, 34 * scale, 46 * scale),
-        radius=shaft_radius,
-        fill=CREAM,
-    )
-    pen.rounded_rectangle(
-        (28 * scale, 42 * scale, 36 * scale, 45 * scale),
-        radius=shaft_radius,
-        fill=CREAM,
-    )
+    corner = max(2, round(14 * scale))
+    pen.rounded_rectangle((0, 0, size - 1, size - 1), radius=corner, fill=GREEN)
+
+    def box(x0: float, y0: float, x1: float, y1: float) -> tuple[float, float, float, float]:
+        return (x0 * scale, y0 * scale, x1 * scale, y1 * scale)
+
+    # Bow (ring)
+    cx, cy = 20.0, 32.0
+    outer, inner = 11.0, 5.0
+    pen.ellipse(box(cx - outer, cy - outer, cx + outer, cy + outer), fill=CREAM)
+    pen.ellipse(box(cx - inner, cy - inner, cx + inner, cy + inner), fill=GREEN)
+
+    radius = max(1, round(2 * scale))
+    # Shaft overlapping the bow
+    pen.rounded_rectangle(box(28, 28, 56, 36), radius=radius, fill=CREAM)
+    # Longer tooth
+    pen.rounded_rectangle(box(36, 34, 43, 50), radius=radius, fill=CREAM)
+    # Shorter tooth
+    pen.rounded_rectangle(box(46, 34, 53, 44), radius=radius, fill=CREAM)
     return image
 
 

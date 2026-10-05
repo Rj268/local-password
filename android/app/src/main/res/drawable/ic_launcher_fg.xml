@@ -3,15 +3,18 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillColor="#00000000"
-        android:pathData="M54,34A12,12 0,1 1,53.9 34"
-        android:strokeWidth="4"
-        android:strokeColor="#F7F3EC" />
+    <!-- Classic horizontal key: ring bow, shaft, two teeth -->
     <path
         android:fillColor="#F7F3EC"
-        android:pathData="M51,54h6v22h-6z" />
+        android:fillType="evenOdd"
+        android:pathData="M40,38a16,16 0 1,1 0,32a16,16 0 1,1 0,-32zM40,46a8,8 0 1,0 0,16a8,8 0 1,0 0,-16z" />
     <path
         android:fillColor="#F7F3EC"
-        android:pathData="M48,70h12v4h-12z" />
+        android:pathData="M50,48h36a6,6 0 0,1 6,6v0a6,6 0 0,1 -6,6H50a6,6 0 0,1 -6,-6v0a6,6 0 0,1 6,-6z" />
+    <path
+        android:fillColor="#F7F3EC"
+        android:pathData="M58,56h10a2.5,2.5 0 0,1 2.5,2.5V78a2.5,2.5 0 0,1 -2.5,2.5h-10a2.5,2.5 0 0,1 -2.5,-2.5V58.5a2.5,2.5 0 0,1 2.5,-2.5z" />
+    <path
+        android:fillColor="#F7F3EC"
+        android:pathData="M74,56h10a2.5,2.5 0 0,1 2.5,2.5V70a2.5,2.5 0 0,1 -2.5,2.5h-10a2.5,2.5 0 0,1 -2.5,-2.5V58.5a2.5,2.5 0 0,1 2.5,-2.5z" />
 </vector>
