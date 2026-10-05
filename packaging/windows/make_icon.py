@@ -14,7 +14,7 @@ HERE = Path(__file__).resolve().parent
 
 
 def draw_icon(size: int) -> Image.Image:
-    """Connected classic key on a green rounded square."""
+    """Compact classic key on a green rounded square — fits round launcher masks."""
     scale = size / 64
     image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     pen = ImageDraw.Draw(image)
@@ -24,18 +24,16 @@ def draw_icon(size: int) -> Image.Image:
     def box(x0: float, y0: float, x1: float, y1: float) -> tuple[float, float, float, float]:
         return (x0 * scale, y0 * scale, x1 * scale, y1 * scale)
 
-    # Bow (ring)
-    cx, cy = 20.0, 32.0
-    outer, inner = 12.0, 5.5
+    cx, cy = 22.0, 32.0
+    outer, inner = 11.0, 5.0
     pen.ellipse(box(cx - outer, cy - outer, cx + outer, cy + outer), fill=CREAM)
     pen.ellipse(box(cx - inner, cy - inner, cx + inner, cy + inner), fill=GREEN)
 
-    radius = max(1, round(2.5 * scale))
-    # Shaft starts inside the ring so it joins cleanly
-    pen.rounded_rectangle(box(22, 27, 58, 37), radius=radius, fill=CREAM)
-    # Teeth grow out of the shaft (overlap the shaft bottom)
-    pen.rounded_rectangle(box(38, 33, 46, 49), radius=radius, fill=CREAM)
-    pen.rounded_rectangle(box(49, 33, 57, 44), radius=radius, fill=CREAM)
+    radius = max(1, round(2 * scale))
+    # Shaft starts inside the ring; tip stays clear of the icon edge
+    pen.rounded_rectangle(box(24, 28, 52, 36), radius=radius, fill=CREAM)
+    pen.rounded_rectangle(box(38, 33, 45, 47), radius=radius, fill=CREAM)
+    pen.rounded_rectangle(box(47, 33, 54, 43), radius=radius, fill=CREAM)
     return image
 
 

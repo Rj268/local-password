@@ -38,6 +38,7 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     var unlocked by mutableStateOf(false)
     var appLocked by mutableStateOf(false)
     var appLockEnabled by mutableStateOf(false)
+    var autoLockSeconds by mutableStateOf(DEFAULT_AUTO_LOCK_SECONDS)
     var biometricEnabled by mutableStateOf(false)
     var askEnableBiometric by mutableStateOf(false)
     var askEnableAppLock by mutableStateOf(false)
@@ -77,10 +78,12 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     private var changeItems: List<SavedPassword>? = null
     private var clipboardGeneration = 0
     private var lastUnlockSecret: String? = null
+    private var pendingLockJob: kotlinx.coroutines.Job? = null
     private val words: List<String> by lazy { loadWords() }
 
     init {
         appLockEnabled = loadAppLockEnabled()
+        autoLockSeconds = loadAutoLockSeconds()
         biometricEnabled = loadBiometricEnabled() && hasStoredUnlockSecret()
         // App lock is opt-in. A vault passphrase alone does not lock the whole app.
         if (hasVault() && appLockEnabled) {
@@ -267,6 +270,8 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun lockApp() {
+        pendingLockJob?.cancel()
+        pendingLockJob = null
         if (!hasVault()) {
             appLocked = false
             return
@@ -297,6 +302,38 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
         appLocked = true
         status = "Locked."
         error = ""
+    }
+
+    fun scheduleBackgroundLock() {
+        if (!appLockEnabled || appLocked) return
+        pendingLockJob?.cancel()
+        val wait = autoLockSeconds.coerceAtLeast(0)
+        if (wait == 0) {
+            lockApp()
+            return
+        }
+        pendingLockJob = viewModelScope.launch {
+            delay(wait * 1000L)
+            lockApp()
+        }
+    }
+
+    fun cancelBackgroundLock() {
+        pendingLockJob?.cancel()
+        pendingLockJob = null
+    }
+
+    fun setAutoLockSeconds(seconds: Int) {
+        val next = AUTO_LOCK_OPTIONS.firstOrNull { it == seconds } ?: DEFAULT_AUTO_LOCK_SECONDS
+        autoLockSeconds = next
+        prefs().edit().putInt(PREF_AUTO_LOCK_SECONDS, next).apply()
+        status = when (next) {
+            0 -> "Locks as soon as you leave the app."
+            60 -> "Locks after 1 minute away."
+            300 -> "Locks after 5 minutes away."
+            900 -> "Locks after 15 minutes away."
+            else -> "Lock delay updated."
+        }
     }
 
     fun requestEnableAppLock() {
@@ -464,9 +501,10 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
                 appLocked = false
                 askChangeNew = false
                 changeItems = null
+                // Old recovery key is dead; keep biometrics in sync with the new passphrase.
                 rememberUnlockSecret(passphrase)
                 recoveryKey = recovery
-                status = "Passphrase changed. The old passphrase and recovery key no longer open this vault."
+                status = "Passphrase changed. Write down the new recovery key — the old one no longer works."
             } catch (exc: VaultException) {
                 error = exc.message ?: "Could not rewrite the vault with the new passphrase."
             } finally {
@@ -1399,6 +1437,11 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
 
     private fun loadAppLockEnabled(): Boolean = prefs().getBoolean(PREF_APP_LOCK, false)
 
+    private fun loadAutoLockSeconds(): Int {
+        val stored = prefs().getInt(PREF_AUTO_LOCK_SECONDS, DEFAULT_AUTO_LOCK_SECONDS)
+        return AUTO_LOCK_OPTIONS.firstOrNull { it == stored } ?: DEFAULT_AUTO_LOCK_SECONDS
+    }
+
     private fun loadBiometricEnabled(): Boolean = prefs().getBoolean(PREF_BIOMETRIC, false)
 
     private fun prefs(): SharedPreferences =
@@ -1455,8 +1498,11 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
 
     companion object {
         private const val PREF_APP_LOCK = "app_lock"
+        private const val PREF_AUTO_LOCK_SECONDS = "auto_lock_seconds"
         private const val PREF_BIOMETRIC = "biometric_unlock"
         private const val PREF_UNLOCK_SECRET = "unlock_secret"
+        const val DEFAULT_AUTO_LOCK_SECONDS = 0
+        val AUTO_LOCK_OPTIONS = listOf(0, 60, 300, 900)
     }
 }
 

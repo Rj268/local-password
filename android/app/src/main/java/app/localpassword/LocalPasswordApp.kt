@@ -31,6 +31,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -103,10 +104,14 @@ fun LocalPasswordApp(model: PasswordModel = viewModel()) {
     DisposableEffect(lifecycleOwner, context) {
         val activity = context as? Activity
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP && activity?.isChangingConfigurations != true) {
-                if (model.appLockEnabled) {
-                    model.lockApp()
+            when (event) {
+                Lifecycle.Event.ON_STOP -> {
+                    if (activity?.isChangingConfigurations != true) {
+                        model.scheduleBackgroundLock()
+                    }
                 }
+                Lifecycle.Event.ON_START -> model.cancelBackgroundLock()
+                else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -175,6 +180,7 @@ fun LocalPasswordApp(model: PasswordModel = viewModel()) {
             body = "Choose a passphrase to lock saved passwords. It is not stored. If you lose both this passphrase and the recovery key, your saved passwords cannot be recovered.",
             confirm = true,
             busy = model.busy,
+            error = model.error,
             onDismiss = { model.askNewPassphrase = false },
         ) { phrase, again -> model.createVault(phrase, again) }
     }
@@ -184,6 +190,7 @@ fun LocalPasswordApp(model: PasswordModel = viewModel()) {
             body = "Enter the passphrase or the recovery key.",
             confirm = false,
             busy = model.busy,
+            error = model.error,
             onDismiss = { model.askUnlock = false },
         ) { phrase, _ -> model.unlock(phrase, thenSave = model.section == "create" && model.current.isNotEmpty()) }
     }
@@ -193,15 +200,17 @@ fun LocalPasswordApp(model: PasswordModel = viewModel()) {
             body = "Enter the current passphrase or recovery key.",
             confirm = false,
             busy = model.busy,
+            error = model.error,
             onDismiss = { model.cancelChangePassphrase() },
         ) { phrase, _ -> model.confirmChangeCurrent(phrase) }
     }
     if (model.askChangeNew) {
         PassphraseDialog(
             title = "New passphrase",
-            body = "Choose a new passphrase to lock saved passwords. It is not stored. A new recovery key will be shown once. The old passphrase and recovery key will stop working.",
+            body = "Choose a new passphrase. A new recovery key will be shown once. The old passphrase and recovery key will stop working.",
             confirm = true,
             busy = model.busy,
+            error = model.error,
             onDismiss = { model.cancelChangePassphrase() },
         ) { phrase, again -> model.confirmChangeNew(phrase, again) }
     }
@@ -234,6 +243,7 @@ fun LocalPasswordApp(model: PasswordModel = viewModel()) {
             body = "This vault uses a different passphrase. Enter it to merge the passwords. It is not sent.",
             confirm = false,
             busy = model.busy,
+            error = model.error,
             onDismiss = { model.dismissIncoming() },
         ) { phrase, _ -> model.mergeWithIncomingPassphrase(phrase) }
     }
@@ -270,6 +280,7 @@ fun LocalPasswordApp(model: PasswordModel = viewModel()) {
             body = "Enter your passphrase or recovery key so fingerprint or face unlock can open the app.",
             confirm = false,
             busy = model.busy,
+            error = model.error,
             onDismiss = { model.askEnableBiometric = false },
         ) { phrase, _ -> model.confirmEnableBiometric(phrase) }
     }
@@ -279,6 +290,7 @@ fun LocalPasswordApp(model: PasswordModel = viewModel()) {
             body = "Enter your vault passphrase or recovery key. Closing the app will ask for it again.",
             confirm = false,
             busy = model.busy,
+            error = model.error,
             onDismiss = { model.askEnableAppLock = false },
         ) { phrase, _ -> model.confirmEnableAppLock(phrase) }
     }
@@ -293,7 +305,10 @@ private fun AppLockPane(model: PasswordModel, card: Color, ink: Color, muted: Co
         manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS ||
             manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK) == BiometricManager.BIOMETRIC_SUCCESS
     }
+    val biometricReady = canBiometric && model.hasBiometricSecret()
     var phrase by remember { mutableStateOf("") }
+    var showPassphrase by remember { mutableStateOf(!biometricReady) }
+    var biometricPrompted by remember { mutableStateOf(false) }
 
     fun promptBiometric() {
         val host = activity ?: return
@@ -307,12 +322,15 @@ private fun AppLockPane(model: PasswordModel, card: Color, ink: Color, muted: Co
                 }
 
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                    if (errorCode != BiometricPrompt.ERROR_USER_CANCELED &&
-                        errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON &&
-                        errorCode != BiometricPrompt.ERROR_CANCELED
+                    if (errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON ||
+                        errorCode == BiometricPrompt.ERROR_USER_CANCELED ||
+                        errorCode == BiometricPrompt.ERROR_CANCELED
                     ) {
-                        model.error = errString.toString()
+                        showPassphrase = true
+                        return
                     }
+                    model.error = errString.toString()
+                    showPassphrase = true
                 }
             },
         )
@@ -323,6 +341,13 @@ private fun AppLockPane(model: PasswordModel, card: Color, ink: Color, muted: Co
                 .setNegativeButtonText("Use passphrase")
                 .build(),
         )
+    }
+
+    LaunchedEffect(biometricReady) {
+        if (biometricReady && !biometricPrompted) {
+            biometricPrompted = true
+            promptBiometric()
+        }
     }
 
     Column(
@@ -345,26 +370,41 @@ private fun AppLockPane(model: PasswordModel, card: Color, ink: Color, muted: Co
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text("Unlock", color = ink, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, fontSize = 24.sp)
-            Text("Enter your passphrase or recovery key to open the vault on this phone.", color = muted)
-            OutlinedTextField(
-                value = phrase,
-                onValueChange = { phrase = it },
-                label = { Text("Passphrase or recovery key") },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                modifier = Modifier.fillMaxWidth(),
-            )
-            GreenButton("Unlock", model.busy, fillMaxWidth = true) {
-                model.unlock(phrase, thenSave = false)
-            }
-            if (canBiometric && model.hasBiometricSecret()) {
+            if (biometricReady) {
+                Text("Use biometrics to open. Passphrase is backup.", color = muted)
+                GreenButton("Unlock with biometrics", model.busy, fillMaxWidth = true) {
+                    promptBiometric()
+                }
                 TextButton(
-                    onClick = { promptBiometric() },
+                    onClick = { showPassphrase = !showPassphrase },
                     enabled = !model.busy,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("Use biometrics", color = Green, fontWeight = FontWeight.Bold)
+                    Text(
+                        if (showPassphrase) "Hide passphrase" else "Use passphrase instead",
+                        color = Green,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            } else {
+                Text("Enter your passphrase or recovery key to open the vault on this phone.", color = muted)
+            }
+            if (showPassphrase || !biometricReady) {
+                OutlinedTextField(
+                    value = phrase,
+                    onValueChange = { phrase = it },
+                    label = { Text("Passphrase or recovery key") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                GreenButton(
+                    if (biometricReady) "Unlock with passphrase" else "Unlock",
+                    model.busy,
+                    fillMaxWidth = true,
+                ) {
+                    model.unlock(phrase, thenSave = false)
                 }
             }
             if (model.error.isNotEmpty()) {
@@ -1150,12 +1190,7 @@ private fun SettingsPane(
 
         Text("App lock", color = ink, fontWeight = FontWeight.Bold)
         Text(
-            if (model.appLockEnabled) {
-                "On. Closing the app asks for your passphrase" +
-                    (if (canBiometric) " or biometrics." else ".")
-            } else {
-                "Off. Anyone who opens the app can reach Generate. Saved still needs your passphrase."
-            },
+            "Keep Generate open, or lock the whole app when you leave.",
             color = muted,
             fontSize = 13.sp,
         )
@@ -1164,39 +1199,72 @@ private fun SettingsPane(
                 if (model.appLockEnabled) model.disableAppLock() else model.requestEnableAppLock()
             },
             enabled = !model.busy,
+            modifier = Modifier.fillMaxWidth(),
         ) {
             Text(
                 if (model.appLockEnabled) "App lock On" else "App lock Off",
                 color = if (model.appLockEnabled) Green else muted,
+                fontWeight = FontWeight.Bold,
             )
         }
-        if (canBiometric && model.hasVault() && model.appLockEnabled) {
-            TextButton(
-                onClick = {
-                    if (model.biometricEnabled) model.disableBiometric() else model.requestEnableBiometric()
-                },
-                enabled = !model.busy,
+        if (model.appLockEnabled) {
+            Text("Lock after leaving the app", color = ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp),
             ) {
-                Text(
-                    if (model.biometricEnabled) "Biometrics On" else "Biometrics Off",
-                    color = if (model.biometricEnabled) Green else muted,
-                )
+                listOf(
+                    0 to "Immediately",
+                    60 to "1 min",
+                    300 to "5 min",
+                    900 to "15 min",
+                ).forEach { (seconds, label) ->
+                    TextButton(onClick = { model.setAutoLockSeconds(seconds) }) {
+                        Text(
+                            label,
+                            color = if (model.autoLockSeconds == seconds) Green else muted,
+                            fontWeight = if (model.autoLockSeconds == seconds) FontWeight.Bold else FontWeight.Normal,
+                        )
+                    }
+                }
             }
-        }
-        TextButton(
-            onClick = { model.lockApp() },
-            enabled = model.hasVault() && model.appLockEnabled && !model.appLocked,
-        ) {
-            Text("Lock now", color = Green)
+            if (canBiometric && model.hasVault()) {
+                Text("Biometrics open the app first; passphrase is the backup.", color = muted, fontSize = 13.sp)
+                TextButton(
+                    onClick = {
+                        if (model.biometricEnabled) model.disableBiometric() else model.requestEnableBiometric()
+                    },
+                    enabled = !model.busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        if (model.biometricEnabled) "Biometrics On" else "Biometrics Off",
+                        color = if (model.biometricEnabled) Green else muted,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+            TextButton(
+                onClick = { model.lockApp() },
+                enabled = model.hasVault() && !model.appLocked,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Lock now", color = Green, fontWeight = FontWeight.Bold)
+            }
         }
 
         Text("Passphrase", color = ink, fontWeight = FontWeight.Bold)
-        Text("Shows a new recovery key once. The old passphrase and key stop working.", color = muted, fontSize = 13.sp)
+        Text(
+            "Changing it seals the vault again and shows a new recovery key once. The old passphrase and recovery key stop working.",
+            color = muted,
+            fontSize = 13.sp,
+        )
         TextButton(
             onClick = { model.requestChangePassphrase() },
-            enabled = !model.busy,
+            enabled = !model.busy && model.hasVault(),
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Change passphrase", color = Green)
+            Text("Change passphrase", color = Green, fontWeight = FontWeight.Bold)
         }
 
         Text("Move vault", color = ink, fontWeight = FontWeight.Bold)
@@ -1320,6 +1388,7 @@ private fun PassphraseDialog(
     body: String,
     confirm: Boolean,
     busy: Boolean,
+    error: String = "",
     onDismiss: () -> Unit,
     onSubmit: (String, String) -> Unit,
 ) {
@@ -1349,13 +1418,16 @@ private fun PassphraseDialog(
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     )
                 }
+                if (error.isNotEmpty()) {
+                    Text(error, color = Danger)
+                }
             }
         },
         confirmButton = {
             TextButton(onClick = { onSubmit(phrase, again) }, enabled = !busy) { Text("Continue") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss, enabled = !busy) { Text("Cancel") }
         },
     )
 }
