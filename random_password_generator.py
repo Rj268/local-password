@@ -18,6 +18,7 @@ import shutil
 import string
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 MIN_PASSWORD_LENGTH = 1
@@ -338,6 +339,16 @@ def _copy_with_pyperclip(password: str) -> bool:
     return True
 
 
+def _windows_open_clipboard(user32, attempts: int = 12) -> bool:
+    """Retry OpenClipboard — GTK often holds it briefly on Windows."""
+    for attempt in range(attempts):
+        if user32.OpenClipboard(None):
+            return True
+        if attempt + 1 < attempts:
+            time.sleep(0.02)
+    return False
+
+
 def copy_with_windows(password: str) -> bool:
     """Copy with the Windows clipboard. The password is not a command argument."""
     if sys.platform != "win32":
@@ -346,28 +357,73 @@ def copy_with_windows(password: str) -> bool:
 
     user32 = ctypes.WinDLL("user32", use_last_error=True)
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    gmem_moveable = 0x0002
+    cf_unicodetext = 13
     data = password.encode("utf-16-le") + b"\0\0"
-    if not user32.OpenClipboard(None):
+    if not _windows_open_clipboard(user32):
         return False
     handle = None
     try:
         if not user32.EmptyClipboard():
             return False
-        handle = kernel32.GlobalAlloc(0x0002, len(data))
+        handle = kernel32.GlobalAlloc(gmem_moveable, len(data))
         if not handle:
             return False
         locked = kernel32.GlobalLock(handle)
         if not locked:
             return False
-        ctypes.memmove(locked, data, len(data))
-        kernel32.GlobalUnlock(handle)
-        if not user32.SetClipboardData(13, handle):
+        try:
+            ctypes.memmove(locked, data, len(data))
+        finally:
+            kernel32.GlobalUnlock(handle)
+        if not user32.SetClipboardData(cf_unicodetext, handle):
             return False
         handle = None
         return True
     finally:
         if handle:
             kernel32.GlobalFree(handle)
+        user32.CloseClipboard()
+
+
+def read_windows_clipboard_text() -> str | None:
+    """Read Unicode text from the Windows clipboard, or None."""
+    if sys.platform != "win32":
+        return None
+    import ctypes
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    cf_unicodetext = 13
+    if not _windows_open_clipboard(user32):
+        return None
+    try:
+        handle = user32.GetClipboardData(cf_unicodetext)
+        if not handle:
+            return None
+        locked = kernel32.GlobalLock(handle)
+        if not locked:
+            return None
+        try:
+            return ctypes.wstring_at(locked)
+        finally:
+            kernel32.GlobalUnlock(handle)
+    finally:
+        user32.CloseClipboard()
+
+
+def clear_windows_clipboard() -> bool:
+    """Empty the Windows clipboard. Best-effort."""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    if not _windows_open_clipboard(user32):
+        return False
+    try:
+        return bool(user32.EmptyClipboard())
+    finally:
         user32.CloseClipboard()
 
 

@@ -1452,8 +1452,84 @@ class WindowsPrepTests(unittest.TestCase):
             Path(r"C:\Users\me\AppData\Local") / "local-password" / "saved.txt",
         )
 
-    def test_windows_clipboard_is_not_used_here(self) -> None:
+    def test_windows_clipboard_helpers_are_noops_off_win32(self) -> None:
+        self.assertNotEqual(password_app.sys.platform, "win32")
         self.assertFalse(password_app.generator.copy_with_windows("secret-value"))
+        self.assertFalse(password_app.generator.clear_windows_clipboard())
+        self.assertIsNone(password_app.generator.read_windows_clipboard_text())
+
+    def test_windows_open_clipboard_retries_before_giving_up(self) -> None:
+        calls = {"n": 0}
+
+        class FakeUser32:
+            def OpenClipboard(self, _hwnd):
+                calls["n"] += 1
+                return calls["n"] >= 3
+
+        with patch.object(password_app.generator.time, "sleep") as sleep:
+            opened = password_app.generator._windows_open_clipboard(FakeUser32(), attempts=5)
+        self.assertTrue(opened)
+        self.assertEqual(calls["n"], 3)
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_copy_prefers_windows_api_on_win32(self) -> None:
+        """GTK clipboard success must not skip the real Windows clipboard."""
+
+        class FakeStatus:
+            def __init__(self) -> None:
+                self.text = ""
+
+            def set_text(self, text: str) -> None:
+                self.text = text
+
+        fake = type("FakeWindow", (), {})()
+        fake.section = "generate"
+        fake.vault_key = None
+        fake.preferences = password_app.Preferences(clipboard_clear_seconds=30)
+        fake.status = FakeStatus()
+        fake.scheduled = None
+        fake.activity = 0
+        fake.gtk = object()
+        fake.gdk = object()
+
+        def note_activity() -> None:
+            fake.activity += 1
+
+        def schedule(text: str) -> None:
+            fake.scheduled = text
+
+        fake._note_activity = note_activity
+        fake._schedule_clipboard_clear = schedule
+
+        order: list[str] = []
+
+        def windows_copy(text: str) -> bool:
+            order.append("windows")
+            self.assertEqual(text, "secret-value")
+            return True
+
+        def xclip_copy(text: str) -> bool:
+            order.append("xclip")
+            return False
+
+        class BoomClipboard:
+            @staticmethod
+            def get(_selection):
+                order.append("gtk")
+                raise AssertionError("GTK clipboard must not run after Win32 success")
+
+        fake.gtk = type("Gtk", (), {"Clipboard": BoomClipboard})()
+        fake.gdk = type("Gdk", (), {"SELECTION_CLIPBOARD": object()})()
+
+        with patch.object(password_app.sys, "platform", "win32"), patch.object(
+            password_app.generator, "copy_with_windows", side_effect=windows_copy
+        ), patch.object(password_app, "copy_with_xclip", side_effect=xclip_copy):
+            password_app.PasswordWindow.on_copy_text(fake, "secret-value")
+
+        self.assertEqual(order, ["windows"])
+        self.assertIn("Copied", fake.status.text)
+        self.assertEqual(fake.scheduled, "secret-value")
+        self.assertEqual(fake.activity, 1)
 
 
 if __name__ == "__main__":

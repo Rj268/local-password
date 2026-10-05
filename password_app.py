@@ -92,7 +92,7 @@ AUTO_LOCK_OPTIONS = (
     (300, "5 minutes"),
     (900, "15 minutes"),
 )
-APP_VERSION = "1.31.0"
+APP_VERSION = "1.31.3"
 THEME_LIGHT = "light"
 THEME_DARK = "dark"
 THEME_SYSTEM = "system"
@@ -2879,11 +2879,16 @@ class PasswordWindow:
         self._clipboard_value = ""
         if not expected:
             return False
+        # Windows: GTK's clipboard is often not the system clipboard. Clear Win32 first.
+        if sys.platform == "win32":
+            current = generator.read_windows_clipboard_text()
+            if current == expected:
+                generator.clear_windows_clipboard()
         try:
             clipboard = self.gtk.Clipboard.get(self.gdk.SELECTION_CLIPBOARD)
             current = clipboard.wait_for_text()
             if current == expected:
-                clipboard.set_text("", 0)
+                clipboard.set_text("", -1)
                 clipboard.store()
         except Exception:
             pass
@@ -6147,15 +6152,22 @@ class PasswordWindow:
             return
         self._note_activity()
         copied = False
-        try:
-            clipboard = self.gtk.Clipboard.get(self.gdk.SELECTION_CLIPBOARD)
-            clipboard.set_text(text, len(text))
-            clipboard.store()
+        # On Windows, GTK Clipboard.set_text often looks successful but does not
+        # put text on the system clipboard other apps paste from. Prefer Win32.
+        if sys.platform == "win32":
+            copied = generator.copy_with_windows(text)
+        if not copied and copy_with_xclip(text):
             copied = True
-        except Exception:
-            copied = False
-        if copy_with_xclip(text) or generator.copy_with_windows(text):
-            copied = True
+        if not copied:
+            try:
+                clipboard = self.gtk.Clipboard.get(self.gdk.SELECTION_CLIPBOARD)
+                clipboard.set_text(text, -1)
+                clipboard.store()
+                copied = True
+            except Exception:
+                copied = False
+        if not copied and sys.platform != "win32":
+            copied = generator.copy_with_windows(text)
         if copied:
             self._schedule_clipboard_clear(text)
             seconds = self.preferences.clipboard_clear_seconds
