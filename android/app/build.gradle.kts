@@ -20,9 +20,9 @@ android {
         applicationId = "app.localpassword"
         minSdk = 26
         targetSdk = 36
-        // Keep in step with desktop APP_VERSION (1.31.2 → 13105 after key icon fix).
-        versionCode = 13105
-        versionName = "1.31.2"
+        // Keep in step with desktop APP_VERSION (1.31.4 → 13106 after icon + app-lock opt-in).
+        versionCode = 13106
+        versionName = "1.31.4"
     }
 
     signingConfigs {

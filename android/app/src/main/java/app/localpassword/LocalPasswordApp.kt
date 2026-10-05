@@ -104,7 +104,9 @@ fun LocalPasswordApp(model: PasswordModel = viewModel()) {
         val activity = context as? Activity
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_STOP && activity?.isChangingConfigurations != true) {
-                model.lockApp()
+                if (model.appLockEnabled) {
+                    model.lockApp()
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -270,6 +272,15 @@ fun LocalPasswordApp(model: PasswordModel = viewModel()) {
             busy = model.busy,
             onDismiss = { model.askEnableBiometric = false },
         ) { phrase, _ -> model.confirmEnableBiometric(phrase) }
+    }
+    if (model.askEnableAppLock) {
+        PassphraseDialog(
+            title = "Turn on app lock",
+            body = "Enter your vault passphrase or recovery key. Closing the app will ask for it again.",
+            confirm = false,
+            busy = model.busy,
+            onDismiss = { model.askEnableAppLock = false },
+        ) { phrase, _ -> model.confirmEnableAppLock(phrase) }
     }
 }
 
@@ -1139,12 +1150,27 @@ private fun SettingsPane(
 
         Text("App lock", color = ink, fontWeight = FontWeight.Bold)
         Text(
-            "Closing the app locks the vault. Unlock with your passphrase" +
-                (if (canBiometric) " or biometrics." else "."),
+            if (model.appLockEnabled) {
+                "On. Closing the app asks for your passphrase" +
+                    (if (canBiometric) " or biometrics." else ".")
+            } else {
+                "Off. Anyone who opens the app can reach Generate. Saved still needs your passphrase."
+            },
             color = muted,
             fontSize = 13.sp,
         )
-        if (canBiometric && model.hasVault()) {
+        TextButton(
+            onClick = {
+                if (model.appLockEnabled) model.disableAppLock() else model.requestEnableAppLock()
+            },
+            enabled = !model.busy,
+        ) {
+            Text(
+                if (model.appLockEnabled) "App lock On" else "App lock Off",
+                color = if (model.appLockEnabled) Green else muted,
+            )
+        }
+        if (canBiometric && model.hasVault() && model.appLockEnabled) {
             TextButton(
                 onClick = {
                     if (model.biometricEnabled) model.disableBiometric() else model.requestEnableBiometric()
@@ -1159,7 +1185,7 @@ private fun SettingsPane(
         }
         TextButton(
             onClick = { model.lockApp() },
-            enabled = model.hasVault() && !model.appLocked,
+            enabled = model.hasVault() && model.appLockEnabled && !model.appLocked,
         ) {
             Text("Lock now", color = Green)
         }

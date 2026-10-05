@@ -3,18 +3,20 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Classic horizontal key: ring bow, shaft, two teeth -->
+    <!-- Connected key: ring, thick shaft through the ring, teeth attached to shaft -->
     <path
         android:fillColor="#F7F3EC"
-        android:fillType="evenOdd"
-        android:pathData="M40,38a16,16 0 1,1 0,32a16,16 0 1,1 0,-32zM40,46a8,8 0 1,0 0,16a8,8 0 1,0 0,-16z" />
+        android:pathData="M38,36a18,18 0 1,1 0,36a18,18 0 1,1 0,-36z" />
+    <path
+        android:fillColor="#0E6B52"
+        android:pathData="M38,45a9,9 0 1,1 0,18a9,9 0 1,1 0,-18z" />
     <path
         android:fillColor="#F7F3EC"
-        android:pathData="M50,48h36a6,6 0 0,1 6,6v0a6,6 0 0,1 -6,6H50a6,6 0 0,1 -6,-6v0a6,6 0 0,1 6,-6z" />
+        android:pathData="M40,46h48a5,5 0 0,1 5,5v6a5,5 0 0,1 -5,5H40a5,5 0 0,1 -5,-5v-6a5,5 0 0,1 5,-5z" />
     <path
         android:fillColor="#F7F3EC"
-        android:pathData="M58,56h10a2.5,2.5 0 0,1 2.5,2.5V78a2.5,2.5 0 0,1 -2.5,2.5h-10a2.5,2.5 0 0,1 -2.5,-2.5V58.5a2.5,2.5 0 0,1 2.5,-2.5z" />
+        android:pathData="M62,54h12a3,3 0 0,1 3,3v22a3,3 0 0,1 -3,3h-12a3,3 0 0,1 -3,-3V57a3,3 0 0,1 3,-3z" />
     <path
         android:fillColor="#F7F3EC"
-        android:pathData="M74,56h10a2.5,2.5 0 0,1 2.5,2.5V70a2.5,2.5 0 0,1 -2.5,2.5h-10a2.5,2.5 0 0,1 -2.5,-2.5V58.5a2.5,2.5 0 0,1 2.5,-2.5z" />
+        android:pathData="M80,54h12a3,3 0 0,1 3,3v14a3,3 0 0,1 -3,3h-12a3,3 0 0,1 -3,-3V57a3,3 0 0,1 3,-3z" />
 </vector>

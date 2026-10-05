@@ -37,8 +37,10 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     var busy by mutableStateOf(false)
     var unlocked by mutableStateOf(false)
     var appLocked by mutableStateOf(false)
+    var appLockEnabled by mutableStateOf(false)
     var biometricEnabled by mutableStateOf(false)
     var askEnableBiometric by mutableStateOf(false)
+    var askEnableAppLock by mutableStateOf(false)
     var saved by mutableStateOf<List<SavedPassword>>(emptyList())
     var revealed by mutableStateOf<String?>(null)
     var askNewPassphrase by mutableStateOf(false)
@@ -78,8 +80,10 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     private val words: List<String> by lazy { loadWords() }
 
     init {
+        appLockEnabled = loadAppLockEnabled()
         biometricEnabled = loadBiometricEnabled() && hasStoredUnlockSecret()
-        if (hasVault()) {
+        // App lock is opt-in. A vault passphrase alone does not lock the whole app.
+        if (hasVault() && appLockEnabled) {
             appLocked = true
             status = "Unlock to open Local Password."
         }
@@ -289,9 +293,56 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
         askChangeCurrent = false
         askChangeNew = false
         askEnableBiometric = false
+        askEnableAppLock = false
         appLocked = true
         status = "Locked."
         error = ""
+    }
+
+    fun requestEnableAppLock() {
+        error = ""
+        if (!hasVault()) {
+            error = "Save a password first. App lock needs a vault passphrase."
+            return
+        }
+        if (unlocked && !lastUnlockSecret.isNullOrEmpty()) {
+            prefs().edit().putBoolean(PREF_APP_LOCK, true).apply()
+            appLockEnabled = true
+            status = "App lock is on. Closing the app asks for your passphrase."
+            return
+        }
+        askEnableAppLock = true
+    }
+
+    fun confirmEnableAppLock(secret: String) {
+        viewModelScope.launch {
+            busy = true
+            error = ""
+            try {
+                val blob = vaultFile().readBytes()
+                val fresh = withContext(Dispatchers.Default) { Vault.open(secret, blob) }
+                opened = fresh
+                saved = fresh.items
+                unlocked = true
+                rememberUnlockSecret(secret)
+                prefs().edit().putBoolean(PREF_APP_LOCK, true).apply()
+                appLockEnabled = true
+                askEnableAppLock = false
+                status = "App lock is on. Closing the app asks for your passphrase."
+            } catch (exc: VaultException) {
+                error = exc.message ?: "That passphrase or recovery key did not unlock the saved passwords."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    fun disableAppLock() {
+        prefs().edit().putBoolean(PREF_APP_LOCK, false).apply()
+        appLockEnabled = false
+        disableBiometric(announce = false)
+        appLocked = false
+        status = "App lock is off. Saved passwords still need the passphrase when you open them."
     }
 
     fun unlockWithBiometricSecret() {
@@ -306,6 +357,10 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
 
     fun requestEnableBiometric() {
         error = ""
+        if (!appLockEnabled) {
+            error = "Turn on App lock first."
+            return
+        }
         if (!unlocked || lastUnlockSecret.isNullOrEmpty()) {
             askEnableBiometric = true
             return
@@ -1008,8 +1063,12 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
         revealed = null
         section = "saved"
         disableBiometric(announce = false)
-        appLocked = true
-        askUnlock = false
+        if (appLockEnabled) {
+            appLocked = true
+        } else {
+            appLocked = false
+            askUnlock = true
+        }
         status = "Vault copied onto this phone. Unlock with the same passphrase."
         error = ""
     }
@@ -1338,6 +1397,8 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
         return prefs().getString("appearance", "light") == "dark"
     }
 
+    private fun loadAppLockEnabled(): Boolean = prefs().getBoolean(PREF_APP_LOCK, false)
+
     private fun loadBiometricEnabled(): Boolean = prefs().getBoolean(PREF_BIOMETRIC, false)
 
     private fun prefs(): SharedPreferences =
@@ -1393,6 +1454,7 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     private data class Made(val text: String, val bits: Double, val note: String)
 
     companion object {
+        private const val PREF_APP_LOCK = "app_lock"
         private const val PREF_BIOMETRIC = "biometric_unlock"
         private const val PREF_UNLOCK_SECRET = "unlock_secret"
     }
