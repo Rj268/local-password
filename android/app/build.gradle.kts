@@ -20,9 +20,9 @@ android {
         applicationId = "app.localpassword"
         minSdk = 26
         targetSdk = 36
-        // Keep in step with desktop APP_VERSION (1.31.0 → 13101 after Play targetSdk bump).
-        versionCode = 13103
-        versionName = "1.31.0"
+        // Keep in step with desktop APP_VERSION (1.31.1 → 13104 after UI/app-lock polish).
+        versionCode = 13104
+        versionName = "1.31.1"
     }
 
     signingConfigs {
@@ -82,5 +82,8 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+    implementation("androidx.biometric:biometric:1.1.0")
+    implementation("androidx.fragment:fragment-ktx:1.8.5")
+    implementation("androidx.security:security-crypto:1.0.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }

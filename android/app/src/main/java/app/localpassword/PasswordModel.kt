@@ -3,12 +3,15 @@ package app.localpassword
 import android.app.Application
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.SharedPreferences
 import android.net.wifi.WifiManager
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -33,6 +36,9 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     var status by mutableStateOf("Generate a password. Name it, then save it.")
     var busy by mutableStateOf(false)
     var unlocked by mutableStateOf(false)
+    var appLocked by mutableStateOf(false)
+    var biometricEnabled by mutableStateOf(false)
+    var askEnableBiometric by mutableStateOf(false)
     var saved by mutableStateOf<List<SavedPassword>>(emptyList())
     var revealed by mutableStateOf<String?>(null)
     var askNewPassphrase by mutableStateOf(false)
@@ -68,7 +74,16 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     private var incomingBlob: ByteArray? = null
     private var changeItems: List<SavedPassword>? = null
     private var clipboardGeneration = 0
+    private var lastUnlockSecret: String? = null
     private val words: List<String> by lazy { loadWords() }
+
+    init {
+        biometricEnabled = loadBiometricEnabled() && hasStoredUnlockSecret()
+        if (hasVault()) {
+            appLocked = true
+            status = "Unlock to open Local Password."
+        }
+    }
 
     fun vaultFile(): File = File(getApplication<Application>().filesDir, "saved.vault")
 
@@ -205,7 +220,9 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
                 opened = fresh
                 saved = fresh.items
                 unlocked = true
+                appLocked = false
                 askNewPassphrase = false
+                rememberUnlockSecret(passphrase)
                 recoveryKey = recovery
                 status = "Saved."
             } catch (exc: VaultException) {
@@ -226,7 +243,9 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
                 opened = fresh
                 saved = fresh.items
                 unlocked = true
+                appLocked = false
                 askUnlock = false
+                rememberUnlockSecret(secret)
                 val waiting = incomingBlob
                 if (waiting != null) {
                     status = "Unlocked."
@@ -242,6 +261,92 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
+    fun lockApp() {
+        if (!hasVault()) {
+            appLocked = false
+            return
+        }
+        if (appLocked) return
+        // Keep the recovery-key dialog up until the user acknowledges it.
+        if (recoveryKey != null) return
+        opened = null
+        unlocked = false
+        saved = emptyList()
+        revealed = null
+        lastRemoved = null
+        pendingRemove = null
+        pendingReplace = null
+        historyFor = null
+        editing = null
+        renaming = null
+        categorizing = null
+        editingUsername = null
+        editingUrl = null
+        editingNotes = null
+        askUnlock = false
+        askNewPassphrase = false
+        askChangeCurrent = false
+        askChangeNew = false
+        askEnableBiometric = false
+        appLocked = true
+        status = "Locked."
+        error = ""
+    }
+
+    fun unlockWithBiometricSecret() {
+        val secret = readStoredUnlockSecret()
+        if (secret.isNullOrEmpty()) {
+            error = "Biometric unlock is not set up. Enter your passphrase."
+            biometricEnabled = false
+            return
+        }
+        unlock(secret, thenSave = false)
+    }
+
+    fun requestEnableBiometric() {
+        error = ""
+        if (!unlocked || lastUnlockSecret.isNullOrEmpty()) {
+            askEnableBiometric = true
+            return
+        }
+        storeUnlockSecret(lastUnlockSecret!!)
+        biometricEnabled = true
+        prefs().edit().putBoolean(PREF_BIOMETRIC, true).apply()
+        status = "Biometric unlock is on."
+    }
+
+    fun confirmEnableBiometric(secret: String) {
+        viewModelScope.launch {
+            busy = true
+            error = ""
+            try {
+                val blob = vaultFile().readBytes()
+                withContext(Dispatchers.Default) { Vault.open(secret, blob) }
+                storeUnlockSecret(secret)
+                rememberUnlockSecret(secret)
+                biometricEnabled = true
+                prefs().edit().putBoolean(PREF_BIOMETRIC, true).apply()
+                askEnableBiometric = false
+                status = "Biometric unlock is on."
+            } catch (exc: VaultException) {
+                error = exc.message ?: "That passphrase or recovery key did not unlock the saved passwords."
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    fun disableBiometric(announce: Boolean = true) {
+        clearStoredUnlockSecret()
+        biometricEnabled = false
+        prefs().edit().putBoolean(PREF_BIOMETRIC, false).apply()
+        if (announce) {
+            status = "Biometric unlock is off."
+        }
+    }
+
+    fun hasBiometricSecret(): Boolean = biometricEnabled && hasStoredUnlockSecret()
 
     fun requestChangePassphrase() {
         error = ""
@@ -301,8 +406,10 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
                 opened = fresh
                 saved = fresh.items
                 unlocked = true
+                appLocked = false
                 askChangeNew = false
                 changeItems = null
+                rememberUnlockSecret(passphrase)
                 recoveryKey = recovery
                 status = "Passphrase changed. The old passphrase and recovery key no longer open this vault."
             } catch (exc: VaultException) {
@@ -900,8 +1007,10 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
         lastRemoved = null
         revealed = null
         section = "saved"
-        askUnlock = true
-        status = "Vault copied onto this phone. The same passphrase opens it."
+        disableBiometric(announce = false)
+        appLocked = true
+        askUnlock = false
+        status = "Vault copied onto this phone. Unlock with the same passphrase."
         error = ""
     }
 
@@ -1218,9 +1327,60 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private fun rememberUnlockSecret(secret: String) {
+        lastUnlockSecret = secret
+        if (biometricEnabled) {
+            storeUnlockSecret(secret)
+        }
+    }
+
     private fun loadDark(): Boolean {
-        return getApplication<Application>().getSharedPreferences("local-password", 0)
-            .getString("appearance", "light") == "dark"
+        return prefs().getString("appearance", "light") == "dark"
+    }
+
+    private fun loadBiometricEnabled(): Boolean = prefs().getBoolean(PREF_BIOMETRIC, false)
+
+    private fun prefs(): SharedPreferences =
+        getApplication<Application>().getSharedPreferences("local-password", 0)
+
+    private fun encryptedPrefs(): SharedPreferences {
+        val app = getApplication<Application>()
+        val masterKey = MasterKey.Builder(app)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        return EncryptedSharedPreferences.create(
+            app,
+            "local-password-secure",
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+        )
+    }
+
+    private fun hasStoredUnlockSecret(): Boolean =
+        try {
+            !encryptedPrefs().getString(PREF_UNLOCK_SECRET, null).isNullOrEmpty()
+        } catch (_: Exception) {
+            false
+        }
+
+    private fun readStoredUnlockSecret(): String? =
+        try {
+            encryptedPrefs().getString(PREF_UNLOCK_SECRET, null)
+        } catch (_: Exception) {
+            null
+        }
+
+    private fun storeUnlockSecret(secret: String) {
+        encryptedPrefs().edit().putString(PREF_UNLOCK_SECRET, secret).apply()
+    }
+
+    private fun clearStoredUnlockSecret() {
+        try {
+            encryptedPrefs().edit().remove(PREF_UNLOCK_SECRET).apply()
+        } catch (_: Exception) {
+            // Ignore wipe failures; biometric toggle is already cleared.
+        }
     }
 
     private fun loadWords(): List<String> {
@@ -1231,6 +1391,11 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     }
 
     private data class Made(val text: String, val bits: Double, val note: String)
+
+    companion object {
+        private const val PREF_BIOMETRIC = "biometric_unlock"
+        private const val PREF_UNLOCK_SECRET = "unlock_secret"
+    }
 }
 
 private fun ByteArray.startsWithMagic(magic: String): Boolean {
