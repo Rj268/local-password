@@ -12,6 +12,7 @@ if [ "${MSYSTEM:-}" != "UCRT64" ]; then
   echo "    mingw-w64-ucrt-x86_64-python \\" >&2
   echo "    mingw-w64-ucrt-x86_64-python-gobject \\" >&2
   echo "    mingw-w64-ucrt-x86_64-python-cryptography \\" >&2
+  echo "    mingw-w64-ucrt-x86_64-python-pillow \\" >&2
   echo "    mingw-w64-ucrt-x86_64-pyinstaller \\" >&2
   echo "    mingw-w64-ucrt-x86_64-librsvg" >&2
   exit 1
@@ -34,12 +35,26 @@ for tool in python pyinstaller gdk-pixbuf-query-loaders glib-compile-schemas; do
 done
 if [ "$missing" -ne 0 ]; then
   echo "From the UCRT64 shell, install:" >&2
-  echo "  pacman -S --needed mingw-w64-ucrt-x86_64-gtk3 mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-python-gobject mingw-w64-ucrt-x86_64-python-cryptography mingw-w64-ucrt-x86_64-pyinstaller mingw-w64-ucrt-x86_64-librsvg" >&2
+  echo "  pacman -S --needed mingw-w64-ucrt-x86_64-gtk3 mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-python-gobject mingw-w64-ucrt-x86_64-python-cryptography mingw-w64-ucrt-x86_64-python-pillow mingw-w64-ucrt-x86_64-pyinstaller mingw-w64-ucrt-x86_64-librsvg" >&2
   exit 1
 fi
 
-# Refresh the Premium Emerald icon assets used by the exe, shortcuts, and window.
-python "$ROOT/packaging/windows/make_icon.py"
+# Refresh icon assets for the exe, shortcuts, and window. Pillow is only needed
+# to regenerate them; committed .ico/.png files are enough for a normal build.
+ICO="$ROOT/packaging/windows/local-password.ico"
+PNG="$ROOT/packaging/windows/local-password.png"
+if python -c "from PIL import Image" >/dev/null 2>&1; then
+  python "$ROOT/packaging/windows/make_icon.py"
+elif [ -f "$ICO" ] && [ -f "$PNG" ]; then
+  echo "Pillow not installed; using existing packaging/windows/local-password.ico" >&2
+  echo "To regenerate icons later: pacman -S --needed mingw-w64-ucrt-x86_64-python-pillow" >&2
+else
+  echo "Missing Pillow and no prebuilt icon files." >&2
+  echo "From the UCRT64 shell, install:" >&2
+  echo "  pacman -S --needed mingw-w64-ucrt-x86_64-python-pillow" >&2
+  echo "Then re-run this script." >&2
+  exit 1
+fi
 
 # Keep MSYS from rewriting the Windows paths in this command line.
 MSYS2_ARG_CONV_EXCL='*' python -m PyInstaller --noconfirm --windowed --onedir --name LocalPassword \

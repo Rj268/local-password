@@ -4,9 +4,21 @@
 from __future__ import annotations
 
 import shutil
+import sys
 from pathlib import Path
 
-from PIL import Image
+try:
+    from PIL import Image
+except ModuleNotFoundError as exc:  # pragma: no cover - environment setup
+    if exc.name not in ("PIL", "Pillow"):
+        raise
+    sys.stderr.write(
+        "Pillow is required to regenerate icons.\n"
+        "On MSYS2 UCRT64, install it with:\n"
+        "  pacman -S --needed mingw-w64-ucrt-x86_64-python-pillow\n"
+        "Or skip regeneration and use the committed packaging/windows/*.ico files.\n"
+    )
+    raise SystemExit(1) from exc
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
