@@ -20,9 +20,9 @@ android {
         applicationId = "app.localpassword"
         minSdk = 26
         targetSdk = 36
-        // Keep in step with desktop APP_VERSION (1.31.5 → 13107 after lock UX + icon safe-zone).
-        versionCode = 13107
-        versionName = "1.31.5"
+        // Play upload with official diagonal-key emerald launcher icon.
+        versionCode = 13108
+        versionName = "1.31.6"
     }
 
     signingConfigs {

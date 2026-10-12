@@ -1,5 +1,9 @@
 # Release notes
 
+## 1.31.6 (Android)
+
+- Official diagonal-key Premium Emerald launcher icon for Google Play
+
 ## 1.31.0
 
 - Public-release prep: `PRIVACY.md`, `LICENSE` (MIT), `PUBLIC_RELEASE.md` checklist
