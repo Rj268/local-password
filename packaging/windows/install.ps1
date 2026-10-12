@@ -8,6 +8,11 @@ $ErrorActionPreference = "Stop"
 if (-not $Source) {
     $Source = Join-Path $PSScriptRoot "LocalPassword"
 }
+# Relative paths like dist\windows\LocalPassword must be absolute before we walk parents.
+if (-not [System.IO.Path]::IsPathRooted($Source)) {
+    $Source = Join-Path (Get-Location).Path $Source
+}
+$Source = [System.IO.Path]::GetFullPath($Source)
 
 $sourceExe = Join-Path $Source "LocalPassword.exe"
 if (-not (Test-Path -LiteralPath $sourceExe)) {
@@ -25,18 +30,21 @@ Copy-Item -LiteralPath $Source -Destination $dest -Recurse -Force
 
 $exe = Join-Path $dest "LocalPassword.exe"
 $icon = Join-Path $dest "local-password.ico"
-# Prefer the ico shipped beside the build, then the repo packaging copy.
-$iconCandidates = @(
-    (Join-Path $Source "local-password.ico"),
-    (Join-Path (Split-Path -Parent $Source) "local-password.ico")
-)
-$repoRoot = $Source
-for ($i = 0; $i -lt 3; $i++) {
-    $repoRoot = Split-Path -Parent $repoRoot
+# Prefer the ico shipped in the build folder, then walk up for the repo packaging copy.
+$iconCandidates = New-Object System.Collections.Generic.List[string]
+$iconCandidates.Add((Join-Path $Source "local-password.ico"))
+$walk = $Source
+for ($i = 0; $i -lt 6; $i++) {
+    $parent = Split-Path -Parent $walk
+    if (-not $parent -or $parent -eq $walk) {
+        break
+    }
+    $walk = $parent
+    $iconCandidates.Add((Join-Path $walk "local-password.ico"))
+    $iconCandidates.Add((Join-Path $walk "packaging\windows\local-password.ico"))
 }
-$iconCandidates += (Join-Path $repoRoot "packaging\windows\local-password.ico")
 foreach ($candidate in $iconCandidates) {
-    if (Test-Path -LiteralPath $candidate) {
+    if ($candidate -and (Test-Path -LiteralPath $candidate)) {
         Copy-Item -LiteralPath $candidate -Destination $icon -Force
         break
     }
