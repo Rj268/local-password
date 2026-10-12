@@ -38,6 +38,9 @@ if [ "$missing" -ne 0 ]; then
   exit 1
 fi
 
+# Refresh the Premium Emerald icon assets used by the exe, shortcuts, and window.
+python "$ROOT/packaging/windows/make_icon.py"
+
 # Keep MSYS from rewriting the Windows paths in this command line.
 MSYS2_ARG_CONV_EXCL='*' python -m PyInstaller --noconfirm --windowed --onedir --name LocalPassword \
   --distpath "$WINROOT/dist/windows" \
@@ -90,6 +93,8 @@ WINDEST=$(cygpath -m "$DEST")
 WINBIN=$(cygpath -m "$PREFIX/bin")
 python "$WINROOT/packaging/windows/scrub_icons.py" "$WINDEST" "$WINBIN"
 cp "$ROOT/packaging/windows/SHARE.txt" "$DEST/Read-this.txt"
+cp "$ROOT/packaging/windows/local-password.ico" "$DEST/local-password.ico"
+cp "$ROOT/packaging/windows/local-password.png" "$DEST/local-password.png"
 cp "$ROOT/packaging/windows/install.ps1" "$ROOT/dist/windows/install.ps1"
 cp "$ROOT/packaging/windows/Install Local Password.cmd" "$ROOT/dist/windows/Install Local Password.cmd"
 

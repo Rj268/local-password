@@ -1,57 +1,111 @@
 #!/usr/bin/env python3
-"""Draw the green key icon used by the Windows exe and the window."""
+"""Build Local Password icon assets from the official Premium Emerald artwork."""
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image
 
-GREEN = (0x0E, 0x6B, 0x52, 255)
-CREAM = (0xF5, 0xF4, 0xEF, 255)
-SIZES = (16, 24, 32, 48, 64, 128, 256)
 HERE = Path(__file__).resolve().parent
+ROOT = HERE.parents[1]
+# Official artwork (diagonal white key on emerald squircle).
+SOURCE_CANDIDATES = (
+    ROOT / "packaging" / "branding" / "app-icon.png",
+    HERE / "icon-source.png",
+)
+
+PNG_SIZES = (16, 24, 32, 48, 64, 128, 256, 512, 1024)
+ICO_SIZES = (16, 24, 32, 48, 64, 128, 256)
+# Android launcher densities (px for mdpi baseline 48dp).
+ANDROID_MIPMAPS = {
+    "mipmap-mdpi": 48,
+    "mipmap-hdpi": 72,
+    "mipmap-xhdpi": 96,
+    "mipmap-xxhdpi": 144,
+    "mipmap-xxxhdpi": 192,
+}
+# Adaptive foreground is 108dp; keep artwork in the safe zone with padding.
+ANDROID_ADAPTIVE_FG = 432  # xxxhdpi 108dp
 
 
-def draw_icon(size: int) -> Image.Image:
-    """Compact classic key on a green rounded square — fits round launcher masks."""
-    scale = size / 64
-    image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    pen = ImageDraw.Draw(image)
-    corner = max(2, round(14 * scale))
-    pen.rounded_rectangle((0, 0, size - 1, size - 1), radius=corner, fill=GREEN)
-
-    def box(x0: float, y0: float, x1: float, y1: float) -> tuple[float, float, float, float]:
-        return (x0 * scale, y0 * scale, x1 * scale, y1 * scale)
-
-    cx, cy = 22.0, 32.0
-    outer, inner = 11.0, 5.0
-    pen.ellipse(box(cx - outer, cy - outer, cx + outer, cy + outer), fill=CREAM)
-    pen.ellipse(box(cx - inner, cy - inner, cx + inner, cy + inner), fill=GREEN)
-
-    radius = max(1, round(2 * scale))
-    # Shaft starts inside the ring; tip stays clear of the icon edge
-    pen.rounded_rectangle(box(24, 28, 52, 36), radius=radius, fill=CREAM)
-    pen.rounded_rectangle(box(38, 33, 45, 47), radius=radius, fill=CREAM)
-    pen.rounded_rectangle(box(47, 33, 54, 43), radius=radius, fill=CREAM)
-    return image
+def resolve_source() -> Path:
+    for path in SOURCE_CANDIDATES:
+        if path.is_file():
+            return path
+    raise FileNotFoundError(
+        "Missing icon source. Expected packaging/branding/app-icon.png"
+    )
 
 
-def write_icons(directory: Path = HERE) -> tuple[Path, Path]:
-    images = [draw_icon(size) for size in SIZES]
+def load_master() -> Image.Image:
+    source = resolve_source()
+    image = Image.open(source).convert("RGBA")
+    # Normalize to a square master so every export stays centered.
+    side = max(image.size)
+    canvas = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+    x = (side - image.width) // 2
+    y = (side - image.height) // 2
+    canvas.paste(image, (x, y), image)
+    return canvas
+
+
+def resize(image: Image.Image, size: int) -> Image.Image:
+    return image.resize((size, size), Image.Resampling.LANCZOS)
+
+
+def adaptive_foreground(master: Image.Image, size: int = ANDROID_ADAPTIVE_FG) -> Image.Image:
+    """Place the full icon inside the adaptive safe zone on a transparent canvas."""
+    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    # Safe zone ~66/108 of the canvas; use ~72% so the squircle fills nicely.
+    inner = int(round(size * 0.72))
+    icon = resize(master, inner)
+    x = (size - inner) // 2
+    y = (size - inner) // 2
+    canvas.paste(icon, (x, y), icon)
+    return canvas
+
+
+def write_icons(directory: Path = HERE) -> tuple[Path, Path, Path]:
+    master = load_master()
+    icons_dir = directory / "icons"
+    icons_dir.mkdir(parents=True, exist_ok=True)
+
+    by_size = {size: resize(master, size) for size in PNG_SIZES}
+    for size, image in by_size.items():
+        image.save(icons_dir / f"local-password-{size}.png", format="PNG")
+
     png_path = directory / "local-password.png"
+    by_size[256].save(png_path, format="PNG")
+
+    ico_images = [by_size[size] for size in ICO_SIZES]
     ico_path = directory / "local-password.ico"
-    images[-1].save(png_path, format="PNG")
-    images[-1].save(
+    ico_images[-1].save(
         ico_path,
         format="ICO",
-        sizes=[(size, size) for size in SIZES],
-        append_images=images[:-1],
+        sizes=[(size, size) for size in ICO_SIZES],
+        append_images=ico_images[:-1],
     )
-    return png_path, ico_path
+
+    # Keep a copy next to the generator for Windows rebuilds that only ship packaging/windows.
+    shutil.copy2(resolve_source(), directory / "icon-source.png")
+
+    android_res = ROOT / "android" / "app" / "src" / "main" / "res"
+    for folder, size in ANDROID_MIPMAPS.items():
+        out_dir = android_res / folder
+        out_dir.mkdir(parents=True, exist_ok=True)
+        resize(master, size).save(out_dir / "ic_launcher.png", format="PNG")
+
+    fg_dir = android_res / "drawable"
+    fg_dir.mkdir(parents=True, exist_ok=True)
+    adaptive_foreground(master).save(fg_dir / "ic_launcher_fg.png", format="PNG")
+
+    return png_path, ico_path, icons_dir
 
 
 if __name__ == "__main__":
-    png_path, ico_path = write_icons()
+    png_path, ico_path, icons_dir = write_icons()
     print(png_path)
     print(ico_path)
+    print(icons_dir)

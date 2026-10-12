@@ -25,9 +25,21 @@ Copy-Item -LiteralPath $Source -Destination $dest -Recurse -Force
 
 $exe = Join-Path $dest "LocalPassword.exe"
 $icon = Join-Path $dest "local-password.ico"
-$iconSource = Join-Path (Split-Path (Split-Path $Source -Parent) -Parent) "packaging\windows\local-password.ico"
-if (Test-Path -LiteralPath $iconSource) {
-    Copy-Item -LiteralPath $iconSource -Destination $icon -Force
+# Prefer the ico shipped beside the build, then the repo packaging copy.
+$iconCandidates = @(
+    (Join-Path $Source "local-password.ico"),
+    (Join-Path (Split-Path -Parent $Source) "local-password.ico")
+)
+$repoRoot = $Source
+for ($i = 0; $i -lt 3; $i++) {
+    $repoRoot = Split-Path -Parent $repoRoot
+}
+$iconCandidates += (Join-Path $repoRoot "packaging\windows\local-password.ico")
+foreach ($candidate in $iconCandidates) {
+    if (Test-Path -LiteralPath $candidate) {
+        Copy-Item -LiteralPath $candidate -Destination $icon -Force
+        break
+    }
 }
 $iconLocation = if (Test-Path -LiteralPath $icon) { $icon } else { "$exe,0" }
 

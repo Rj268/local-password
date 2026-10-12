@@ -24,14 +24,14 @@ class WindowsInstallTests(unittest.TestCase):
         self.assertIn(b"\r\n", command)
         self.assertIn(b"install.ps1", command)
 
-    def test_icon_script_embeds_the_green_key(self) -> None:
+    def test_icon_script_applies_the_packaged_ico(self) -> None:
         script = (WINDOWS / "set_icon.ps1").read_text(encoding="utf-8")
-        self.assertIn("AAABAAcA", script)
-        self.assertIn(r"Programs\Local Password", script)
         self.assertIn("local-password.ico", script)
-        self.assertIn("0x4D, 0x45, 0x49, 0x0C, 0x0D, 0x0A, 0x0D, 0x0B", script)
+        self.assertIn(r"Programs\Local Password", script)
         self.assertIn("BeginUpdateResource", script)
         self.assertIn("installed copy was left as it is", script)
+        self.assertIn("Premium Emerald", script)
+        self.assertNotIn("AAABAAcA", script)
 
     def test_build_puts_the_installer_in_the_zip(self) -> None:
         script = (WINDOWS / "build.sh").read_text(encoding="utf-8")
