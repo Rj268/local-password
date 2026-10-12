@@ -74,9 +74,12 @@ pacman -S --needed \
   mingw-w64-ucrt-x86_64-python \
   mingw-w64-ucrt-x86_64-python-gobject \
   mingw-w64-ucrt-x86_64-python-cryptography \
+  mingw-w64-ucrt-x86_64-python-pillow \
   mingw-w64-ucrt-x86_64-pyinstaller \
   mingw-w64-ucrt-x86_64-librsvg
 ```
+
+Pillow is optional for a normal build when `packaging/windows/local-password.ico` is already in the repo. Install it only if you need to regenerate icons with `python packaging/windows/make_icon.py`.
 
 3. From the project folder, run `bash packaging/windows/build.sh`. The script removes SVG theme icons and leaves a PNG fallback, so the window can open. It also stamps the green key onto `LocalPassword.exe` and writes `dist/windows/LocalPassword-windows.zip`.
 4. Install it into the Start menu and onto the desktop:
