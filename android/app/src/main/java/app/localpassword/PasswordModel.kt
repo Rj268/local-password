@@ -323,7 +323,7 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
         pendingLockJob = null
     }
 
-    fun setAutoLockSeconds(seconds: Int) {
+    fun chooseAutoLockSeconds(seconds: Int) {
         val next = AUTO_LOCK_OPTIONS.firstOrNull { it == seconds } ?: DEFAULT_AUTO_LOCK_SECONDS
         autoLockSeconds = next
         prefs().edit().putInt(PREF_AUTO_LOCK_SECONDS, next).apply()

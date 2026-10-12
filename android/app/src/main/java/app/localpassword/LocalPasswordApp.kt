@@ -1219,7 +1219,7 @@ private fun SettingsPane(
                     300 to "5 min",
                     900 to "15 min",
                 ).forEach { (seconds, label) ->
-                    TextButton(onClick = { model.setAutoLockSeconds(seconds) }) {
+                    TextButton(onClick = { model.chooseAutoLockSeconds(seconds) }) {
                         Text(
                             label,
                             color = if (model.autoLockSeconds == seconds) Green else muted,
