@@ -1,5 +1,21 @@
 # Release notes
 
+## 1.31.8 (Windows desktop)
+
+- Android-style Create, Vault, and Settings flow adapted for desktop, with light and dark emerald themes.
+- Generator length slider and character switches, masked results, and a Save to Vault naming prompt.
+- Compact vault list with favorites, expandable details, and local password-health summary.
+- Atomic vault replacement preserves the previous file if saving fails. Payload-verification errors are distinguished from an incorrect unlock secret.
+- Desktop validation: 121 tests ran without failures; 3 platform-related skips.
+
+## 1.31.7 (Android)
+
+- Automatic biometric unlock on return to the app, including from recent apps, with passphrase fallback.
+- Android Autofill service with destination details, biometric unlock, and a login-selection panel.
+- Updated Create, Vault, entry details, and Settings screens, generator options, and local password-health checks.
+- Updated dependencies and build tools; Android API 37 is required to compile. Target SDK remains 36; minimum SDK remains 26.
+- Closed-testing bundle uses version code 13109. Release checks passed 47 unit tests with 0 lint errors; 16 lint warnings remain.
+
 ## 1.31.6 (Android)
 
 - Official diagonal-key Premium Emerald launcher icon for Google Play

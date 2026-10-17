@@ -633,7 +633,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "-s",
         "--special",
         action="store_true",
-        help="Include shell-safe special characters such as @%+=",
+        help="Include shell-safe special characters such as @%%+=",
     )
     parser.add_argument(
         "--all-special",

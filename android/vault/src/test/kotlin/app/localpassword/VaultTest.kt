@@ -25,6 +25,46 @@ class VaultTest {
     }
 
     @Test
+    fun rejectsUnsafeScryptParametersBeforeKeyDerivation() {
+        val computerVault = javaClass.getResourceAsStream("/computer.vault")!!.readBytes()
+        assertEquals("LPV2", computerVault.copyOfRange(0, 4).toString(Charsets.US_ASCII))
+        val recovery = "alpha bravo charlie delta echo foxtrot golf hotel"
+        val version2 = Vault.create("correct horse", recovery, emptyList()).first
+
+        val malformedLegacyHeader = computerVault.copyOf().also { it[3] = '1'.code.toByte() }
+        for (source in listOf(computerVault, version2, malformedLegacyHeader)) {
+            // Both supported formats store N at byte offset 4. Reject unbounded work
+            // before either format attempts passphrase or recovery-key derivation.
+            val malicious = source.copyOf().also {
+                it[4] = 0x7f
+                it[5] = 0x7f
+                it[6] = 0x7f
+                it[7] = 0x7f
+            }
+            val error = assertThrows<VaultException> {
+                Vault.open("correct horse", malicious)
+            }
+            assertEquals("The saved password file is damaged.", error.message)
+        }
+    }
+
+    @Test
+    fun tamperedCiphertextDoesNotReturnCredentials() {
+        val blob = javaClass.getResourceAsStream("/computer.vault")!!.readBytes()
+        blob[blob.lastIndex] = (blob.last().toInt() xor 1).toByte()
+        assertThrows<VaultException> { Vault.open("correct horse", blob) }
+        assertThrows<VaultException> { Vault.open("one two three four five six seven eight", blob) }
+    }
+
+    @Test
+    fun truncatedVaultDoesNotReturnCredentials() {
+        val blob = javaClass.getResourceAsStream("/computer.vault")!!.readBytes()
+        for (length in listOf(0, 4, 47, 195, blob.size - 1)) {
+            assertThrows<VaultException> { Vault.open("correct horse", blob.copyOf(length)) }
+        }
+    }
+
+    @Test
     fun aVaultWrittenHereOpensAgain() {
         val recovery = "alpha bravo charlie delta echo foxtrot golf hotel"
         val (blob, opened) = Vault.create(

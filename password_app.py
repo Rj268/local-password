@@ -23,6 +23,7 @@ import string
 import subprocess
 import sys
 import threading
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -92,7 +93,7 @@ AUTO_LOCK_OPTIONS = (
     (300, "5 minutes"),
     (900, "15 minutes"),
 )
-APP_VERSION = "1.31.3"
+APP_VERSION = "1.31.8"
 THEME_LIGHT = "light"
 THEME_DARK = "dark"
 THEME_SYSTEM = "system"
@@ -111,21 +112,21 @@ HIBP_TIMEOUT_SECONDS = 15.0
 
 STYLES = """
 window.app {
-  background-color: #F5F4EF;
+  background-color: #F3F8F3;
   color: #202522;
-  font-family: "Source Sans 3", "DejaVu Sans", sans-serif;
+  font-family: "Segoe UI", "DejaVu Sans", sans-serif;
 }
 .header-bar {
   background-color: transparent;
 }
 .brand {
-  font-family: "Source Serif 4", "DejaVu Serif", Palatino, serif;
+  font-family: "Segoe UI", "DejaVu Sans", sans-serif;
   font-size: 22px;
   font-weight: 700;
   color: #202522;
 }
 .section-title {
-  font-family: "Source Serif 4", "DejaVu Serif", Palatino, serif;
+  font-family: "Segoe UI", "DejaVu Sans", sans-serif;
   font-size: 28px;
   font-weight: 700;
   color: #202522;
@@ -134,7 +135,7 @@ window.app {
   background-color: #FFFFFF;
   background-image: none;
   border: 1px solid #E2E4DF;
-  border-radius: 12px;
+  border-radius: 20px;
 }
 .entry-card {
   background-color: #F8F8F5;
@@ -148,7 +149,7 @@ window.app {
   letter-spacing: 1.2px;
 }
 .title {
-  font-family: "Source Serif 4", "DejaVu Serif", Palatino, serif;
+  font-family: "Segoe UI", "DejaVu Sans", sans-serif;
   font-size: 28px;
   font-weight: 700;
 }
@@ -167,7 +168,7 @@ window.app {
   color: #A15C12;
 }
 .stat-value {
-  font-family: "Source Serif 4", "DejaVu Serif", Palatino, serif;
+  font-family: "Segoe UI", "DejaVu Sans", sans-serif;
   font-size: 32px;
   font-weight: 700;
   color: #202522;
@@ -385,6 +386,35 @@ window.app.dark checkbutton label {
 window.app.dark progressbar.weak progress {
   background-color: #C9843A;
 }
+
+.card-title { font-size: 21px; font-weight: 600; color: #123D30; }
+.health-summary { background-color: #E3F3EA; color: #245542; border-radius: 14px; padding: 14px; }
+.settings-block { background-color: #F3F8F3; border: 1px solid #DDE7DF; border-radius: 16px; padding: 16px; }
+.slab, .slab text { background-color: #D6F2E5; color: #124535; }
+button.primary { border-radius: 22px; padding: 12px 18px; }
+switch { border-radius: 20px; min-width: 46px; min-height: 26px; }
+switch:checked { background-color: #08775B; background-image: none; }
+scale highlight { background-color: #08775B; }
+expander { color: #08775B; }
+window.app.dark { background-color: #101C17; }
+window.app.dark .card { background-color: #17271F; border-color: #40594C; }
+window.app.dark .card-title { color: #DCEFE3; }
+window.app.dark .entry-card, window.app.dark .settings-block { background-color: #1C3026; border-color: #40594C; }
+window.app.dark .health-summary { background-color: #244234; color: #CDEBDD; }
+window.app.dark .slab, window.app.dark .slab text { background-color: #23513F; color: #BCF7DB; }
+window.app.dark button.primary { background-color: #8CE2BD; border-color: #8CE2BD; }
+window.app.dark button.primary label { color: #003828; }
+window.app.dark button.primary:hover { background-color: #ADF0D3; }
+window.app.dark expander { color: #8CE2BD; }
+window.app.dark switch:checked { background-color: #8CE2BD; }
+window.app.dark scale highlight { background-color: #8CE2BD; }
+window.app.dark combobox button {
+  background-image: none;
+  background-color: #253C30;
+  border-color: #40594C;
+  color: #DCEFE3;
+}
+window.app.dark combobox button label { color: #DCEFE3; }
 """
 
 
@@ -2095,6 +2125,27 @@ def _unwrap_dek(kek: bytes, wrapped: bytes, header: bytes) -> bytes:
     return AESGCM(kek).decrypt(nonce, ciphertext, header)
 
 
+def _atomic_write_vault(path: Path, blob: bytes) -> None:
+    """Commit complete encrypted bytes; failed writes leave the existing vault intact."""
+    if path.is_symlink():
+        raise ValueError("The saved password file is a symbolic link.")
+    descriptor, temporary = tempfile.mkstemp(prefix=".vault-", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(blob)
+            stream.flush()
+            os.fsync(stream.fileno())
+        # Recheck before replacement, including dangling symbolic links.
+        if path.is_symlink():
+            raise ValueError("The saved password file is a symbolic link.")
+        os.replace(temporary, path)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+
+
 def write_vault(material: VaultKey, items: list[SavedPassword], path: Path | None = None) -> Path:
     """Encrypt saved passwords. A later read needs the passphrase or the recovery key."""
     path = vault_path() if path is None else path
@@ -2122,15 +2173,7 @@ def write_vault(material: VaultKey, items: list[SavedPassword], path: Path | Non
         body = b""
     nonce = os.urandom(12)
     ciphertext = AESGCM(material.key).encrypt(nonce, _encode_saved(items), associated)
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    descriptor = os.open(path, flags, 0o600)
-    try:
-        os.fchmod(descriptor, 0o600)
-        os.write(descriptor, header + body + nonce + ciphertext)
-    finally:
-        os.close(descriptor)
+    _atomic_write_vault(path, header + body + nonce + ciphertext)
     return path
 
 
@@ -2351,15 +2394,7 @@ def store_vault_blob(blob: bytes, path: Path | None = None) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     if path.is_symlink():
         raise ValueError("The saved password file is a symbolic link.")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    descriptor = os.open(path, flags, 0o600)
-    try:
-        os.fchmod(descriptor, 0o600)
-        os.write(descriptor, blob)
-    finally:
-        os.close(descriptor)
+    _atomic_write_vault(path, blob)
     return path
 
 
@@ -2414,7 +2449,7 @@ def _open_vault_v2(secret: str, blob: bytes) -> tuple[VaultKey, list[SavedPasswo
     try:
         raw = AESGCM(dek).decrypt(nonce, ciphertext, associated)
     except InvalidTag as exc:
-        raise ValueError("The saved password file is damaged.") from exc
+        raise ValueError("The vault unlocked, but its contents could not be verified. Keep this file and restore an encrypted backup.") from exc
     material = VaultKey(
         dek,
         passphrase_salt,
@@ -2617,16 +2652,19 @@ class PasswordWindow:
         self.page_title = gtk.Label(label="Dashboard", xalign=0)
         self.page_title.get_style_context().add_class("section-title")
         header.pack_start(self.page_title, False, False, 0)
+        self.page_subtitle = gtk.Label(xalign=0)
+        self.page_subtitle.get_style_context().add_class("hint")
+        header.pack_start(self.page_subtitle, False, False, 0)
         root.pack_start(header, False, False, 0)
 
         nav = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=6)
         nav.set_homogeneous(True)
         self.dashboard_tab = gtk.Button(label="Dashboard")
-        self.create_tab = gtk.Button(label="Generate")
-        self.saved_tab = gtk.Button(label="Saved")
+        self.create_tab = gtk.Button(label="Create")
+        self.saved_tab = gtk.Button(label="Vault")
         self.settings_tab = gtk.Button(label="Settings")
+        self.dashboard_tab.set_no_show_all(True)
         for button in (
-            self.dashboard_tab,
             self.create_tab,
             self.saved_tab,
             self.settings_tab,
@@ -2649,6 +2687,7 @@ class PasswordWindow:
 
         columns = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=14)
         columns.set_vexpand(True)
+        columns.set_homogeneous(True)
         self.create_view = columns
         root.pack_start(self.create_view, True, True, 0)
 
@@ -2658,7 +2697,8 @@ class PasswordWindow:
 
         result_frame, result = self._card()
         columns.pack_start(result_frame, True, True, 0)
-        self._build_result(result)
+        self._build_result(self._scroll_page(result))
+        columns.reorder_child(result_frame, 0)
 
         saved_frame, saved_inner = self._card()
         self.saved_view = saved_frame
@@ -2819,7 +2859,7 @@ class PasswordWindow:
             "Generate a strong password or word passphrase, then save it under a name.",
             "The first save asks for a passphrase and shows a recovery key once. Write that key down.",
             "Saved passwords stay encrypted. Unlock with the passphrase or recovery key.",
-            "Use Dashboard for shortcuts, Saved to search and manage, and Settings for backups.",
+            "Use Create for passwords, Vault to search and manage, and Settings for backups.",
         ):
             label = gtk.Label(label=line, xalign=0)
             label.set_line_wrap(True)
@@ -3007,7 +3047,7 @@ class PasswordWindow:
                 text="Replace the vault on this computer?",
             )
             confirm.format_secondary_text(
-                "Import copies an encrypted vault file onto this computer and locks Saved. "
+                "Import copies an encrypted vault file onto this computer and locks the vault. "
                 "The current vault file is replaced."
             )
             answer = confirm.run()
@@ -3440,6 +3480,9 @@ class PasswordWindow:
 
     def _build_controls(self, controls) -> None:
         gtk = self.gtk
+        heading = gtk.Label(label="Generator options", xalign=0)
+        heading.get_style_context().add_class("card-title")
+        controls.pack_start(heading, False, False, 0)
         mode_row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
         mode_row.set_homogeneous(True)
         self.mode_characters = gtk.Button(label="Characters")
@@ -3458,20 +3501,22 @@ class PasswordWindow:
         )
         self.length.set_value(16)
         self.length.set_numeric(True)
-        self.character_box.pack_start(self._labeled("Length", self.length), False, False, 0)
+        self.character_box.pack_start(self._labeled("Password length", self.length), False, False, 0)
 
-        chips = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
-        chips.set_homogeneous(True)
-        self.uppercase = self._chip("Uppercase", True)
-        self.lowercase = self._chip("Lowercase", True)
-        self.digits = self._chip("Digits", True)
-        self.symbols = self._chip("Symbols", True)
-        for chip in (self.uppercase, self.lowercase, self.digits, self.symbols):
-            chips.pack_start(chip, True, True, 0)
-        self.character_box.pack_start(chips, False, False, 0)
-        self.ambiguous = self._chip("Exclude ambiguous", False)
-        self.ambiguous.set_halign(gtk.Align.START)
-        self.character_box.pack_start(self.ambiguous, False, False, 0)
+        self.length_scale = gtk.Scale.new_with_range(
+            gtk.Orientation.HORIZONTAL,
+            generator.MIN_PASSWORD_LENGTH, generator.MAX_PASSWORD_LENGTH, 1,
+        )
+        self.length_scale.set_adjustment(self.length.get_adjustment())
+        self.length_scale.set_draw_value(False)
+        self.character_box.pack_start(self.length_scale, False, False, 0)
+        self.uppercase = self._switch_row(self.character_box, "Uppercase (A–Z)", True)
+        self.lowercase = self._switch_row(self.character_box, "Lowercase (a–z)", True)
+        self.digits = self._switch_row(self.character_box, "Numbers (0–9)", True)
+        self.symbols = self._switch_row(self.character_box, "Symbols", True)
+        self.ambiguous = self._switch_row(
+            self.character_box, "Exclude ambiguous characters", False
+        )
         exclude_box = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=4)
         exclude_label = gtk.Label(label="Also exclude", xalign=0)
         self.exclude_entry = gtk.Entry()
@@ -3533,34 +3578,30 @@ class PasswordWindow:
         self.count.set_numeric(True)
         controls.pack_start(self._labeled("Number of passwords", self.count), False, False, 0)
 
-        self.generate_button = gtk.Button(label="Generate")
-        self.generate_button.get_style_context().add_class("primary")
-        self.generate_button.connect("clicked", self.on_generate)
-        controls.pack_start(self.generate_button, False, False, 0)
         self._style_mode_buttons()
 
     def _build_result(self, result) -> None:
         gtk = self.gtk
+        heading = gtk.Label(label="Generated password", xalign=0)
+        heading.get_style_context().add_class("card-title")
+        result.pack_start(heading, False, False, 0)
         head = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=12)
-        self.strength = gtk.Label(label="Result", xalign=0)
+        self.strength = gtk.Label(label="Ready when you are", xalign=0)
         self.strength.get_style_context().add_class("strength")
         self.strength.set_hexpand(True)
         self.bits = gtk.Label(label="Waiting to generate", xalign=1)
         self.bits.get_style_context().add_class("bits")
         head.pack_start(self.strength, True, True, 0)
         head.pack_start(self.bits, False, False, 0)
-        result.pack_start(head, False, False, 0)
 
         self.meter = gtk.ProgressBar()
         self.meter.set_fraction(0)
-        result.pack_start(self.meter, False, False, 0)
         caption = gtk.Label(
             label="Search-space estimate. Strong starts at about 75 bits.",
             xalign=0,
         )
         caption.set_line_wrap(True)
         caption.get_style_context().add_class("caption")
-        result.pack_start(caption, False, False, 0)
 
         self.note = gtk.Label(label="", xalign=0)
         self.note.set_line_wrap(True)
@@ -3571,6 +3612,7 @@ class PasswordWindow:
 
         self.buffer = gtk.TextBuffer()
         self.view = gtk.TextView.new_with_buffer(self.buffer)
+        self.buffer.set_text("Your next password starts here.")
         self.view.set_editable(False)
         self.view.set_cursor_visible(False)
         self.view.set_wrap_mode(gtk.WrapMode.WORD_CHAR)
@@ -3582,8 +3624,9 @@ class PasswordWindow:
         self.view.connect("realize", lambda *_: self.view.drag_source_unset())
         scroller = gtk.ScrolledWindow()
         scroller.set_policy(gtk.PolicyType.NEVER, gtk.PolicyType.AUTOMATIC)
-        scroller.set_min_content_height(160)
-        scroller.set_vexpand(True)
+        scroller.set_min_content_height(120)
+        scroller.set_max_content_height(200)
+        scroller.set_vexpand(False)
         scroller.add(self.view)
 
         name_box = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=4)
@@ -3597,37 +3640,38 @@ class PasswordWindow:
 
         actions = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
         actions.set_homogeneous(True)
-        self.reveal_button = gtk.Button(label="Hide")
+        self.reveal_button = gtk.Button(label="Show")
         self.reveal_button.get_style_context().add_class("secondary")
         self.reveal_button.set_sensitive(False)
         self.reveal_button.connect("clicked", self.on_toggle_result_reveal)
         self.copy_button = gtk.Button(label="Copy")
-        self.copy_button.get_style_context().add_class("primary")
+        self.copy_button.get_style_context().add_class("secondary")
         self.copy_button.set_sensitive(False)
         self.copy_button.connect("clicked", self.on_copy)
         self.regenerate_button = gtk.Button(label="Regenerate")
         self.regenerate_button.get_style_context().add_class("secondary")
         self.regenerate_button.set_sensitive(False)
         self.regenerate_button.connect("clicked", self.on_regenerate)
-        self.save_button = gtk.Button(label="Save")
+        self.save_button = gtk.Button(label="Save to Vault")
         self.save_button.get_style_context().add_class("secondary")
         self.save_button.set_sensitive(False)
-        self.save_button.connect("clicked", self.on_save)
+        self.save_button.connect("clicked", self.on_save_to_vault)
         for button in (
             self.reveal_button,
             self.copy_button,
-            self.regenerate_button,
-            self.save_button,
         ):
             actions.pack_start(button, True, True, 0)
 
-        self.result_revealed = True
+        self.result_revealed = False
         self.single_box = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=12)
-        self.single_box.set_vexpand(True)
-        self.single_box.pack_start(scroller, True, True, 0)
-        self.single_box.pack_start(name_box, False, False, 0)
+        self.single_box.set_vexpand(False)
+        self.single_box.pack_start(scroller, False, False, 0)
+        self.single_box.pack_start(head, False, False, 0)
+        self.single_box.pack_start(self.meter, False, False, 0)
+        self.single_box.pack_start(caption, False, False, 0)
         self.single_box.pack_start(actions, False, False, 0)
-        result.pack_start(self.single_box, True, True, 0)
+
+        result.pack_start(self.single_box, False, False, 0)
 
         self.batch_box = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=12)
         self.batch_scroll = gtk.ScrolledWindow()
@@ -3638,6 +3682,11 @@ class PasswordWindow:
         self.batch_scroll.hide()
         self.batch_scroll.add(self.batch_box)
         result.pack_start(self.batch_scroll, True, True, 0)
+        self.generate_button = gtk.Button(label="Generate password")
+        self.generate_button.get_style_context().add_class("primary")
+        self.generate_button.connect("clicked", self.on_generate)
+        result.pack_start(self.generate_button, False, False, 0)
+        result.pack_start(self.save_button, False, False, 0)
         self.batch: list[str] = []
 
         self.status = gtk.Label(
@@ -3650,9 +3699,6 @@ class PasswordWindow:
 
     def _build_settings(self, page) -> None:
         gtk = self.gtk
-        heading = gtk.Label(label="Settings", xalign=0)
-        heading.get_style_context().add_class("section-title")
-        page.pack_start(heading, False, False, 0)
         appearance = gtk.Label(label="APPEARANCE", xalign=0)
         appearance.get_style_context().add_class("eyebrow")
         page.pack_start(appearance, False, False, 0)
@@ -3679,7 +3725,7 @@ class PasswordWindow:
         security_label.get_style_context().add_class("eyebrow")
         security.pack_start(security_label, False, False, 0)
         security_hint = gtk.Label(
-            label="Clipboard clear is best-effort. Breach checks are on Saved.",
+            label="Clipboard clear is best-effort. Optional breach checks are in Vault.",
             xalign=0,
         )
         security_hint.set_line_wrap(True)
@@ -3710,19 +3756,15 @@ class PasswordWindow:
         lock_row.pack_start(self.auto_lock_combo, False, False, 0)
         security.pack_start(lock_row, False, False, 0)
 
-        self.confirm_reveal_button = self._chip(
-            "Confirm before reveal", self.preferences.confirm_before_reveal
+        self.confirm_reveal_button = self._switch_row(
+            security, "Confirm before reveal", self.preferences.confirm_before_reveal
         )
-        self.confirm_reveal_button.set_halign(gtk.Align.START)
-        self.confirm_reveal_button.connect("toggled", self._on_confirm_reveal_toggled)
-        security.pack_start(self.confirm_reveal_button, False, False, 0)
+        self.confirm_reveal_button.connect("notify::active", lambda button, _: self._on_confirm_reveal_toggled(button))
 
-        self.lock_on_open_button = self._chip(
-            "Lock on open", self.preferences.lock_on_open
+        self.lock_on_open_button = self._switch_row(
+            security, "Lock on open", self.preferences.lock_on_open
         )
-        self.lock_on_open_button.set_halign(gtk.Align.START)
-        self.lock_on_open_button.connect("toggled", self._on_lock_on_open_toggled)
-        security.pack_start(self.lock_on_open_button, False, False, 0)
+        self.lock_on_open_button.connect("notify::active", lambda button, _: self._on_lock_on_open_toggled(button))
 
         self.lock_now_button = gtk.Button(label="Lock vault now")
         self.lock_now_button.get_style_context().add_class("secondary")
@@ -3841,7 +3883,7 @@ class PasswordWindow:
 
     def _build_manager(self, page) -> None:
         gtk = self.gtk
-        self.saved_heading = gtk.Label(label="Saved", xalign=0)
+        self.saved_heading = gtk.Label(label="Saved passwords", xalign=0)
         self.saved_heading.get_style_context().add_class("section-title")
         page.pack_start(self.saved_heading, False, False, 0)
         saved_lede = gtk.Label(
@@ -3871,6 +3913,12 @@ class PasswordWindow:
         page.pack_start(saved_actions, False, False, 0)
         self.saved_actions_row = saved_actions
 
+        self.vault_health = gtk.Label(xalign=0)
+        self.vault_health.set_line_wrap(True)
+        self.vault_health.get_style_context().add_class("health-summary")
+        self.vault_health.set_no_show_all(True)
+        page.pack_start(self.vault_health, False, False, 0)
+        self.expanded_entries = set()
         self.find_entry = gtk.Entry()
         self.find_entry.set_placeholder_text("Search name, username, URL, notes, category")
         self.find_entry.connect("changed", lambda *_args: self._refresh_saved_rows())
@@ -3949,9 +3997,9 @@ class PasswordWindow:
         self.save_ready = False
         self.locked = False
         self.vault_key: VaultKey | None = None
-        self.section = "dashboard"
+        self.section = "generate"
         self._prepare_saved()
-        self.show_section("dashboard")
+        self.show_section("generate")
 
     def _labeled(self, caption: str, control):
         row = self.gtk.Box(orientation=self.gtk.Orientation.VERTICAL, spacing=4)
@@ -3962,6 +4010,21 @@ class PasswordWindow:
         line.pack_start(control, False, False, 0)
         row.pack_start(line, False, False, 0)
         return row
+
+    def _switch_row(self, parent, label: str, active: bool):
+        gtk = self.gtk
+        row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=12)
+        caption = gtk.Label(label=label, xalign=0)
+        caption.set_line_wrap(True)
+        caption.set_hexpand(True)
+        switch = gtk.Switch()
+        switch.set_active(active)
+        switch.set_valign(gtk.Align.CENTER)
+        switch.set_tooltip_text(label)
+        row.pack_start(caption, True, True, 0)
+        row.pack_end(switch, False, False, 0)
+        parent.pack_start(row, False, False, 0)
+        return switch
 
     def _chip(self, name: str, active: bool):
         button = self.gtk.ToggleButton(label=chip_label(name, active))
@@ -4068,8 +4131,8 @@ class PasswordWindow:
         }
         titles = {
             "dashboard": "Dashboard",
-            "generate": "Generate",
-            "saved": "Saved",
+            "generate": "Create",
+            "saved": "Vault",
             "settings": "Settings",
         }
         for name, view in views.items():
@@ -4080,6 +4143,12 @@ class PasswordWindow:
                 view.set_no_show_all(True)
                 view.hide()
         self.page_title.set_text(titles[section])
+        self.page_subtitle.set_text({
+            "generate": "Make a password. Save it when you’re ready.",
+            "saved": "Your saved passwords and account details.",
+            "settings": "Make Local Password work for you.",
+            "dashboard": "Your vault on this computer.",
+        }[section])
         if section == "saved":
             self._refresh_saved_rows()
             self._update_lock_button()
@@ -4135,10 +4204,13 @@ class PasswordWindow:
     def _apply_generated(self, result: Generated) -> None:
         passwords = [line for line in result.text.splitlines() if line]
         self.batch = passwords
+        self.generate_button.set_label("Generate another" if len(passwords) == 1 else "Generate passwords")
+        self.save_button.set_no_show_all(len(passwords) > 1)
+        self.save_button.set_visible(len(passwords) == 1)
         self.current = result.text
         self.showing_saved = False
         self.save_ready = True
-        self.result_revealed = True
+        self.result_revealed = False
         self._refresh_result_display()
         if len(passwords) > 1:
             self._show_batch(passwords)
@@ -4394,7 +4466,9 @@ class PasswordWindow:
         for child in list(self.saved_box.get_children()):
             self.saved_box.remove(child)
         query = self.find_entry.get_text()
+        self.vault_health.hide()
         if self.locked and self.vault_key is None:
+            self.expanded_entries.clear()
             self.find_entry.hide()
             self.filter_row.hide()
             self.sort_row.hide()
@@ -4452,6 +4526,12 @@ class PasswordWindow:
         weak_count, reuse_count, stale_count, breached_count, _attention = password_health_summary(
             self.saved, breach_counts=self.breach_counts
         )
+        self.vault_health.set_text(
+            f"Password health · {weak_count} potentially weak · {reuse_count} reuse groups · {stale_count} older entries\n"
+            "Local estimates, not a breach check. Reuse means identical passwords. "
+            "Older means unchanged for 180 days; age alone does not mean unsafe."
+        )
+        self.vault_health.show()
         if archived_only:
             count = archived_count
             heading = "1 archived" if count == 1 else f"{count} archived"
@@ -4592,6 +4672,37 @@ class PasswordWindow:
 
     def _saved_row(self, item: SavedPassword):
         gtk = self.gtk
+        shell = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=8)
+        shell.get_style_context().add_class("entry-card")
+        shell.set_border_width(12)
+        header = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=12)
+        name = gtk.Label(label=item.name, xalign=0)
+        name.get_style_context().add_class("saved-name")
+        name.set_hexpand(True)
+        header.pack_start(name, True, True, 0)
+        favorite = gtk.Button(label="★" if item.favorite else "☆")
+        favorite.get_style_context().add_class("secondary")
+        favorite.set_tooltip_text("Remove favorite" if item.favorite else "Add favorite")
+        favorite.connect("clicked", lambda *_: self.on_toggle_favorite(item))
+        header.pack_end(favorite, False, False, 0)
+        shell.pack_start(header, False, False, 0)
+        detail = gtk.Expander(label="View details")
+        detail.add(self._saved_detail_row(item))
+        detail.set_expanded(item.name in self.expanded_entries)
+        def remember_expansion(widget, _param):
+            if widget.get_expanded():
+                self.expanded_entries.add(item.name)
+            else:
+                self.expanded_entries.discard(item.name)
+                if item.name in self.revealed_names:
+                    self.revealed_names.discard(item.name)
+                    self._refresh_saved_rows()
+        detail.connect("notify::expanded", remember_expansion)
+        shell.pack_start(detail, False, False, 0)
+        return shell
+
+    def _saved_detail_row(self, item: SavedPassword):
+        gtk = self.gtk
         shell = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=0)
         shell.get_style_context().add_class("entry-card")
         row = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=8)
@@ -4676,11 +4787,15 @@ class PasswordWindow:
         else:
             replace_btn.get_style_context().add_class("secondary")
         replace_btn.connect("clicked", lambda *_args, entry=item: self.on_replace_password(entry))
-        more = gtk.MenuButton(label="More")
+        edit = gtk.Button(label="Edit")
+        edit.get_style_context().add_class("secondary")
+        edit.connect("clicked", lambda *_args, entry=item: self.on_edit_entry(entry))
+        more = gtk.MenuButton(label="Manage")
         more.get_style_context().add_class("secondary")
         more.set_popup(self._saved_row_more_menu(item))
         actions.pack_start(show, False, False, 0)
         actions.pack_start(copy, False, False, 0)
+        actions.pack_start(edit, False, False, 0)
         actions.pack_start(replace_btn, False, False, 0)
         actions.pack_start(more, False, False, 0)
         row.pack_start(text, True, True, 0)
@@ -6102,6 +6217,7 @@ class PasswordWindow:
         if self.status.get_text() in (
             "Saved passwords are locked.",
             "Saved passwords locked after sitting idle.",
+            "The saved password file is damaged.",
         ):
             self.status.set_text("Generate a password. Name it, then save it.")
 
@@ -6202,6 +6318,33 @@ class PasswordWindow:
             self._refresh_saved_rows()
         elif self.section == "dashboard":
             self._refresh_dashboard()
+
+    def on_save_to_vault(self, _button) -> None:
+        if not self.save_ready or not self.current or self.showing_saved:
+            return
+        gtk = self.gtk
+        dialog = gtk.Dialog(title="Save to Vault", transient_for=self.window, modal=True)
+        self._match_dialog(dialog)
+        dialog.add_button("Cancel", gtk.ResponseType.CANCEL)
+        dialog.add_button("Save", gtk.ResponseType.OK)
+        dialog.set_default_response(gtk.ResponseType.OK)
+        dialog.set_default_size(400, -1)
+        area = dialog.get_content_area()
+        area.set_spacing(12)
+        area.set_border_width(20)
+        area.pack_start(gtk.Label(label="Name this password", xalign=0), False, False, 0)
+        entry = gtk.Entry()
+        entry.set_placeholder_text("Email, bank, router")
+        entry.set_max_length(MAX_NAME_LENGTH)
+        entry.set_activates_default(True)
+        area.pack_start(entry, False, False, 0)
+        dialog.show_all()
+        response = dialog.run()
+        name = entry.get_text()
+        dialog.destroy()
+        if response == gtk.ResponseType.OK:
+            self.name_entry.set_text(name)
+            self.on_save(None)
 
     def on_save(self, _button) -> None:
         if not self.save_ready or not self.current or self.showing_saved:
@@ -6310,7 +6453,7 @@ class PasswordWindow:
         ):
             setter(16)
         label = gtk.Label(
-            label=f'Remove "{name}" from this computer? You can Undo on the Saved page.',
+            label=f'Remove "{name}" from this computer? You can Undo in Vault.',
             xalign=0,
         )
         label.set_line_wrap(True)

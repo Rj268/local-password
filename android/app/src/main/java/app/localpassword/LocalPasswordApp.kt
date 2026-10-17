@@ -1,14 +1,27 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package app.localpassword
 
-import android.app.Activity
+import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
 import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.LocalActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -18,6 +31,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -26,6 +41,8 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -34,12 +51,16 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -53,56 +74,112 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 
-private val Green = Color(0xFF0E6B52)
-private val Cream = Color(0xFFEBE4D8)
-private val Card = Color(0xFFF7F3EC)
-private val Ink = Color(0xFF1C1915)
-private val Muted = Color(0xFF5F584E)
-private val Line = Color(0xFFDDD4C6)
-private val Danger = Color(0xFF9C2F2F)
-private val Night = Color(0xFF141210)
-private val NightCard = Color(0xFF1C1916)
-private val NightInk = Color(0xFFF6F1E7)
-private val NightMuted = Color(0xFFB7A99A)
+private val Green: Color @Composable get() = MaterialTheme.colorScheme.primary
+private val Muted: Color @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
+private val Line: Color @Composable get() = MaterialTheme.colorScheme.outlineVariant
+private val Danger: Color @Composable get() = MaterialTheme.colorScheme.error
 
 @Composable
 fun LocalPasswordApp(model: PasswordModel = viewModel()) {
+    LocalPasswordTheme(model.appearance) { LocalPasswordContent(model) }
+}
+
+@Composable
+private fun LocalPasswordContent(model: PasswordModel) {
     val context = LocalContext.current
+    val activity = LocalActivity.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val dark = model.dark
-    val page = if (dark) Night else Cream
-    val card = if (dark) NightCard else Card
-    val ink = if (dark) NightInk else Ink
-    val muted = if (dark) NightMuted else Muted
+    val page = MaterialTheme.colorScheme.background
+    val ink = MaterialTheme.colorScheme.onSurface
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val enrollmentCipher = model.biometricEnrollmentCipher
+    DisposableEffect(enrollmentCipher, activity) {
+        val host = activity as? FragmentActivity
+        val prompt = if (enrollmentCipher != null && host != null) {
+            BiometricPrompt(host, ContextCompat.getMainExecutor(host),
+                object : BiometricPrompt.AuthenticationCallback() {
+                    override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                        model.completeBiometricEnrollment(result.cryptoObject?.cipher)
+                    }
+                    override fun onAuthenticationError(code: Int, message: CharSequence) {
+                        if (model.biometricEnrollmentCipher !== enrollmentCipher) return
+                        model.cancelBiometricEnrollment()
+                        model.error = "Biometric setup cancelled. Your passphrase still works."
+                    }
+                }).also {
+                try {
+                    it.authenticate(
+                        BiometricPrompt.PromptInfo.Builder()
+                            .setTitle("Enable biometric unlock")
+                            .setSubtitle("Authorize protection of your vault unlock secret")
+                            .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+                            .setNegativeButtonText("Cancel")
+                            .build(),
+                        BiometricPrompt.CryptoObject(enrollmentCipher),
+                    )
+                } catch (_: Exception) {
+                    model.cancelBiometricEnrollment()
+                    model.error = "Biometric setup could not start. Your passphrase still works."
+                }
+            }
+        } else null
+        onDispose { prompt?.cancelAuthentication() }
+    }
     val importVault = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
-        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@rememberLauncherForActivityResult
-        model.import(bytes)
+        try {
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                ?: throw java.io.IOException("Could not open that backup file.")
+            model.beginVaultImport(bytes)
+            bytes.fill(0)
+        } catch (exc: Exception) {
+            model.error = exc.message ?: "Could not read that backup file. Your vault was not changed."
+        }
     }
     val importCsv = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
-        val text = context.contentResolver.openInputStream(uri)?.use { stream ->
-            stream.bufferedReader().readText()
-        } ?: return@rememberLauncherForActivityResult
-        model.importCsv(text)
+        try {
+            val text = context.contentResolver.openInputStream(uri)?.use { stream ->
+                stream.bufferedReader().readText()
+            } ?: throw java.io.IOException("Could not open that CSV file.")
+            model.importCsv(text)
+        } catch (exc: Exception) {
+            model.error = exc.message ?: "Could not read that CSV file. Your vault was not changed."
+        }
     }
     val exportVault = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         val bytes = model.exportBytes() ?: return@rememberLauncherForActivityResult
-        context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
-        model.status = "Vault file written. Copy it back to the computer the same way."
+        try {
+            val output = context.contentResolver.openOutputStream(uri)
+                ?: throw java.io.IOException("Could not open the selected destination.")
+            output.use { it.write(bytes); it.flush() }
+            model.status = "Encrypted vault backup written. Keep it somewhere private."
+            model.error = ""
+        } catch (exc: Exception) {
+            model.error = exc.message ?: "Could not write the encrypted vault backup."
+        } finally {
+            bytes.fill(0)
+        }
     }
     val exportCsv = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         val text = model.exportCsvText() ?: return@rememberLauncherForActivityResult
-        context.contentResolver.openOutputStream(uri)?.use { stream ->
-            stream.write(text.toByteArray(Charsets.UTF_8))
+        val bytes = text.toByteArray(Charsets.UTF_8)
+        try {
+            val output = context.contentResolver.openOutputStream(uri)
+                ?: throw java.io.IOException("Could not open the selected destination.")
+            output.use { it.write(bytes); it.flush() }
+            model.status = "Plaintext CSV exported. Protect the file and delete it when you are done."
+            model.error = ""
+        } catch (exc: Exception) {
+            model.error = exc.message ?: "Could not write the plaintext CSV export."
+        } finally {
+            bytes.fill(0)
         }
-        model.status = "Exported plaintext CSV. Delete that file when you are done."
     }
 
-    DisposableEffect(lifecycleOwner, context) {
-        val activity = context as? Activity
+    DisposableEffect(lifecycleOwner, activity) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_STOP -> {
@@ -118,42 +195,19 @@ fun LocalPasswordApp(model: PasswordModel = viewModel()) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize(), color = page) {
             if (model.appLocked) {
-                AppLockPane(model, card, ink, muted, dark)
+                AppLockPane(model, ink, muted)
             } else {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 20.dp, vertical = 28.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    Column {
-                        Text("ON THIS PHONE", color = Green, fontWeight = FontWeight.Bold, fontSize = 11.sp, letterSpacing = 1.5.sp)
-                        Text("Local Password", color = ink, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, fontSize = 32.sp)
-                    }
-                    Text(
-                        "Generate a password, open Saved, or change appearance and vault transfer in Settings.",
-                        color = muted,
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Pill("Create", model.section == "create", dark) { model.section = "create" }
-                        Pill("Saved", model.section == "saved", dark) { model.section = "saved" }
-                        Pill("Settings", model.section == "settings", dark) { model.section = "settings" }
-                    }
+                AppShell(model.section, onSectionChange = { model.closeEntry(); model.section = it }, detailKey = model.selectedEntryName) {
                     if (model.section == "create") {
-                        CreatePane(model, card, ink, muted, dark)
+                        CreatePane(model)
                     } else if (model.section == "saved") {
-                        SavedPane(model, card, ink, muted, dark)
+                        SavedPane(model)
                     } else {
                         SettingsPane(
                             model,
-                            card,
-                            ink,
                             muted,
-                            dark,
                             onImport = { importVault.launch(arrayOf("*/*")) },
                             onImportCsv = { importCsv.launch(arrayOf("text/*", "text/csv", "*/*")) },
                             onExportCsv = { exportCsv.launch("local-password.csv") },
@@ -161,23 +215,17 @@ fun LocalPasswordApp(model: PasswordModel = viewModel()) {
                         )
                     }
                     if (model.error.isNotEmpty()) {
-                        Text(model.error, color = Danger)
+                        Text(model.error, color = Danger, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                     }
-                    Text(model.status, color = muted)
-                    Text(
-                        "Passphrases use the EFF large wordlist (CC BY 3.0 US). The EFF does not endorse this project.",
-                        color = muted,
-                        fontSize = 12.sp,
-                    )
+                    Text(model.status, color = muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                 }
             }
         }
-    }
 
     if (model.askNewPassphrase) {
         PassphraseDialog(
             title = "Choose a passphrase",
-            body = "Choose a passphrase to lock saved passwords. It is not stored. If you lose both this passphrase and the recovery key, your saved passwords cannot be recovered.",
+            body = "Choose a passphrase to lock saved passwords. If you enable biometric unlock later, an encrypted unlock secret is protected by Android Keystore. If you lose both this passphrase and the recovery key, your saved passwords cannot be recovered.",
             confirm = true,
             busy = model.busy,
             error = model.error,
@@ -220,7 +268,7 @@ fun LocalPasswordApp(model: PasswordModel = viewModel()) {
             onDismissRequest = { model.cancelOffer() },
             title = { Text("Send vault") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("On the other device, choose Receive vault and enter this code. Both devices need the same Wi-Fi. The passphrase stays on this phone.")
                     Text(offerCode, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 32.sp, color = Green)
                     if (model.offerWhere.isNotEmpty()) {
@@ -236,6 +284,31 @@ fun LocalPasswordApp(model: PasswordModel = viewModel()) {
     }
     if (model.askReceive) {
         ReceiveDialog(model)
+    }
+    if (model.askImportOverwrite) {
+        AlertDialog(
+            onDismissRequest = { model.cancelVaultImport() },
+            title = { Text("Replace this vault?") },
+            text = {
+                Text("Your current vault will be replaced only after the selected backup is successfully unlocked. If verification fails or you cancel, the current vault stays unchanged.")
+            },
+            confirmButton = {
+                TextButton(onClick = model::confirmVaultImportReplacement) { Text("Continue") }
+            },
+            dismissButton = {
+                TextButton(onClick = model::cancelVaultImport) { Text("Cancel") }
+            },
+        )
+    }
+    if (model.askImportPassphrase) {
+        PassphraseDialog(
+            title = if (model.pendingImportSource == "Wi-Fi transfer") "Verify received vault" else "Verify backup",
+            body = "Enter the passphrase or recovery key for this vault. It is checked before this phone’s vault is changed.",
+            confirm = false,
+            busy = model.busy,
+            error = model.error,
+            onDismiss = { if (!model.busy) model.cancelVaultImport() },
+        ) { phrase, _ -> model.unlockImportedVault(phrase) }
     }
     if (model.askIncomingPassphrase) {
         PassphraseDialog(
@@ -253,7 +326,7 @@ fun LocalPasswordApp(model: PasswordModel = viewModel()) {
             onDismissRequest = {},
             title = { Text("Write down this recovery key") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
                         recovery,
                         fontFamily = FontFamily.Monospace,
@@ -270,7 +343,7 @@ fun LocalPasswordApp(model: PasswordModel = viewModel()) {
                 TextButton(onClick = { model.recoveryKey = null }) { Text("I wrote it down") }
             },
             dismissButton = {
-                TextButton(onClick = { model.copy(recovery) }) { Text("Copy", color = Green) }
+                TextButton(onClick = { model.copy(recovery) }) { Text("Copy") }
             },
         )
     }
@@ -297,31 +370,50 @@ fun LocalPasswordApp(model: PasswordModel = viewModel()) {
 }
 
 @Composable
-private fun AppLockPane(model: PasswordModel, card: Color, ink: Color, muted: Color, dark: Boolean) {
+private fun AppLockPane(model: PasswordModel, ink: Color, muted: Color) {
     val context = LocalContext.current
-    val activity = context as? FragmentActivity
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val activity = LocalActivity.current as? FragmentActivity
     val canBiometric = remember(context) {
         val manager = BiometricManager.from(context)
-        manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS ||
-            manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK) == BiometricManager.BIOMETRIC_SUCCESS
+        manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS
     }
     val biometricReady = canBiometric && model.hasBiometricSecret()
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
+    var resumed by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+    }
     var phrase by remember { mutableStateOf("") }
     var showPassphrase by remember { mutableStateOf(!biometricReady) }
     var biometricPrompted by remember { mutableStateOf(false) }
+    var activePrompt by remember { mutableStateOf<BiometricPrompt?>(null) }
+    var promptGeneration by remember { mutableIntStateOf(0) }
 
     fun promptBiometric() {
+        if (!lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) ||
+            activePrompt != null || model.busy) return
         val host = activity ?: return
+        biometricPrompted = true
+        val generation = ++promptGeneration
+        val cipher = model.prepareBiometricUnlock()
+        if (cipher == null) {
+            showPassphrase = true
+            return
+        }
         val executor = ContextCompat.getMainExecutor(host)
         val prompt = BiometricPrompt(
             host,
             executor,
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    model.unlockWithBiometricSecret()
+                    if (generation != promptGeneration) return
+                    activePrompt = null
+                    if (!model.unlockWithBiometricSecret(result.cryptoObject?.cipher)) showPassphrase = true
                 }
 
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    if (generation != promptGeneration) return
+                    activePrompt = null
                     if (errorCode == BiometricPrompt.ERROR_NEGATIVE_BUTTON ||
                         errorCode == BiometricPrompt.ERROR_USER_CANCELED ||
                         errorCode == BiometricPrompt.ERROR_CANCELED
@@ -334,18 +426,56 @@ private fun AppLockPane(model: PasswordModel, card: Color, ink: Color, muted: Co
                 }
             },
         )
+        activePrompt = prompt
+        try {
         prompt.authenticate(
             BiometricPrompt.PromptInfo.Builder()
                 .setTitle("Unlock Local Password")
                 .setSubtitle("Confirm fingerprint or face")
+                .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
                 .setNegativeButtonText("Use passphrase")
                 .build(),
+            BiometricPrompt.CryptoObject(cipher),
         )
+        } catch (_: Exception) {
+            activePrompt = null
+            showPassphrase = true
+            model.error = "Biometric unlock could not start. Use your passphrase or try again."
+        }
     }
 
-    LaunchedEffect(biometricReady) {
-        if (biometricReady && !biometricPrompted) {
-            biometricPrompted = true
+    DisposableEffect(lifecycleOwner, biometricReady) {
+        // Recents can pause the Activity without stopping it. Reset the attempt
+        // on pause as well, but launch only after resume and window focus settle.
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> {
+                    resumed = true
+                }
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
+                    resumed = false
+                    promptGeneration++
+                    activePrompt?.cancelAuthentication()
+                    activePrompt = null
+                    biometricPrompted = false
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            promptGeneration++
+            activePrompt?.cancelAuthentication()
+            activePrompt = null
+        }
+    }
+
+    LaunchedEffect(resumed, windowFocused, biometricReady, model.busy, biometricPrompted) {
+        if (resumed && windowFocused && biometricReady && !model.busy && !biometricPrompted) {
+            // The Recents transition may resume us before the app owns the window.
+            // Losing focus cancels this pending launch, not an active system prompt.
+            kotlinx.coroutines.delay(200)
             promptBiometric()
         }
     }
@@ -353,6 +483,8 @@ private fun AppLockPane(model: PasswordModel, card: Color, ink: Color, muted: Co
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .safeDrawingPadding()
+            .imePadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 40.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -360,19 +492,13 @@ private fun AppLockPane(model: PasswordModel, card: Color, ink: Color, muted: Co
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text("ON THIS PHONE", color = Green, fontWeight = FontWeight.Bold, fontSize = 11.sp, letterSpacing = 1.5.sp)
-            Text("Local Password", color = ink, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, fontSize = 32.sp)
+            Text("Local Password", color = ink, fontWeight = FontWeight.Bold, fontSize = 32.sp)
         }
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(card, RoundedCornerShape(18.dp))
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text("Unlock", color = ink, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, fontSize = 24.sp)
+        ScreenSurface {
+            Text("Unlock", color = ink, fontWeight = FontWeight.Bold, fontSize = 24.sp)
             if (biometricReady) {
                 Text("Use biometrics to open. Passphrase is backup.", color = muted)
-                GreenButton("Unlock with biometrics", model.busy, fillMaxWidth = true) {
+                PrimaryActionButton("Unlock with biometrics", model.busy, fillMaxWidth = true) {
                     promptBiometric()
                 }
                 TextButton(
@@ -399,7 +525,7 @@ private fun AppLockPane(model: PasswordModel, card: Color, ink: Color, muted: Co
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                GreenButton(
+                PrimaryActionButton(
                     if (biometricReady) "Unlock with passphrase" else "Unlock",
                     model.busy,
                     fillMaxWidth = true,
@@ -408,216 +534,26 @@ private fun AppLockPane(model: PasswordModel, card: Color, ink: Color, muted: Co
                 }
             }
             if (model.error.isNotEmpty()) {
-                Text(model.error, color = Danger)
+                Text(model.error, color = Danger, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
             }
             Text(model.status, color = muted, fontSize = 13.sp)
         }
     }
 }
 
-@Composable
-private fun CreatePane(model: PasswordModel, card: Color, ink: Color, muted: Color, dark: Boolean) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(card, RoundedCornerShape(18.dp))
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Pill("Characters", !model.wordsMode, dark) { model.wordsMode = false }
-            Pill("Words", model.wordsMode, dark) { model.wordsMode = true }
-        }
-        if (model.wordsMode) {
-            Stepper("Words", model.wordCount, 1, 20, ink, muted) { model.wordCount = it }
-        } else {
-            Stepper("Length", model.length, 1, 128, ink, muted) { model.length = it }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Pill(if (model.digits) "Digits    On" else "Digits    Off", model.digits, dark) { model.digits = !model.digits }
-                Pill(if (model.letters) "Letters    On" else "Letters    Off", model.letters, dark) { model.letters = !model.letters }
-                Pill(if (model.symbols) "Symbols    On" else "Symbols    Off", model.symbols, dark) { model.symbols = !model.symbols }
-            }
-            Text("Symbols include quotes, backticks, and backslashes.", color = muted, fontSize = 13.sp)
-        }
-        Spacer(modifier = Modifier.height(4.dp))
-        GreenButton("Generate", model.busy, fillMaxWidth = true, onClick = { model.generate() })
-        Spacer(modifier = Modifier.height(4.dp))
-        Text("Result", color = ink, fontWeight = FontWeight.Bold)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(model.strength.ifEmpty { "Waiting to generate" }, color = if (model.strength == "Strong") Green else muted, modifier = Modifier.weight(1f))
-            Text(model.bitsLabel, color = muted, fontSize = 13.sp)
-        }
-        LinearProgressIndicator(
-            progress = { model.fraction },
-            modifier = Modifier.fillMaxWidth().height(8.dp),
-            color = if (model.strength == "Weak") Color(0xFFC47B2B) else Green,
-            trackColor = Line,
-        )
-        Text(model.note, color = muted, fontSize = 13.sp)
-        Text(
-            model.current.ifEmpty { "Generate a password." },
-            color = Color(0xFFF7F3EC),
-            fontFamily = FontFamily.Monospace,
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color(0xFF1C1915), RoundedCornerShape(12.dp))
-                .padding(12.dp),
-            fontSize = 16.sp,
-        )
-        TextField(
-            value = model.name,
-            onValueChange = { model.name = it },
-            label = { Text("Name") },
-            placeholder = { Text("Email, bank, router") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Text("What this password is for.", color = muted, fontSize = 13.sp)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            GreenButton("Copy", enabled = model.current.isNotEmpty()) { model.copy(model.current) }
-            TextButton(onClick = { model.requestSave() }, enabled = !model.busy) {
-                Text("Save", color = Green)
-            }
-        }
-        Text(
-            "If you lose both this passphrase and the recovery key, your saved passwords cannot be recovered.",
-            color = Danger,
-            fontSize = 13.sp,
-        )
-    }
-}
-
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SavedPane(model: PasswordModel, card: Color, ink: Color, muted: Color, dark: Boolean) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(card, RoundedCornerShape(18.dp))
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text("Saved", color = ink, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, fontSize = 24.sp)
-        if (!model.hasVault()) {
-            Text("Nothing saved yet. Generate one, name it, then save — or import a vault file.", color = muted)
-        } else if (!model.unlocked) {
-            Text("Locked. Unlock with your passphrase or recovery key.", color = muted)
-            GreenButton("Unlock", model.busy, fillMaxWidth = true) { model.askUnlock = true }
-        } else if (model.saved.isEmpty()) {
-            Text("The vault is empty.", color = muted)
-        } else {
-            val health = model.passwordHealthSummary()
-            val healthBits = buildList {
-                if (health.weakCount > 0) add("${health.weakCount} weak")
-                if (health.reuseCount > 0) add("${health.reuseCount} reused")
-                if (health.staleCount > 0) add("${health.staleCount} stale")
-            }
-            Text(
-                if (healthBits.isNotEmpty()) {
-                    "Masked until shown. ${healthBits.joinToString(" · ")} need attention."
-                } else {
-                    "Masked until shown. Use filters and sort below."
-                },
-                color = muted,
-                fontSize = 13.sp,
-            )
-            if (model.lastRemoved != null) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(model.status.ifEmpty { "Removed. Undo to put it back." }, color = muted, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                    TextButton(onClick = { model.undoRemove() }, enabled = !model.busy) {
-                        Text("Undo", color = Green)
-                    }
-                }
-            }
-            OutlinedTextField(
-                value = model.savedQuery,
-                onValueChange = { model.savedQuery = it },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                label = { Text("Search") },
-            )
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(0.dp),
-            ) {
-                TextButton(onClick = { model.favoritesOnly = !model.favoritesOnly }) {
-                    Text(if (model.favoritesOnly) "Favorites On" else "Favorites", color = if (model.favoritesOnly) Green else muted)
-                }
-                TextButton(onClick = { model.archivedOnly = !model.archivedOnly }) {
-                    Text(if (model.archivedOnly) "Archived On" else "Archived", color = if (model.archivedOnly) Green else muted)
-                }
-                TextButton(onClick = { model.needsAttentionOnly = !model.needsAttentionOnly }) {
-                    Text(
-                        if (model.needsAttentionOnly) "Needs attention On" else "Needs attention",
-                        color = if (model.needsAttentionOnly) Green else muted,
-                    )
-                }
-                if (model.categoryFilter != "all") {
-                    TextButton(onClick = { model.categoryFilter = "all" }) {
-                        Text("Clear category", color = muted)
-                    }
-                }
-            }
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(0.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Sort", color = muted, fontSize = 13.sp, modifier = Modifier.align(Alignment.CenterVertically))
-                listOf(
-                    Vault.SAVED_SORT_NAME to "Name",
-                    Vault.SAVED_SORT_RECENT to "Recent",
-                    Vault.SAVED_SORT_CHANGED to "Changed",
-                ).forEach { (mode, label) ->
-                    TextButton(onClick = { model.savedSortMode = mode }) {
-                        Text(label, color = if (model.savedSortMode == mode) Green else muted)
-                    }
-                }
-            }
-            val categories = model.categories()
-            if (categories.isNotEmpty()) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(0.dp),
-                ) {
-                    categories.forEach { category ->
-                        TextButton(onClick = { model.categoryFilter = category }) {
-                            Text(category, color = if (model.categoryFilter == category) Green else muted)
-                        }
-                    }
-                }
-            }
-            val matches = model.filteredSaved()
-            if (matches.isEmpty()) {
-                Text("No saved password matches that search.", color = muted)
-            } else {
-                matches.forEach { item ->
-                    SavedEntryCard(model, item, ink, muted, dark)
-                }
-            }
-        }
-    }
-    SavedPaneDialogs(model, muted, ink)
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun SavedEntryCard(
+fun CredentialDetailsContent(
     model: PasswordModel,
     item: SavedPassword,
     ink: Color,
     muted: Color,
-    dark: Boolean,
 ) {
     var more by remember(item.name) { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(if (dark) Night else Cream, RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerLow, MaterialTheme.shapes.medium)
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -635,6 +571,7 @@ private fun SavedEntryCard(
         if (meta.isNotEmpty()) {
             Text(meta.joinToString(" · "), color = muted, fontSize = 13.sp)
         }
+        if (item.url.isNotBlank()) Text(item.url, color = muted)
         val dates = Vault.entryDatesLabel(item)
         if (dates.isNotEmpty()) {
             Text(dates, color = muted, fontSize = 12.sp)
@@ -668,16 +605,14 @@ private fun SavedEntryCard(
                 Text(if (model.revealed == item.name) "Hide" else "Show", color = Green)
             }
             TextButton(onClick = { model.copySavedSecret(item, item.password) }) {
-                Text("Copy", color = Green)
+                Text("Copy")
             }
             TextButton(onClick = { model.beginEdit(item) }) {
-                Text("Edit", color = Green)
+                Text("Edit")
             }
-            TextButton(onClick = { model.requestRemove(item) }) {
-                Text("Remove", color = Danger)
-            }
+
             TextButton(onClick = { more = !more }) {
-                Text(if (more) "Less" else "More", color = muted)
+                Text(if (more) "Hide management actions" else "Manage entry", color = muted)
             }
         }
         if (more) {
@@ -685,13 +620,16 @@ private fun SavedEntryCard(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalArrangement = Arrangement.spacedBy(0.dp),
             ) {
+                TextButton(onClick = { model.requestRemove(item) }, enabled = !model.busy) {
+                    Text("Remove entry", color = Danger)
+                }
                 val loginText = Vault.loginCopyText(item)
                 if (loginText.isNotEmpty()) {
                     TextButton(onClick = { model.copySavedSecret(item, loginText) }) {
-                        Text("Copy login", color = Green)
+                        Text("Copy login")
                     }
                     TextButton(onClick = { model.copySavedSecret(item, item.username) }) {
-                        Text("Copy username", color = Green)
+                        Text("Copy username")
                     }
                 }
                 Vault.optionalCopyFields(item).forEach { (label, value) ->
@@ -700,16 +638,16 @@ private fun SavedEntryCard(
                     }
                     if (label == "Copy URL" && Vault.browseableUrl(item.url) != null) {
                         TextButton(onClick = { model.openUrl(item.url) }) {
-                            Text("Open URL", color = Green)
+                            Text("Open URL")
                         }
                     }
                 }
                 TextButton(onClick = { model.requestReplace(item) }) {
-                    Text("Replace", color = Green)
+                    Text("Replace")
                 }
                 if (item.history.isNotEmpty()) {
                     TextButton(onClick = { model.showHistory(item) }) {
-                        Text("Previous (${item.history.size})", color = Green)
+                        Text("Previous (${item.history.size})")
                     }
                 }
                 TextButton(onClick = { model.toggleFavorite(item) }, enabled = !model.busy) {
@@ -719,22 +657,22 @@ private fun SavedEntryCard(
                     Text(if (item.archived) "Unarchive" else "Archive", color = Green)
                 }
                 TextButton(onClick = { model.duplicateEntry(item) }, enabled = !model.busy) {
-                    Text("Duplicate", color = Green)
+                    Text("Duplicate")
                 }
                 TextButton(onClick = { model.beginRename(item) }, enabled = !model.busy) {
-                    Text("Rename", color = Green)
+                    Text("Rename")
                 }
                 TextButton(onClick = { model.beginCategory(item) }, enabled = !model.busy) {
-                    Text("Category", color = Green)
+                    Text("Category")
                 }
                 TextButton(onClick = { model.beginUsername(item) }, enabled = !model.busy) {
-                    Text("Username", color = Green)
+                    Text("Username")
                 }
                 TextButton(onClick = { model.beginUrl(item) }, enabled = !model.busy) {
-                    Text("URL", color = Green)
+                    Text("URL")
                 }
                 TextButton(onClick = { model.beginNotes(item) }, enabled = !model.busy) {
-                    Text("Notes", color = Green)
+                    Text("Notes")
                 }
             }
         }
@@ -742,7 +680,7 @@ private fun SavedEntryCard(
 }
 
 @Composable
-private fun SavedPaneDialogs(model: PasswordModel, muted: Color, ink: Color) {
+fun SavedPaneDialogs(model: PasswordModel, muted: Color, ink: Color) {
     model.renaming?.let { item ->
         RenameEntryDialog(
             item = item,
@@ -789,17 +727,30 @@ private fun SavedPaneDialogs(model: PasswordModel, muted: Color, ink: Color) {
         )
     }
     model.historyFor?.let { item ->
+        var restoreIndex by remember(item) { mutableStateOf<Int?>(null) }
+        if (restoreIndex != null) {
+            AlertDialog(
+                onDismissRequest = { restoreIndex = null },
+                title = { Text("Restore previous password?") },
+                text = { Text("This changes the saved password for ${item.name} in this vault only. It does not change the password on the website or app. The current password will move into history.") },
+                confirmButton = { TextButton(enabled = !model.busy, onClick = {
+                    restoreIndex?.let(model::restorePrevious)
+                    restoreIndex = null
+                }) { Text("Restore in vault") } },
+                dismissButton = { TextButton(onClick = { restoreIndex = null }) { Text("Cancel") } },
+            )
+        } else {
         AlertDialog(
             onDismissRequest = { model.cancelHistory() },
             title = { Text("Previous passwords") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         "Earlier passwords for \"${item.name}\". Copy one, or Restore to make it current again. Up to ${Vault.MAX_PASSWORD_HISTORY} are kept.",
                         color = muted,
                     )
                     item.history.forEachIndexed { index, revision ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(
                                 if (revision.replacedAt.isNotEmpty()) {
                                     "Replaced ${revision.replacedAt}"
@@ -811,10 +762,10 @@ private fun SavedPaneDialogs(model: PasswordModel, muted: Color, ink: Color) {
                                 fontSize = 13.sp,
                             )
                             TextButton(onClick = { model.copyPrevious(revision.password) }) {
-                                Text("Copy", color = Green)
+                                Text("Copy")
                             }
-                            TextButton(onClick = { model.restorePrevious(index) }, enabled = !model.busy) {
-                                Text("Restore", color = Green)
+                            TextButton(onClick = { restoreIndex = index }, enabled = !model.busy) {
+                                Text("Restore")
                             }
                         }
                     }
@@ -824,6 +775,7 @@ private fun SavedPaneDialogs(model: PasswordModel, muted: Color, ink: Color) {
                 TextButton(onClick = { model.cancelHistory() }) { Text("Close") }
             },
         )
+        }
     }
     model.pendingRemove?.let { item ->
         AlertDialog(
@@ -854,7 +806,7 @@ private fun SavedPaneDialogs(model: PasswordModel, muted: Color, ink: Color) {
             },
             confirmButton = {
                 TextButton(onClick = { model.confirmReplace() }, enabled = !model.busy) {
-                    Text("Replace", color = Green)
+                    Text("Replace")
                 }
             },
             dismissButton = {
@@ -880,7 +832,7 @@ private fun RenameEntryDialog(
         onDismissRequest = onCancel,
         title = { Text("Rename saved password") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Rename \"${item.name}\". Other fields stay the same.", color = Muted)
                 OutlinedTextField(
                     value = name,
@@ -896,7 +848,7 @@ private fun RenameEntryDialog(
         },
         confirmButton = {
             TextButton(enabled = !busy, onClick = { onRename(name) }) {
-                Text("Rename", color = Green)
+                Text("Rename")
             }
         },
         dismissButton = {
@@ -918,7 +870,7 @@ private fun CategoryEntryDialog(
         onDismissRequest = onCancel,
         title = { Text("Category") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     "Category for \"${item.name}\". Pick a preset or type your own. Leave blank to clear. Other fields stay the same.",
                     color = Muted,
@@ -930,14 +882,14 @@ private fun CategoryEntryDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Vault.DEFAULT_CATEGORIES.take(4).forEach { label ->
                         TextButton(onClick = { category = label }, enabled = !busy) {
                             Text(label, color = Green, fontSize = 12.sp)
                         }
                     }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Vault.DEFAULT_CATEGORIES.drop(4).forEach { label ->
                         TextButton(onClick = { category = label }, enabled = !busy) {
                             Text(label, color = Green, fontSize = 12.sp)
@@ -951,7 +903,7 @@ private fun CategoryEntryDialog(
         },
         confirmButton = {
             TextButton(enabled = !busy, onClick = { onSave(category) }) {
-                Text("Save", color = Green)
+                Text("Save")
             }
         },
         dismissButton = {
@@ -973,7 +925,7 @@ private fun UsernameEntryDialog(
         onDismissRequest = onCancel,
         title = { Text("Username") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     "Username for \"${item.name}\". Leave blank to clear. Other fields stay the same.",
                     color = Muted,
@@ -992,7 +944,7 @@ private fun UsernameEntryDialog(
         },
         confirmButton = {
             TextButton(enabled = !busy, onClick = { onSave(username) }) {
-                Text("Save", color = Green)
+                Text("Save")
             }
         },
         dismissButton = {
@@ -1014,7 +966,7 @@ private fun UrlEntryDialog(
         onDismissRequest = onCancel,
         title = { Text("Website URL") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     "Website for \"${item.name}\". Leave blank to clear. Other fields stay the same.",
                     color = Muted,
@@ -1033,7 +985,7 @@ private fun UrlEntryDialog(
         },
         confirmButton = {
             TextButton(enabled = !busy, onClick = { onSave(url) }) {
-                Text("Save", color = Green)
+                Text("Save")
             }
         },
         dismissButton = {
@@ -1055,15 +1007,18 @@ private fun NotesEntryDialog(
         onDismissRequest = onCancel,
         title = { Text("Notes") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "Notes for \"${item.name}\". Leave blank to clear. Notes do not reveal the password.",
+                    "Notes for \"${item.name}\" are stored inside the encrypted vault. Leave blank to clear. Plaintext CSV exports include these notes.",
                     color = Muted,
                 )
                 OutlinedTextField(
                     value = notes,
                     onValueChange = { notes = it },
                     label = { Text("Notes") },
+                    supportingText = { Text("${notes.length} / 2000 characters") },
+                    isError = notes.length > 2000,
+                    minLines = 3,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 if (error.isNotEmpty()) {
@@ -1072,8 +1027,8 @@ private fun NotesEntryDialog(
             }
         },
         confirmButton = {
-            TextButton(enabled = !busy, onClick = { onSave(notes) }) {
-                Text("Save", color = Green)
+            TextButton(enabled = !busy && notes.length <= 2000, onClick = { onSave(notes) }) {
+                Text("Save")
             }
         },
         dismissButton = {
@@ -1103,7 +1058,7 @@ private fun EditEntryDialog(
         onDismissRequest = onCancel,
         title = { Text("Edit saved password") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = username, onValueChange = { username = it }, label = { Text("Username") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = url, onValueChange = { url = it }, label = { Text("URL") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -1146,7 +1101,7 @@ private fun EditEntryDialog(
                         ),
                     )
                 },
-            ) { Text("Save", color = Green) }
+            ) { Text("Save") }
         },
         dismissButton = {
             TextButton(onClick = onCancel, enabled = !busy) { Text("Cancel") }
@@ -1158,188 +1113,240 @@ private fun EditEntryDialog(
 @Composable
 private fun SettingsPane(
     model: PasswordModel,
-    card: Color,
-    ink: Color,
     muted: Color,
-    dark: Boolean,
     onImport: () -> Unit,
     onImportCsv: () -> Unit,
     onExportCsv: () -> Unit,
     onExport: () -> Unit,
 ) {
     val context = LocalContext.current
+    var showPrivacy by remember { mutableStateOf(false) }
+    if (showPrivacy) {
+        val policy = remember { context.assets.open("privacy-android.txt").bufferedReader().use { it.readText() } }
+        AlertDialog(onDismissRequest = { showPrivacy = false }, title = { Text("Privacy") },
+            text = { Text(policy, modifier = Modifier.verticalScroll(rememberScrollState())) },
+            confirmButton = { TextButton(onClick = { showPrivacy = false }) { Text("Close") } })
+    }
     val canBiometric = remember(context) {
         val manager = BiometricManager.from(context)
-        manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS ||
-            manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK) == BiometricManager.BIOMETRIC_SUCCESS
+        manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS
     }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(card, RoundedCornerShape(18.dp))
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text("Settings", color = ink, fontFamily = FontFamily.Serif, fontWeight = FontWeight.Bold, fontSize = 24.sp)
-        Text("Copied passwords clear from the clipboard after 30 seconds.", color = muted, fontSize = 13.sp)
-
-        Text("Appearance", color = ink, fontWeight = FontWeight.Bold)
-        TextButton(onClick = { model.toggleDark() }) {
-            Text(if (dark) "Dark On" else "Dark Off", color = if (dark) Green else muted)
+    ScreenSurface {
+        SettingsCard(
+            title = "Appearance",
+            description = "Choose a theme. System follows your phone’s appearance setting.",
+        ) {
+            listOf("light" to "Light", "dark" to "Dark", "system" to "System").forEach { (mode, label) ->
+                SettingsChoiceRow(
+                    label = label,
+                    selected = model.appearance == mode,
+                    onSelect = { model.chooseAppearance(mode) },
+                )
+            }
         }
 
-        Text("App lock", color = ink, fontWeight = FontWeight.Bold)
-        Text(
-            "Keep Generate open, or lock the whole app when you leave.",
-            color = muted,
-            fontSize = 13.sp,
-        )
-        TextButton(
-            onClick = {
-                if (model.appLockEnabled) model.disableAppLock() else model.requestEnableAppLock()
-            },
-            enabled = !model.busy,
-            modifier = Modifier.fillMaxWidth(),
+        SettingsCard(
+            title = "App lock",
+            description = "Copied passwords clear from the clipboard after 30 seconds. App lock protects the vault when you leave.",
         ) {
-            Text(
-                if (model.appLockEnabled) "App lock On" else "App lock Off",
-                color = if (model.appLockEnabled) Green else muted,
-                fontWeight = FontWeight.Bold,
-            )
+            SettingsSwitchRow(
+                label = "Lock the app",
+                supportingText = if (model.appLockEnabled) "The app asks you to unlock when the selected delay ends." else "The generator and vault stay open when you leave the app.",
+                checked = model.appLockEnabled,
+                enabled = !model.busy && (model.hasVault() || model.appLockEnabled),
+            ) { enabled ->
+                if (enabled) model.requestEnableAppLock() else model.disableAppLock()
+            }
+            if (!model.hasVault()) {
+                Text("Save your first password to create a vault and turn on app lock.", style = MaterialTheme.typography.bodyMedium, color = muted)
+            }
         }
         if (model.appLockEnabled) {
-            Text("Lock after leaving the app", color = ink, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(0.dp),
-            ) {
+            SettingsCard(title = "Lock delay", description = "Choose when the app locks after it leaves the screen.") {
                 listOf(
                     0 to "Immediately",
                     60 to "1 min",
                     300 to "5 min",
                     900 to "15 min",
                 ).forEach { (seconds, label) ->
-                    TextButton(onClick = { model.chooseAutoLockSeconds(seconds) }) {
-                        Text(
-                            label,
-                            color = if (model.autoLockSeconds == seconds) Green else muted,
-                            fontWeight = if (model.autoLockSeconds == seconds) FontWeight.Bold else FontWeight.Normal,
-                        )
-                    }
-                }
-            }
-            if (canBiometric && model.hasVault()) {
-                Text("Biometrics open the app first; passphrase is the backup.", color = muted, fontSize = 13.sp)
-                TextButton(
-                    onClick = {
-                        if (model.biometricEnabled) model.disableBiometric() else model.requestEnableBiometric()
-                    },
-                    enabled = !model.busy,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        if (model.biometricEnabled) "Biometrics On" else "Biometrics Off",
-                        color = if (model.biometricEnabled) Green else muted,
-                        fontWeight = FontWeight.Bold,
+                    SettingsChoiceRow(
+                        label = label,
+                        selected = model.autoLockSeconds == seconds,
+                        onSelect = { model.chooseAutoLockSeconds(seconds) },
                     )
                 }
-            }
-            TextButton(
-                onClick = { model.lockApp() },
-                enabled = model.hasVault() && !model.appLocked,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Lock now", color = Green, fontWeight = FontWeight.Bold)
+                if (canBiometric && model.hasVault()) {
+                    SettingsSwitchRow(
+                        label = "Biometric unlock",
+                        supportingText = "Use fingerprint or face first. Your passphrase remains available.",
+                        checked = model.biometricEnabled,
+                        enabled = !model.busy,
+                    ) { enabled ->
+                        if (enabled) model.requestEnableBiometric() else model.disableBiometric()
+                    }
+                } else if (!canBiometric) {
+                    Text("Biometric unlock is not available on this device. You can still unlock with your passphrase or recovery key.", style = MaterialTheme.typography.bodyMedium, color = muted)
+                }
+                PrimaryActionButton("Lock now", enabled = model.hasVault() && !model.appLocked, fillMaxWidth = true) {
+                    model.lockApp()
+                }
             }
         }
 
-        Text("Passphrase", color = ink, fontWeight = FontWeight.Bold)
-        Text(
-            "Changing it seals the vault again and shows a new recovery key once. The old passphrase and recovery key stop working.",
-            color = muted,
-            fontSize = 13.sp,
-        )
-        TextButton(
-            onClick = { model.requestChangePassphrase() },
-            enabled = !model.busy && model.hasVault(),
-            modifier = Modifier.fillMaxWidth(),
+        SettingsCard(
+            title = "Passphrase and recovery",
+            description = "Changing the passphrase reseals the vault and shows a new recovery key once. The old passphrase and recovery key then stop working.",
         ) {
-            Text("Change passphrase", color = Green, fontWeight = FontWeight.Bold)
+            PrimaryActionButton(
+                "Change passphrase",
+                enabled = !model.busy && model.hasVault(),
+                fillMaxWidth = true,
+            ) { model.requestChangePassphrase() }
         }
 
-        Text("Move vault", color = ink, fontWeight = FontWeight.Bold)
-        Text("Wi-Fi send keeps the passphrase on this phone. CSV export is plaintext.", color = muted, fontSize = 13.sp)
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalArrangement = Arrangement.spacedBy(0.dp),
+        SettingsCard(
+            title = "Move vault",
+            description = "Wi-Fi send keeps the passphrase on this phone. CSV export contains unencrypted text; protect or delete the file when you’re done.",
         ) {
-            TextButton(
-                onClick = { model.sendVault() },
-                enabled = !model.busy && model.offerCode == null,
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(AppSpacing.small),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.small),
             ) {
-                Text("Send vault", color = Green)
+                PrimaryActionButton("Send vault", enabled = !model.busy && model.offerCode == null) { model.sendVault() }
+                PrimaryActionButton("Receive vault", enabled = !model.busy) { model.askReceive = true }
+                PrimaryActionButton("Import vault") { onImport() }
+                PrimaryActionButton("Export vault") { onExport() }
+                PrimaryActionButton("Import CSV", enabled = !model.busy) { onImportCsv() }
+                PrimaryActionButton("Export CSV", enabled = !model.busy) { onExportCsv() }
             }
-            TextButton(
-                onClick = { model.askReceive = true },
-                enabled = !model.busy,
-            ) {
-                Text("Receive vault", color = Green)
+        }
+
+        SettingsCard(
+            title = "Android Autofill",
+            description = "Use Local Password to fill saved logins in other apps and websites. Android asks you to unlock and choose an entry before it fills anything. New logins are not saved by Autofill yet.",
+        ) {
+            PrimaryActionButton("Choose Autofill service", fillMaxWidth = true) {
+                try {
+                    context.startActivity(
+                        android.content.Intent(
+                            Settings.ACTION_REQUEST_SET_AUTOFILL_SERVICE,
+                            Uri.parse("package:${context.packageName}"),
+                        ),
+                    )
+                } catch (_: Exception) {
+                    model.error = "Open Android Settings and choose Local Password under Autofill service."
+                }
             }
-            TextButton(onClick = onImport) { Text("Import vault", color = Green) }
-            TextButton(onClick = onExport) { Text("Export vault", color = Green) }
-            TextButton(onClick = onImportCsv, enabled = !model.busy) {
-                Text("Import CSV", color = Green)
+        }
+
+        SettingsCard(
+            title = "Accessibility",
+            description = "Text size follows Android’s Display size and text settings. Settings controls expose their labels and selected states to screen readers.",
+        ) { }
+        SettingsCard(title = "About Local Password") {
+            val version = remember(context) {
+                @Suppress("DEPRECATION")
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "Unknown"
             }
-            TextButton(onClick = onExportCsv, enabled = !model.busy) {
-                Text("Export CSV", color = Green)
-            }
+            Text("Version $version", style = MaterialTheme.typography.bodyMedium)
+            Text("Your vault is stored on this device. Backups and transfers happen when you choose them. Keep an encrypted backup and your recovery key somewhere safe.")
+            Text("Passphrases use the EFF large wordlist (CC BY 3.0 US). The EFF does not endorse this project.",
+                style = MaterialTheme.typography.bodySmall)
+            TextButton(onClick = { model.openUrl("https://github.com/Rj268/local-password") }) { Text("Source code and licenses") }
+            TextButton(onClick = { showPrivacy = true }) { Text("Privacy information") }
         }
     }
 }
 
 @Composable
-private fun Pill(label: String, selected: Boolean, dark: Boolean, onClick: () -> Unit) {
-    TextButton(
-        onClick = onClick,
-        modifier = Modifier.background(if (selected) Green else if (dark) Color(0xFF2C2823) else Color(0xFFF3EFE6), RoundedCornerShape(24.dp)),
+private fun SettingsCard(
+    title: String,
+    description: String? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
-        Text(label, color = if (selected) Color.White else if (dark) NightInk else Ink, fontWeight = FontWeight.Bold)
+        Column(
+            modifier = Modifier.padding(AppSpacing.large),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.small),
+            content = {
+                Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+                if (description != null) Text(description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                content()
+            },
+        )
     }
 }
 
 @Composable
-private fun GreenButton(
+private fun SettingsChoiceRow(label: String, selected: Boolean, onSelect: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect)
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Text(label, modifier = Modifier.padding(start = 8.dp), style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+@Composable
+private fun SettingsSwitchRow(
+    label: String,
+    supportingText: String,
+    checked: Boolean,
+    enabled: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 64.dp)
+            .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onCheckedChange)
+            .padding(vertical = AppSpacing.small),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.medium),
+    ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
+            Text(supportingText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled)
+    }
+}
+@Composable
+private fun PrimaryActionButton(
     label: String,
     busy: Boolean = false,
     enabled: Boolean = true,
     fillMaxWidth: Boolean = false,
     onClick: () -> Unit,
 ) {
-    TextButton(
+    Button(
         onClick = onClick,
         enabled = enabled && !busy,
         modifier = Modifier
             .then(if (fillMaxWidth) Modifier.fillMaxWidth() else Modifier)
-            .then(if (fillMaxWidth) Modifier.height(52.dp) else Modifier)
-            .background(Green, RoundedCornerShape(if (fillMaxWidth) 14.dp else 24.dp)),
+            .heightIn(min = 48.dp),
     ) {
-        Text(
-            label,
-            color = Color.White,
-            fontWeight = FontWeight.Bold,
-            fontSize = if (fillMaxWidth) 18.sp else 14.sp,
-        )
+        Text(label, style = MaterialTheme.typography.labelLarge)
     }
 }
-
 @Composable
 private fun Stepper(label: String, value: Int, min: Int, max: Int, ink: Color, muted: Color, onChange: (Int) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+    FlowRow(horizontalArrangement = Arrangement.SpaceBetween, verticalArrangement = Arrangement.spacedBy(AppSpacing.small), modifier = Modifier.fillMaxWidth()) {
         Text(label, color = ink)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { if (value > min) onChange(value - 1) }) { Text("−", color = Green, fontSize = 20.sp) }
+            TextButton(onClick = { onChange(value - 1) }, enabled = value > min, modifier = Modifier.semantics { contentDescription = "Decrease $label" }) { Text("−", color = Green, fontSize = 20.sp) }
             Text(value.toString(), color = ink, fontWeight = FontWeight.Bold)
-            TextButton(onClick = { if (value < max) onChange(value + 1) }) { Text("+", color = Green, fontSize = 20.sp) }
+            TextButton(onClick = { onChange(value + 1) }, enabled = value < max, modifier = Modifier.semantics { contentDescription = "Increase $label" }) { Text("+", color = Green, fontSize = 20.sp) }
         }
     }
 }
@@ -1352,7 +1359,7 @@ private fun ReceiveDialog(model: PasswordModel) {
         onDismissRequest = { model.askReceive = false },
         title = { Text("Receive vault") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Enter the 6-digit code from the other device. Both devices need the same Wi-Fi. The passphrase is not sent.")
                 OutlinedTextField(
                     value = code,
@@ -1369,7 +1376,7 @@ private fun ReceiveDialog(model: PasswordModel) {
                     singleLine = true,
                 )
                 if (model.error.isNotEmpty()) {
-                    Text(model.error, color = Danger)
+                    Text(model.error, color = Danger, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                 }
             }
         },
@@ -1398,7 +1405,7 @@ private fun PassphraseDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(body)
                 OutlinedTextField(
                     value = phrase,

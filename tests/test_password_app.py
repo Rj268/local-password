@@ -166,8 +166,10 @@ class SavedPasswordTests(unittest.TestCase):
             self.assertEqual(password_app.load_saved_passwords(path), saved)
             file_mode = stat.S_IMODE(path.stat().st_mode)
             directory_mode = stat.S_IMODE(path.parent.stat().st_mode)
-            self.assertEqual(file_mode & 0o077, 0)
-            self.assertEqual(directory_mode & 0o077, 0)
+            if os.name != "nt":
+                self.assertEqual(file_mode & 0o077, 0)
+            if os.name != "nt":
+                self.assertEqual(directory_mode & 0o077, 0)
 
     def test_same_name_replaces_the_previous_password(self) -> None:
         existing = [
@@ -215,7 +217,12 @@ class SavedPasswordTests(unittest.TestCase):
             target = Path(directory) / "real.txt"
             target.write_text("keep\n", encoding="utf-8")
             link = Path(directory) / "saved.txt"
-            link.symlink_to(target)
+            try:
+                link.symlink_to(target)
+            except OSError as exc:
+                if getattr(exc, "winerror", None) == 1314:
+                    self.skipTest("Windows symlink privilege is unavailable")
+                raise
             with self.assertRaises(ValueError):
                 password_app.store_saved_passwords(
                     [password_app.SavedPassword("Email", "stolen")],
@@ -249,7 +256,8 @@ class VaultTests(unittest.TestCase):
             self.assertEqual(opened.n, 2**14)
             self.assertGreaterEqual(password_app.SCRYPT_N, 2**15)
             mode = stat.S_IMODE(path.stat().st_mode)
-            self.assertEqual(mode & 0o077, 0)
+            if os.name != "nt":
+                self.assertEqual(mode & 0o077, 0)
 
     def test_wrong_passphrase_does_not_unlock(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1175,12 +1183,18 @@ class AppearanceTests(unittest.TestCase):
                 password_app.store_appearance(True)
                 path = password_app.appearance_path()
                 self.assertEqual(path.read_text(encoding="utf-8"), "dark\n")
-                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+                if os.name != "nt":
+                    self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
                 self.assertTrue(password_app.load_dark_mode())
                 password_app.store_appearance(False)
                 self.assertFalse(password_app.load_dark_mode())
                 path.unlink()
-                path.symlink_to(path.with_name("other"))
+                try:
+                    path.symlink_to(path.with_name("other"))
+                except OSError as exc:
+                    if getattr(exc, "winerror", None) == 1314:
+                        self.skipTest("Windows symlink privilege is unavailable")
+                    raise
                 with self.assertRaises(ValueError):
                     password_app.store_appearance(True)
                 self.assertFalse(password_app.load_dark_mode())
@@ -1209,7 +1223,8 @@ class AppearanceTests(unittest.TestCase):
                     )
                 )
                 path = password_app.preferences_path()
-                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+                if os.name != "nt":
+                    self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
                 loaded = password_app.load_preferences()
                 self.assertEqual(loaded.clipboard_clear_seconds, 15)
                 self.assertEqual(loaded.auto_lock_seconds, 60)
@@ -1226,7 +1241,12 @@ class AppearanceTests(unittest.TestCase):
                 self.assertTrue(repaired.confirm_before_reveal)
                 self.assertTrue(repaired.lock_on_open)
                 path.unlink()
-                path.symlink_to(path.with_name("other"))
+                try:
+                    path.symlink_to(path.with_name("other"))
+                except OSError as exc:
+                    if getattr(exc, "winerror", None) == 1314:
+                        self.skipTest("Windows symlink privilege is unavailable")
+                    raise
                 with self.assertRaises(ValueError):
                     password_app.store_preferences(password_app.Preferences())
             finally:
@@ -1320,8 +1340,8 @@ class CreatePageTests(unittest.TestCase):
 
         password_app.install_styles(Gtk, Gdk)
         window = password_app.PasswordWindow(Gtk, Gdk)
-        self.assertEqual(window.section, "dashboard")
-        self.assertTrue(window.dashboard_view.get_visible())
+        self.assertEqual(window.section, "generate")
+        self.assertTrue(window.create_view.get_visible())
         window.show_section("saved")
         window.window.show_all()
         window.show_section("create")
@@ -1351,6 +1371,85 @@ class CreatePageTests(unittest.TestCase):
         window.window.destroy()
         while Gtk.events_pending():
             Gtk.main_iteration_do(False)
+
+
+@unittest.skipUnless(os.environ.get("DISPLAY"), "needs a graphical session")
+class DesktopMirrorTests(unittest.TestCase):
+    def setUp(self):
+        import gi
+        gi.require_version("Gtk", "3.0")
+        gi.require_version("Gdk", "3.0")
+        from gi.repository import Gdk, Gtk
+        self.gtk = Gtk
+        self.directory = tempfile.TemporaryDirectory()
+        self.environment = patch.dict(os.environ, {"XDG_DATA_HOME": self.directory.name})
+        self.environment.start()
+        password_app.install_styles(Gtk, Gdk)
+        self.window = password_app.PasswordWindow(Gtk, Gdk)
+
+    def tearDown(self):
+        self.window.window.destroy()
+        while self.gtk.events_pending():
+            self.gtk.main_iteration_do(False)
+        self.environment.stop()
+        self.directory.cleanup()
+
+    def test_slider_and_switches_control_generated_passwords(self):
+        w = self.window
+        w.length_scale.set_value(24)
+        w.uppercase.set_active(False)
+        w.digits.set_active(False)
+        w.symbols.set_active(False)
+        w.on_generate(None)
+        self.assertEqual(len(w.current), 24)
+        self.assertTrue(set(w.current) <= set(string.ascii_lowercase))
+        self.assertFalse(w.result_revealed)
+        self.assertNotIn(w.current, w.buffer.get_text(w.buffer.get_start_iter(), w.buffer.get_end_iter(), False))
+        w.length.set_value(32)
+        self.assertEqual(w.length_scale.get_value(), 32)
+
+    def test_cancel_save_name_dialog_does_not_write_vault(self):
+        w = self.window
+        w.on_generate(None)
+        with patch.object(self.gtk.Dialog, "run", return_value=self.gtk.ResponseType.CANCEL), patch("password_app.write_vault") as write:
+            w.on_save_to_vault(None)
+        write.assert_not_called()
+        self.assertTrue(w.save_ready)
+
+    def test_save_name_dialog_uses_existing_encrypted_save_flow(self):
+        w = self.window
+        w.on_generate(None)
+        w.vault_key = b"x" * 32
+        def name_and_accept(dialog):
+            entry = next(child for child in _gtk_descendants(dialog) if isinstance(child, self.gtk.Entry))
+            entry.set_text("Test mail")
+            return self.gtk.ResponseType.OK
+        with patch.object(self.gtk.Dialog, "run", name_and_accept), patch("password_app.write_vault") as write:
+            w.on_save_to_vault(None)
+        write.assert_called_once()
+        self.assertEqual(w.saved[0].name, "Test mail")
+        self.assertEqual(w.saved[0].password, w.current)
+        self.assertEqual(w.section, "saved")
+
+    def test_closing_entry_details_masks_password_and_lock_clears_expansion(self):
+        w = self.window
+        entry = password_app.SavedPassword(name="Test mail", password="Synthetic-only-123!")
+        w.saved = [entry]
+        w.locked = False
+        w.vault_key = b"x" * 32
+        w.show_section("saved")
+        expander = next(child for child in _gtk_descendants(w.saved_box) if isinstance(child, self.gtk.Expander))
+        self.assertFalse(expander.get_expanded())
+        expander.set_expanded(True)
+        w.revealed_names.add(entry.name)
+        expander.set_expanded(False)
+        self.assertNotIn(entry.name, w.revealed_names)
+        w.expanded_entries.add(entry.name)
+        w.locked = True
+        w.vault_key = None
+        w._refresh_saved_rows()
+        self.assertFalse(w.expanded_entries)
+        self.assertFalse(w.vault_health.get_visible())
 
 
 class BatchSaveTests(unittest.TestCase):
@@ -1453,10 +1552,10 @@ class WindowsPrepTests(unittest.TestCase):
         )
 
     def test_windows_clipboard_helpers_are_noops_off_win32(self) -> None:
-        self.assertNotEqual(password_app.sys.platform, "win32")
-        self.assertFalse(password_app.generator.copy_with_windows("secret-value"))
-        self.assertFalse(password_app.generator.clear_windows_clipboard())
-        self.assertIsNone(password_app.generator.read_windows_clipboard_text())
+        with patch.object(password_app.sys, "platform", "linux"):
+            self.assertFalse(password_app.generator.copy_with_windows("secret-value"))
+            self.assertFalse(password_app.generator.clear_windows_clipboard())
+            self.assertIsNone(password_app.generator.read_windows_clipboard_text())
 
     def test_windows_open_clipboard_retries_before_giving_up(self) -> None:
         calls = {"n": 0}
@@ -1534,3 +1633,34 @@ class WindowsPrepTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AtomicVaultTests(unittest.TestCase):
+    def test_failed_replace_preserves_vault_and_removes_temporary_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "saved.vault"
+            material = password_app.new_vault_key("test-passphrase", n=2**14)
+            original = [password_app.SavedPassword("test", "old-secret")]
+            password_app.write_vault(material, original, path)
+            before = path.read_bytes()
+            with patch.object(password_app.os, "replace", side_effect=OSError("disk error")):
+                with self.assertRaises(OSError):
+                    password_app.write_vault(material, [password_app.SavedPassword("new", "new-secret")], path)
+            self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(password_app.open_vault("test-passphrase", path)[1], original)
+            self.assertEqual(list(Path(directory).glob(".vault-*.tmp")), [])
+
+    def test_corrupt_payload_is_distinguished_from_wrong_secret(self):
+        recovery = "alpha bravo charlie delta echo foxtrot golf hotel"
+        material = password_app.new_vault_key("test-passphrase", recovery, n=2**14)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "saved.vault"
+            password_app.write_vault(material, [password_app.SavedPassword("test", "dummy")], path)
+            blob = bytearray(path.read_bytes())
+            blob[-1] ^= 1
+            with self.assertRaisesRegex(ValueError, "did not unlock"):
+                password_app.open_vault_bytes("wrong-passphrase", bytes(blob))
+            with self.assertRaisesRegex(ValueError, "contents could not be verified"):
+                password_app.open_vault_bytes("test-passphrase", bytes(blob))
+            with self.assertRaisesRegex(ValueError, "contents could not be verified"):
+                password_app.open_vault_bytes(recovery, bytes(blob))

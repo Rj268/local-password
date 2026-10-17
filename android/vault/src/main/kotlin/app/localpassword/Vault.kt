@@ -848,6 +848,7 @@ object Vault {
         val n = intBe(blob, 4)
         val r = intBe(blob, 8)
         val p = intBe(blob, 12)
+        validateScryptParameters(n, r, p)
         val passphraseSalt = blob.copyOfRange(16, 32)
         val recoverySalt = blob.copyOfRange(32, 48)
         val passphraseWrap = blob.copyOfRange(48, 48 + WRAP_LEN)
@@ -884,6 +885,7 @@ object Vault {
         val n = intBe(blob, 4)
         val r = intBe(blob, 8)
         val p = intBe(blob, 12)
+        validateScryptParameters(n, r, p)
         val salt = blob.copyOfRange(16, 32)
         val nonce = blob.copyOfRange(32, 44)
         val ciphertext = blob.copyOfRange(44, blob.size)
@@ -917,10 +919,14 @@ object Vault {
     }
 
     private fun derive(secret: String, salt: ByteArray, n: Int, r: Int, p: Int): ByteArray {
+        validateScryptParameters(n, r, p)
+        return SCrypt.generate(secret.toByteArray(Charsets.UTF_8), salt, n, r, p, 32)
+    }
+
+    private fun validateScryptParameters(n: Int, r: Int, p: Int) {
         if (r != SCRYPT_R || p != SCRYPT_P || n < (1 shl 14) || n > (1 shl 16) || n and (n - 1) != 0) {
             throw VaultException("The saved password file is damaged.")
         }
-        return SCrypt.generate(secret.toByteArray(Charsets.UTF_8), salt, n, r, p, 32)
     }
 
     private fun wrap(kek: ByteArray, dek: ByteArray, header: ByteArray): ByteArray {

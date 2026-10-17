@@ -1,0 +1,17 @@
+Local Password — Android privacy information
+Updated 16 October 2026
+
+Local Password stores passwords, usernames, websites, notes, and password history inside an encrypted vault on your device. Theme and app-lock preferences are stored locally. This Android build has no advertising, analytics, cloud account, crash telemetry, or online breach-check service.
+
+If you enable biometric unlock, an encrypted vault unlock secret is stored locally and protected by an Android Keystore key requiring strong biometric authentication. Android handles fingerprint/face recognition; Local Password does not receive biometric templates. Disabling biometric unlock removes this stored enrollment.
+
+When you choose Autofill, Android provides information about the requesting form. After you unlock and select a login, the chosen credentials are sent to that form. Check the destination before choosing an entry. No form information is sent to a Local Password server.
+
+Encrypted backup and Wi-Fi transfer move the encrypted vault to a destination you choose. CSV export contains plaintext credentials, notes, and other exported fields. Your chosen document provider may store exported files in the cloud. The app cannot delete copies retained by other apps or providers.
+
+Copy sends data to Android's clipboard. Other apps and the operating system may retain it. Automatic clipboard clearing is best-effort and subject to Android's background restrictions. Opening a saved website or project link uses your browser, which connects to that website under its own privacy policy.
+
+The app disables Android backup for its private data. Keep an encrypted backup and your recovery key. Uninstalling the app can remove the local vault. Losing both the passphrase and recovery key can make the vault unrecoverable.
+
+Project maintainer: Ronnie Samuel. Project and contact information: https://github.com/Rj268/local-password
+Never include real passwords, recovery keys, or vault contents in public issue reports.
