@@ -9,11 +9,13 @@ A strong password here has about 75 bits of entropy or more. The strength bar fi
 The Debian package installs the local window:
 
 ```bash
-sudo dpkg -i dist/local-password_1.31.0_all.deb
+sudo apt install ./local-password_1.31.8_all.deb
 local-password
 ```
 
-It depends on `python3`, `python3-gi`, `gir1.2-gtk-3.0`, `python3-cryptography`, and `xclip`. After install, "Local Password" is also in the application menu.
+For Ubuntu 22.04 or newer, Debian 12 or newer, and compatible Linux Mint releases. Run the command from the folder containing the downloaded package. APT installs its system dependencies: `python3`, `python3-gi`, `python3-gi-cairo`, `gir1.2-gtk-3.0`, `python3-cryptography`, and `xclip`. After install, "Local Password" is also in the application menu. This is a Python package marked `all`; it uses your distribution's native libraries. Other package formats are not included.
+
+The **Build Linux Debian package** workflow tests the desktop code and the installed package under a virtual X11 display on Ubuntu 22.04 and 24.04. It saves the `.deb`, checksums, and verification reports as build artifacts; it does not publish automatically. Native Wayland clipboard behavior and other distributions need separate testing.
 
 Rebuild the package with:
 

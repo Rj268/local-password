@@ -2,7 +2,16 @@
 # Build an architecture-independent Debian package for the local window.
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-VERSION=1.31.0
+VERSION=$(python3 - "$ROOT/password_app.py" <<'PY'
+import ast
+import sys
+tree = ast.parse(open(sys.argv[1], encoding='utf-8').read())
+print(next(ast.literal_eval(node.value) for node in tree.body
+           if isinstance(node, ast.Assign)
+           and any(isinstance(target, ast.Name) and target.id == 'APP_VERSION'
+                   for target in node.targets)))
+PY
+)
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 PKG="$STAGE/local-password"
@@ -13,7 +22,8 @@ mkdir -p \
   "$PKG/usr/share/local-password" \
   "$PKG/usr/share/applications" \
   "$PKG/usr/share/doc/local-password" \
-  "$PKG/usr/share/icons/hicolor/scalable/apps"
+  "$PKG/usr/share/icons/hicolor/scalable/apps" \
+  "$PKG/usr/share/icons/hicolor/256x256/apps"
 
 install -m 0755 "$ROOT/packaging/local-password" "$PKG/usr/bin/local-password"
 install -m 0755 "$ROOT/packaging/random-password-generator" "$PKG/usr/bin/random-password-generator"
@@ -28,6 +38,10 @@ install -m 0644 \
 install -m 0644 "$ROOT/packaging/local-password.desktop" "$PKG/usr/share/applications/local-password.desktop"
 install -m 0644 "$ROOT/packaging/local-password.svg" \
   "$PKG/usr/share/icons/hicolor/scalable/apps/local-password.svg"
+install -m 0644 "$ROOT/packaging/windows/local-password.png" \
+  "$PKG/usr/share/local-password/local-password.png"
+install -m 0644 "$ROOT/packaging/windows/local-password.png" \
+  "$PKG/usr/share/icons/hicolor/256x256/apps/local-password.png"
 install -m 0644 "$ROOT/eff_large_wordlist.LICENSE.txt" \
   "$PKG/usr/share/doc/local-password/eff_large_wordlist.LICENSE.txt"
 install -m 0644 "$ROOT/PRIVACY.md" "$PKG/usr/share/doc/local-password/PRIVACY.md"
@@ -58,11 +72,12 @@ Version: ${VERSION}
 Section: utils
 Priority: optional
 Architecture: all
-Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-3.0, python3-cryptography, xclip
+Depends: python3 (>= 3.10), python3-gi, python3-gi-cairo, gir1.2-gtk-3.0, python3-cryptography, xclip
 Maintainer: Local Password <local-password@localhost>
-Description: Air-gapped password generator
- Generate a password in a local window and copy it.
- Dark, beside the title, switches the colors on this computer.
+Description: Local password generator and encrypted vault
+ Generate passwords and word passphrases in Create, manage saved logins in
+ Vault, and choose appearance, auto-lock, clipboard clearing and backups
+ in Settings. Password generation and encrypted storage work offline.
  Save keeps a named password, locked with a passphrase, after the window closes.
  A recovery key is shown once. Either it or the passphrase opens saved passwords.
  If both are lost, the saved passwords cannot be recovered.
@@ -84,4 +99,5 @@ chmod 0755 "$PKG/DEBIAN/postinst"
 
 mkdir -p "$ROOT/dist"
 dpkg-deb --root-owner-group --build "$PKG" "$ROOT/dist/local-password_${VERSION}_all.deb"
+(cd "$ROOT/dist" && sha256sum "local-password_${VERSION}_all.deb" > SHA256SUMS-linux.txt)
 echo "Built $ROOT/dist/local-password_${VERSION}_all.deb"

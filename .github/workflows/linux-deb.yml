@@ -1,0 +1,60 @@
+name: Build Linux Debian package
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/linux-deb.yml'
+      - 'packaging/build-deb.sh'
+      - 'packaging/linux/**'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install build and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-gi python3-gi-cairo gir1.2-gtk-3.0 python3-cryptography python3-pyperclip xclip xvfb desktop-file-utils
+      - name: Test desktop code using isolated data
+        run: |
+          export XDG_DATA_HOME="$RUNNER_TEMP/unit-test-data"
+          mkdir -p "$XDG_DATA_HOME"
+          xvfb-run -a /usr/bin/python3 -m unittest discover -s tests -t . -q
+      - name: Build and validate package
+        run: |
+          sh -n packaging/build-deb.sh
+          sh packaging/build-deb.sh
+          desktop-file-validate packaging/local-password.desktop
+          /usr/bin/python3 packaging/linux/verify-package.py
+          sudo apt-get install -y ./dist/local-password_*_all.deb
+      - name: Test installed package with an empty vault
+        run: |
+          export XDG_DATA_HOME="$RUNNER_TEMP/installed-test-data"
+          mkdir -p "$XDG_DATA_HOME"
+          cd "$RUNNER_TEMP"
+          export PYTHONPATH=/usr/share/local-password
+          xvfb-run -a /usr/bin/python3 "$GITHUB_WORKSPACE/packaging/linux/smoke-test.py" "$GITHUB_WORKSPACE/dist/smoke-test.json"
+          xvfb-run -a /usr/bin/python3 "$GITHUB_WORKSPACE/packaging/linux/check-launch.py"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LocalPassword-linux-${{ matrix.runner }}
+          path: |
+            dist/*.deb
+            dist/SHA256SUMS-linux.txt
+            dist/*verification.json
+            dist/smoke-test.json
+          if-no-files-found: error
+          retention-days: 14
