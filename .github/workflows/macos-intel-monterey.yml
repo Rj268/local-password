@@ -36,6 +36,8 @@ jobs:
         shell: micromamba-shell {0}
         run: |
           python -m pip install PyInstaller==6.22.3
+          command -v g-ir-compiler
+          g-ir-compiler --version
           python -c "import gi; gi.require_version('Gtk', '3.0'); gi.require_version('Gdk', '3.0'); from gi.repository import Gtk, Gdk; assert Gtk.init_check([])[0]; display = Gdk.Display.get_default(); assert display is not None and 'Quartz' in type(display).__name__, type(display).__name__"
           micromamba list --explicit > conda-packages.txt
       - name: Test shared desktop source with fresh data
@@ -46,7 +48,12 @@ jobs:
           python -m unittest discover -s tests -t . -q
       - name: Build DMG and audit every Intel binary for macOS 12
         shell: micromamba-shell {0}
-        run: bash packaging/macos/build.sh
+        run: |
+          # ctypes and PyInstaller must resolve the conda libraries while building.
+          # The mounted-app test clears this variable and still checks portability.
+          export DYLD_FALLBACK_LIBRARY_PATH="$CONDA_PREFIX/lib:${DYLD_FALLBACK_LIBRARY_PATH:-/usr/local/lib:/usr/lib}"
+          python -c "from ctypes.util import find_library; assert find_library('gdk_pixbuf-2.0.0'), 'GdkPixbuf build library was not found'"
+          bash packaging/macos/build.sh
       - uses: actions/upload-artifact@v4
         with:
           name: LocalPassword-macos12-x86_64

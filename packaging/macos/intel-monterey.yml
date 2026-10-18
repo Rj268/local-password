@@ -6,6 +6,8 @@ dependencies:
   - pip
   - gtk3
   - pygobject
+  - gobject-introspection
+  - pkg-config
   - pycairo
   - cryptography>=46,<51
   - pyperclip
