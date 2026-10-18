@@ -1,0 +1,6 @@
+PyInstaller==6.22.3
+PyGObject==3.58.1
+pycairo>=1.28,<2
+cryptography>=46,<51
+pyperclip>=1.9,<2
+Pillow>=11,<13

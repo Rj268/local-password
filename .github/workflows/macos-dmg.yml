@@ -1,0 +1,61 @@
+name: Build macOS DMGs
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/macos-dmg.yml'
+      - 'packaging/macos/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-dmg-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: macOS 15 / ${{ matrix.architecture }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            architecture: arm64
+          - runner: macos-15-intel
+            architecture: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      HOMEBREW_NO_ANALYTICS: '1'
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Mac runtime and build dependencies
+        run: |
+          brew install python@3.14 gtk+3 gobject-introspection cairo pkgconf adwaita-icon-theme librsvg
+          "$(brew --prefix python@3.14)/bin/python3.14" -m venv .venv-macos
+          echo "$GITHUB_WORKSPACE/.venv-macos/bin" >> "$GITHUB_PATH"
+          export PKG_CONFIG_PATH="$(brew --prefix libffi)/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+          .venv-macos/bin/python -m pip install -r packaging/macos/build-requirements.txt
+      - name: Test shared desktop code with empty test data
+        run: |
+          export XDG_DATA_HOME="$RUNNER_TEMP/desktop-unit-tests"
+          mkdir -p "$XDG_DATA_HOME"
+          python -m unittest discover -s tests -t . -q
+      - name: Build and verify native app and disk image
+        run: bash packaging/macos/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LocalPassword-macos15-${{ matrix.architecture }}
+          path: |
+            dist/macos-${{ matrix.architecture }}/*.dmg
+            dist/macos-${{ matrix.architecture }}/SHA256SUMS.txt
+            dist/macos-${{ matrix.architecture }}/*verification.json
+            dist/macos-${{ matrix.architecture }}/smoke-test.json
+          if-no-files-found: error
+          retention-days: 14

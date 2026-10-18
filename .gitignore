@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 .venv/
+.venv-macos/
 .pytest_cache/
 build/
 dist/
@@ -25,4 +26,5 @@ android/**/build/
 keystore.properties
 local.properties
 *.aab
+*.dmg
 .idea/

@@ -103,7 +103,11 @@ The zip is what other people download. Send `dist/windows/LocalPassword-windows.
 
 Windows may warn that the program is unrecognized until it is signed with a code-signing certificate. Signing is a separate step after the exe runs. Recipients choose **More info**, then **Run anyway**.
 
-A macOS disk image is built on macOS.
+## macOS
+
+The Mac build uses the same desktop interface and vault format as Windows 1.31.8. Separate DMGs target Apple Silicon (`arm64`) and Intel (`x86_64`), on macOS 15 or later. The initial builds are not Developer ID signed or notarized and need testing on a real Mac.
+
+The **Build macOS DMGs** workflow builds both architectures on GitHub-hosted Macs. It can be started from the Actions page and saves the DMGs, checksums, and verification reports as workflow artifacts. The workflow does not publish a release automatically. See [Mac build and installation instructions](packaging/macos/README.md).
 
 ## Android
 

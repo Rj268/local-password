@@ -98,7 +98,7 @@ class ScrubIconTests(unittest.TestCase):
             self.assertTrue((status / "image-missing.svg").is_file())
             password_app.repair_bundled_icons()
             self.assertTrue((status / "image-missing.svg").is_file())
-            with unittest.mock.patch.object(password_app.sys, "frozen", True, create=True), unittest.mock.patch.object(
+            with unittest.mock.patch.object(password_app.sys, "platform", "win32"), unittest.mock.patch.object(password_app.sys, "frozen", True, create=True), unittest.mock.patch.object(
                 password_app.sys, "executable", str(exe)
             ), unittest.mock.patch.object(password_app.sys, "_MEIPASS", str(root / "_internal"), create=True):
                 password_app.repair_bundled_icons()

@@ -1284,6 +1284,11 @@ def data_directory() -> Path:
         if local:
             return Path(local)
         return Path.home() / "AppData" / "Local"
+    if sys.platform == "darwin":
+        legacy = Path.home() / ".local" / "share"
+        if (legacy / "local-password" / "saved.vault").is_file() or (legacy / "local-password" / "saved.txt").is_file():
+            return legacy
+        return Path.home() / "Library" / "Application Support"
     return Path.home() / ".local" / "share"
 
 
@@ -1329,6 +1334,15 @@ def store_onboarding_done(path: Path | None = None) -> None:
 
 def system_prefers_dark() -> bool:
     """Best-effort read of the desktop or Windows app theme."""
+    if sys.platform == "darwin":
+        try:
+            theme = subprocess.run(
+                ["/usr/bin/defaults", "read", "-g", "AppleInterfaceStyle"],
+                check=False, capture_output=True, text=True, timeout=1,
+            )
+            return theme.returncode == 0 and theme.stdout.strip().casefold() == "dark"
+        except (OSError, subprocess.SubprocessError):
+            return False
     if sys.platform == "win32":
         try:
             import winreg
@@ -1603,6 +1617,10 @@ def scrub_icon_themes(root: Path) -> tuple[int, int]:
 
 def repair_bundled_icons() -> None:
     """Drop bundled SVG theme icons before GTK starts. Source checkouts are left alone."""
+    # A macOS bundle is signed and may run from a read-only disk image.
+    # Windows' SVG-loader workaround must never modify that bundle.
+    if sys.platform == "darwin":
+        return
     if not getattr(sys, "frozen", False):
         return
     roots: list[Path] = []
