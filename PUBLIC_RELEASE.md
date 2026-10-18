@@ -2,7 +2,7 @@
 
 Use this when shipping Local Password beyond private use.
 
-## Ready in the repo (1.31.0)
+## Ready in the repo
 
 - [x] Privacy policy (`PRIVACY.md`) and About copy that matches it
 - [x] Security notes (`SECURITY.md`) covering vault crypto, breach checks, and limits
@@ -34,7 +34,7 @@ Until signed, keep the “More info → Run anyway” note in `SHARE.txt`.
 
 ### 3. Build the shareable packages
 
-On your Windows UCRT64 machine (this Linux agent cannot produce the `.exe`):
+On Windows, from an MSYS2 UCRT64 shell:
 
 ```bash
 bash packaging/windows/build.sh
@@ -42,13 +42,15 @@ bash packaging/windows/build.sh
 
 Share `dist/windows/LocalPassword-windows.zip`. Recipients unzip and double-click **Install Local Password**.
 
+Published Windows installers are available on [GitHub Releases](https://github.com/Rj268/local-password/releases/latest).
+
 On Debian/Ubuntu:
 
 ```bash
 sh packaging/build-deb.sh
 ```
 
-Share `dist/local-password_1.31.0_all.deb`.
+Share the versioned `.deb` file produced in `dist/`.
 
 ### 4. Android / Google Play
 
@@ -71,7 +73,3 @@ When you post a download link, include:
 - Link or quote `SECURITY.md` limits
 - “Not yet independently audited” until a review exists
 - Windows SmartScreen note until the build is signed
-
-## Suggested first public tag
-
-`v1.31.0` — privacy policy + packaging fixes + current feature set through breach checks and UI polish.
