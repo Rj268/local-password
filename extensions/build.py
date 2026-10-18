@@ -9,7 +9,7 @@ for browser in ('chromium', 'firefox'):
     destination = ROOT.parent / 'dist' / 'extensions' / browser
     destination.mkdir(parents=True, exist_ok=True)
     manifest = {
-        'manifest_version': 3, 'name': 'Local Password', 'version': '0.1.0',
+        'manifest_version': 3, 'name': 'Local Password', 'version': '0.1.1',
         'description': 'Choose a saved login from your local encrypted desktop vault.',
         'permissions': ['activeTab', 'scripting', 'nativeMessaging'],
         'action': {'default_popup': 'popup.html', 'default_title': 'Local Password'},

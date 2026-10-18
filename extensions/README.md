@@ -12,6 +12,11 @@ credential storage, local web server, automatic form submission, or background
 page scanning. Every request unlocks independently; the bridge does not reuse
 the desktop window's unlocked session. No vault writes are made by this preview.
 
+If a request window is stuck or missing, reopen the popup and select **Cancel
+pending request**. Native connections also expire after two minutes. Cancelling
+disconnects the native port, clears the pending state, and prevents a late reply
+from filling a page or interfering with a newer request.
+
 Only exact HTTPS origins match, including nondefault ports. Subdomains are
 separate sites. Save the full HTTPS website URL in each desktop entry. Archived
 entries are excluded. The extension fills only the top-level page, requires one

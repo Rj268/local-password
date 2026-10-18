@@ -4,4 +4,6 @@ h1 { font-size: 20px; margin-top: 0; }
 #site { overflow-wrap: anywhere; font-weight: 600; }
 button { width: 100%; background: #08775b; color: white; border: 0; border-radius: 10px; padding: 12px; font: inherit; cursor: pointer; }
 button:disabled { opacity: .6; }
+#cancel { margin-top: 10px; background: transparent; color: inherit; border: 1px solid #888; }
+[hidden] { display: none; }
 #status { line-height: 1.5; }

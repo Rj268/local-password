@@ -1,6 +1,10 @@
 # Local Password browser preview for Windows
 
 This is a development preview for Chrome, Brave and Firefox, not a public release.
+Version 0.1.1 adds **Cancel pending request**, a two-minute request timeout, and
+protection against late replies from cancelled requests. After replacing extension
+files in the same folder, click Reload on the browser extensions page. This also
+clears a stuck request from the older preview; no host re-registration is needed.
 The native bridge reads the existing Windows vault and never modifies it. Start
 with a synthetic test login and a full HTTPS website URL. Safari is not included.
 
