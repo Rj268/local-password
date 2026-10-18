@@ -111,6 +111,10 @@ The Mac build uses the same desktop interface and vault format as Windows 1.31.8
 
 The **Build macOS DMGs** workflow builds both architectures on GitHub-hosted Macs. It can be started from the Actions page and saves the DMGs, checksums, and verification reports as workflow artifacts. The workflow does not publish a release automatically. See [Mac build and installation instructions](packaging/macos/README.md).
 
+## Browser extensions (development preview)
+
+An initial local browser bridge and extension sources for Chrome, Brave and Firefox are in [extensions/README.md](extensions/README.md). They are not part of the published 1.31.8 installers or browser stores. Each request unlocks the local vault in a native window and fills only a user-approved login for the exact HTTPS site. Safari needs a separate macOS containing-app integration and is not implemented in this preview. Real-browser testing is required before public distribution.
+
 ## Android
 
 The phone app reads and writes the same `saved.vault` file. Generate a password, name it, and save it. The first save asks for a passphrase and shows a recovery key once. Saved can sort by Name, Recent, or Changed; each entry shows Created and Changed dates; copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Rename changes only the name without opening Edit. Category sets or clears the category without opening Edit. Username sets or clears the username without opening Edit. Archive hides a row from the main list. Remove can be undone with Undo. Settings holds dark mode, Change passphrase, Send vault, Receive vault, Import vault, Import CSV, Export CSV, and Export vault. Category dialogs offer the same default presets as the desktop app. URL and Notes can be set without opening Edit. Import vault reads a `saved.vault` copied from a computer. Import CSV adds password rows from another manager into the unlocked vault. Export CSV writes those rows as plaintext. Export vault writes that file so it can go back.
