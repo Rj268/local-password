@@ -14,7 +14,7 @@ VERSION=$($PYTHON -c 'import ast; t=ast.parse(open("password_app.py").read()); p
 OUT="$ROOT/dist/macos-$ARCH"
 BUILD="$ROOT/build/macos"
 mkdir -p "$OUT" "$BUILD"
-export MACOSX_DEPLOYMENT_TARGET=15.0
+export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-15.0}"
 
 # Generate only the Mac icon. Do not regenerate Android or Windows assets.
 $PYTHON - "$ROOT/packaging/branding/app-icon.png" "$BUILD/LocalPassword.icns" <<'PY'
@@ -39,7 +39,7 @@ trap cleanup EXIT
 ln -s /Applications "$STAGE/Applications"
 cp packaging/macos/README.md "$STAGE/Read Me.md"
 cp LICENSE "$STAGE/LICENSE.txt"
-DMG="$OUT/LocalPassword-$VERSION-macos15-$ARCH.dmg"
+DMG="$OUT/LocalPassword-$VERSION-macos${MACOSX_DEPLOYMENT_TARGET%%.*}-$ARCH.dmg"
 /usr/bin/hdiutil create -volname "Local Password $VERSION" -srcfolder "$STAGE" -format UDZO -ov "$DMG"
 /usr/bin/hdiutil verify "$DMG"
 /usr/bin/hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$MOUNT"

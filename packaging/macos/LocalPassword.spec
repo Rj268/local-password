@@ -1,5 +1,6 @@
 # Build natively on the target Mac architecture.
 import ast
+import os
 from pathlib import Path
 from PyInstaller.utils.hooks import copy_metadata
 
@@ -38,6 +39,6 @@ app = BUNDLE(coll, name='Local Password.app',
              info_plist={'CFBundleShortVersionString': version,
                          'CFBundleVersion': version,
                          'NSHighResolutionCapable': True,
-                         'LSMinimumSystemVersion': '15.0',
+                         'LSMinimumSystemVersion': os.environ.get('MACOSX_DEPLOYMENT_TARGET', '15.0'),
                          'NSLocalNetworkUsageDescription':
                          'Send or receive your encrypted vault with another device on the same Wi-Fi.'})

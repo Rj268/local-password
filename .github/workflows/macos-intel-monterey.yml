@@ -1,0 +1,60 @@
+name: Build Intel Mac Monterey DMG
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/macos-intel-monterey.yml'
+      - 'packaging/macos/intel-monterey.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15-intel
+    timeout-minutes: 60
+    env:
+      CONDA_OVERRIDE_OSX: '12.0'
+      MACOSX_DEPLOYMENT_TARGET: '12.0'
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: mamba-org/setup-micromamba@v3
+        with:
+          environment-file: packaging/macos/intel-monterey.yml
+          init-shell: none
+          post-cleanup: all
+          condarc: |
+            channels:
+              - conda-forge
+            channel_priority: strict
+      - name: Install packager and check native Quartz display
+        shell: micromamba-shell {0}
+        run: |
+          python -m pip install PyInstaller==6.22.3
+          python -c "import gi; gi.require_version('Gtk', '3.0'); gi.require_version('Gdk', '3.0'); from gi.repository import Gtk, Gdk; assert Gtk.init_check([])[0]; display = Gdk.Display.get_default(); assert display is not None and 'Quartz' in type(display).__name__, type(display).__name__"
+          micromamba list --explicit > conda-packages.txt
+      - name: Test shared desktop source with fresh data
+        shell: micromamba-shell {0}
+        run: |
+          export XDG_DATA_HOME="$RUNNER_TEMP/monterey-unit-test-data"
+          mkdir -p "$XDG_DATA_HOME"
+          python -m unittest discover -s tests -t . -q
+      - name: Build DMG and audit every Intel binary for macOS 12
+        shell: micromamba-shell {0}
+        run: bash packaging/macos/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LocalPassword-macos12-x86_64
+          path: |
+            dist/macos-x86_64/*macos12-x86_64.dmg
+            dist/macos-x86_64/SHA256SUMS.txt
+            dist/macos-x86_64/*verification.json
+            dist/macos-x86_64/smoke-test.json
+            conda-packages.txt
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,14 @@
+name: local-password-monterey
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - gtk3
+  - pygobject
+  - pycairo
+  - cryptography>=46,<51
+  - pyperclip
+  - pillow
+  - adwaita-icon-theme
+  - librsvg
