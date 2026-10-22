@@ -66,26 +66,49 @@ def choose_login(origin):
     import concurrent.futures
     import gi
     gi.require_version('Gtk', '3.0')
-    from gi.repository import Gtk, GLib
+    from gi.repository import Gtk, GLib, Gdk
     import password_app as app
 
-    dialog = Gtk.Dialog(title='Local Password — browser request')
-    dialog.set_default_size(480, 240)
+    app.set_windows_app_id()
+    dialog = Gtk.Dialog(title='Local Password')
+    for icon in app._icon_candidates():
+        if icon.is_file() and icon.suffix == '.png':
+            dialog.set_icon_from_file(str(icon))
+            break
+    provider = Gtk.CssProvider()
+    provider.load_from_data(b"dialog { background: #f3f8f5; color: #183c32; font-family: Segoe UI, sans-serif; font-size: 15px; } entry { padding: 10px; border-radius: 8px; background: white; color: #183c32; } button { padding: 8px 16px; border-radius: 8px; } button.suggested-action { background: #08775b; color: white; } .request-title { font-size: 22px; font-weight: bold; }")
+    Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+    dialog.set_default_size(480, 320)
+    dialog.set_resizable(False)
     dialog.set_border_width(18)
     dialog.add_button('Cancel', Gtk.ResponseType.CANCEL)
-    unlock = dialog.add_button('Unlock', Gtk.ResponseType.OK)
+    unlock = dialog.add_button('Unlock vault', Gtk.ResponseType.OK)
+    unlock.get_style_context().add_class('suggested-action')
     box = dialog.get_content_area()
-    heading = Gtk.Label(label=f'Choose a login for\n{origin}')
+    heading = Gtk.Label(label='Unlock to use a saved login')
+    heading.get_style_context().add_class('request-title')
+    heading.set_xalign(0)
     heading.set_line_wrap(True)
     box.pack_start(heading, False, False, 8)
+    site = Gtk.Label(label=origin)
+    site.set_xalign(0)
+    site.set_line_wrap(True)
+    site.set_max_width_chars(48)
+    box.pack_start(site, False, False, 8)
+    field_label = Gtk.Label(label='Vault passphrase or recovery key')
+    field_label.set_xalign(0)
+    box.pack_start(field_label, False, False, 4)
     secret = Gtk.Entry()
+    secret.get_accessible().set_name('Vault passphrase or recovery key')
     secret.set_visibility(False)
     secret.set_placeholder_text('Vault passphrase or recovery key')
     secret.set_activates_default(True)
     dialog.set_default_response(Gtk.ResponseType.OK)
     box.pack_start(secret, False, False, 8)
-    status = Gtk.Label(label='Only an exact site match can be filled. You choose the login.')
+    status = Gtk.Label(label='Unlock your vault, then choose an account for this site.')
     status.set_line_wrap(True)
+    status.set_xalign(0)
+    status.set_max_width_chars(48)
     box.pack_start(status, False, False, 8)
     dialog.show_all()
     if dialog.run() != Gtk.ResponseType.OK:
@@ -116,6 +139,7 @@ def choose_login(origin):
     def show_problem(text):
         status.set_text(text)
         secret.hide()
+        field_label.hide()
         unlock.set_label('Close')
         unlock.set_sensitive(True)
         dialog.run()
@@ -130,6 +154,8 @@ def choose_login(origin):
         show_problem('No saved login matches this exact site. Add its full HTTPS URL to the entry in your desktop vault.')
         return {'ok': False, 'error': 'no_matching_login'}
     secret.destroy()
+    field_label.set_text('Saved account')
+    heading.set_text('Choose a saved login')
     selector = Gtk.ComboBoxText()
     for item in candidates:
         selector.append_text(item.name + (' — ' + item.username if item.username else ''))

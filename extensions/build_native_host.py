@@ -13,7 +13,9 @@ command = [sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--con
            '--paths', str(root), '--hidden-import', 'password_app', '--hidden-import', 'vault_sync',
            '--hidden-import', 'gi.repository.Gtk', '--hidden-import', 'gi.repository.Gdk',
            '--hidden-import', 'gi.repository.GLib', '--hidden-import', 'cairo']
-for name in ('eff_large_wordlist.txt', 'eff_large_wordlist.LICENSE.txt', 'LICENSE'):
+if sys.platform == 'win32':
+    command.extend(['--icon', str(root / 'packaging/windows/local-password.ico')])
+for name in ('local-password.png', 'eff_large_wordlist.txt', 'eff_large_wordlist.LICENSE.txt', 'LICENSE'):
     command.extend(['--add-data', f'{root / name}{";" if sys.platform == "win32" else ":"}.'])
 command.append(str(root / 'browser_native.py'))
 subprocess.run(command, cwd=root, check=True)

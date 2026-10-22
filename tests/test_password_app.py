@@ -171,22 +171,26 @@ class SavedPasswordTests(unittest.TestCase):
             if os.name != "nt":
                 self.assertEqual(directory_mode & 0o077, 0)
 
-    def test_same_name_replaces_the_previous_password(self) -> None:
-        existing = [
-            password_app.SavedPassword(
-                "Email",
-                "old",
-                username="me@example.com",
-                created="2020-01-01T00:00:00Z",
-            )
-        ]
-        saved = password_app.remember_named(existing, "  Email  ", ["new"])
-        self.assertEqual(len(saved), 1)
-        self.assertEqual(saved[0].name, "Email")
-        self.assertEqual(saved[0].password, "new")
-        self.assertEqual(saved[0].username, "me@example.com")
-        self.assertEqual(saved[0].created, "2020-01-01T00:00:00Z")
-        self.assertTrue(saved[0].modified)
+    def test_duplicate_save_preserves_original(self):
+        original = password_app.SavedPassword("Email", "old", username="me", archived=True)
+        for name in ("Email", "  Email  ", "email"):
+            with self.assertRaises(ValueError):
+                password_app.remember_named([original], name, ["new"])
+        self.assertEqual(original.password, "old")
+
+    def test_batch_collision_is_atomic_and_keeps_base_name(self):
+        original = password_app.SavedPassword("Router 2", "old")
+        with self.assertRaises(ValueError):
+            password_app.remember_named([original], "Router", ["one", "two"])
+        base = password_app.SavedPassword("Router", "old")
+        self.assertIn(base, password_app.remember_named([base], "Router", ["one", "two"]))
+
+    def test_manual_add_and_edit_cannot_replace_another_entry(self):
+        entries = [password_app.SavedPassword("Email", "old"), password_app.SavedPassword("Bank", "bank")]
+        with self.assertRaises(ValueError):
+            password_app.upsert_entry(entries, password_app.SavedPassword("Email", "new"))
+        with self.assertRaises(ValueError):
+            password_app.upsert_entry(entries, password_app.SavedPassword("Bank", "new"), previous_name="Email")
 
     def test_several_passwords_share_a_numbered_name(self) -> None:
         saved = password_app.remember_named([], "Router", ["one", "two"])

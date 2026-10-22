@@ -93,7 +93,7 @@ AUTO_LOCK_OPTIONS = (
     (300, "5 minutes"),
     (900, "15 minutes"),
 )
-APP_VERSION = "1.31.8"
+APP_VERSION = "1.31.9"
 THEME_LIGHT = "light"
 THEME_DARK = "dark"
 THEME_SYSTEM = "system"
@@ -813,7 +813,7 @@ def rename_entry(
     label = clean_name(new_name)
     if label == item.name:
         return list(existing)
-    if label in taken:
+    if any(label.casefold() == name.casefold() for name in taken if name != item.name):
         raise ValueError("Another saved password already uses that name.")
     stamp = when or utc_now()
     renamed = replace(item, name=label, modified=stamp)
@@ -1712,56 +1712,28 @@ def remember_named(
     name: str,
     passwords: list[str],
 ) -> list[SavedPassword]:
-    """Save these passwords under a name. The same name replaces the previous one."""
+    """Create entries without replacing any saved password."""
     label = clean_name(name)
     if not passwords:
         raise ValueError("There is no password to save.")
+    names = [label] if len(passwords) == 1 else [f"{label} {i}" for i in range(1, len(passwords) + 1)]
+    for entry_name in names:
+        clean_name(entry_name)
+    taken = {entry.name.casefold() for entry in existing}
+    if any(entry_name.casefold() in taken for entry_name in names):
+        raise ValueError("A saved password already uses that name. Choose a different name, or use Edit in Vault to update it. Nothing was replaced.")
     now = utc_now()
-    by_name = {item.name: item for item in existing}
-
-    def _fresh(entry_name: str, password: str) -> SavedPassword:
-        previous = by_name.get(entry_name)
-        secret = _password_line(password)
-        if previous is None:
-            return SavedPassword(entry_name, secret, created=now, modified=now)
-        base = SavedPassword(
-            entry_name,
-            previous.password,
-            username=previous.username,
-            url=previous.url,
-            notes=previous.notes,
-            category=previous.category,
-            favorite=previous.favorite,
-            archived=previous.archived,
-            created=previous.created if previous.created else now,
-            modified=now,
-            last_used=previous.last_used,
-            history=previous.history,
-            extras=dict(previous.extras),
-        )
-        if secret == previous.password:
-            return base
-        return with_changed_password(base, secret)
-
-    if len(passwords) == 1:
-        fresh = [_fresh(label, passwords[0])]
-    else:
-        extra = len(str(len(passwords))) + 1
-        if len(label) + extra > MAX_NAME_LENGTH:
-            raise ValueError(f"The name must be {MAX_NAME_LENGTH - extra} characters or fewer for this many passwords.")
-        fresh = [
-            _fresh(f"{label} {index}", password)
-            for index, password in enumerate(passwords, start=1)
-        ]
-    replaced = {item.name for item in fresh}
-    replaced.add(label)
-    kept = [item for item in existing if item.name not in replaced]
-    return fresh + kept
+    fresh = [SavedPassword(n, _password_line(p), created=now, modified=now) for n, p in zip(names, passwords)]
+    return fresh + list(existing)
 
 
 def upsert_entry(existing: list[SavedPassword], item: SavedPassword, *, previous_name: str | None = None) -> list[SavedPassword]:
     """Insert or replace one vault entry. Renames drop the old name."""
     label = clean_name(item.name)
+    if any(entry.name.casefold() == label.casefold() and entry.name != previous_name for entry in existing):
+        raise ValueError("A saved password already uses that name. Choose a different name. Nothing was replaced.")
+    if previous_name is not None and not any(entry.name == previous_name for entry in existing):
+        raise ValueError("That saved password is gone.")
     now = utc_now()
     drop = {label}
     if previous_name:
@@ -4409,6 +4381,7 @@ class PasswordWindow:
             updated = remember_named(self.saved, label, [password])
             write_vault(self.vault_key, updated)
         except ValueError as exc:
+            self._show_save_error(str(exc))
             row_status.set_text(str(exc))
             self.status.set_text(str(exc))
             return
@@ -6337,6 +6310,15 @@ class PasswordWindow:
         elif self.section == "dashboard":
             self._refresh_dashboard()
 
+    def _show_save_error(self, message: str) -> None:
+        dialog = self.gtk.MessageDialog(transient_for=self.window, modal=True,
+            message_type=self.gtk.MessageType.WARNING, buttons=self.gtk.ButtonsType.CLOSE,
+            text="Password not saved")
+        dialog.format_secondary_text(message)
+        self._match_dialog(dialog)
+        dialog.run()
+        dialog.destroy()
+
     def on_save_to_vault(self, _button) -> None:
         if not self.save_ready or not self.current or self.showing_saved:
             return
@@ -6380,6 +6362,7 @@ class PasswordWindow:
             updated = remember_named(self.saved, label, fresh)
             write_vault(self.vault_key, updated)
         except ValueError as exc:
+            self._show_save_error(str(exc))
             self.status.set_text(str(exc))
             return
         except OSError:

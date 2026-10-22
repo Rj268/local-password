@@ -246,7 +246,7 @@ object Vault {
         val changed = stampDate(item.modified)
         if (created.isNotEmpty()) bits.add("Created $created")
         if (changed.isNotEmpty()) bits.add("Changed $changed")
-        return bits.joinToString(" · ")
+        return bits.joinToString(" Ã‚Â· ")
     }
 
     fun activeSavedEntries(items: List<SavedPassword>): List<SavedPassword> =
@@ -312,6 +312,14 @@ object Vault {
         return listOf(fresh) + items
     }
 
+    fun addEntry(items: List<SavedPassword>, item: SavedPassword): List<SavedPassword> {
+        val fresh = normalizeEntry(item)
+        if (items.any { it.name.equals(fresh.name, ignoreCase = true) }) {
+            throw VaultException("A saved password already uses that name. Choose a different name, or use Edit in Vault to update it. Nothing was replaced.")
+        }
+        return listOf(fresh) + items
+    }
+
     fun renameEntry(
         items: List<SavedPassword>,
         item: SavedPassword,
@@ -323,7 +331,7 @@ object Vault {
         }
         val label = cleanName(newName)
         if (label == item.name) return items.toList()
-        if (items.any { it.name == label }) {
+        if (items.any { it.name != item.name && it.name.equals(label, ignoreCase = true) }) {
             throw VaultException("Another saved password already uses that name.")
         }
         val renamed = item.copy(name = label, modified = whenStamp)

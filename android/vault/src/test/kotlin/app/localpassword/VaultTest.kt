@@ -6,6 +6,16 @@ import org.junit.jupiter.api.assertThrows
 
 class VaultTest {
     @Test
+    fun duplicateAddPreservesOriginal() {
+        val original = SavedPassword(name = "Email", password = "old", archived = true)
+        for (name in listOf("Email", " email ")) {
+            assertThrows<VaultException> { Vault.addEntry(listOf(original), SavedPassword(name = name, password = "new")) }
+        }
+        assertEquals("old", original.password)
+        assertEquals(2, Vault.addEntry(listOf(original), SavedPassword(name = "Bank", password = "new")).size)
+    }
+
+    @Test
     fun opensAVaultWrittenByTheComputerApp() {
         val blob = javaClass.getResourceAsStream("/computer.vault")!!.readBytes()
         val opened = Vault.open("correct horse", blob)
@@ -609,7 +619,7 @@ class VaultTest {
         )
         assertEquals("", Vault.entryDatesLabel(bare))
         assertEquals("Created 2024-01-15", Vault.entryDatesLabel(createdOnly))
-        assertEquals("Created 2024-01-15 · Changed 2024-03-20", Vault.entryDatesLabel(both))
+        assertEquals("Created 2024-01-15 Ã‚Â· Changed 2024-03-20", Vault.entryDatesLabel(both))
     }
 
     @Test

@@ -1155,7 +1155,7 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
                 } else {
                     Vault.normalizeEntry(base.copy(password = previous.password, modified = now))
                 }
-                if (stamped.name != previous.name && currentOpen.items.any { it.name == stamped.name }) {
+                if (stamped.name != previous.name && currentOpen.items.any { it.name != previous.name && it.name.equals(stamped.name, ignoreCase = true) }) {
                     error = "Another saved password already uses that name."
                     return@launch
                 }
@@ -1595,31 +1595,13 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     private fun persist(currentOpen: OpenVault) {
         val now = Vault.utcNow()
         val label = Vault.cleanName(name)
-        val previous = currentOpen.items.firstOrNull { it.name == label }
-        val item = if (previous == null) {
-            SavedPassword(
-                name = label,
-                password = current,
-                created = now,
-                modified = now,
-            )
-        } else if (previous.password == current) {
-            previous.copy(modified = now)
-        } else {
-            Vault.withChangedPassword(
-                previous.copy(
-                    username = previous.username,
-                    url = previous.url,
-                    notes = previous.notes,
-                    category = previous.category,
-                    favorite = previous.favorite,
-                    created = previous.created.ifEmpty { now },
-                    extras = previous.extras,
-                ),
-                current,
-            )
+        try {
+            val item = SavedPassword(name = label, password = current, created = now, modified = now)
+            val next = Vault.addEntry(currentOpen.items, item)
+            replace(currentOpen, next, "Saved.")
+        } catch (exc: VaultException) {
+            error = exc.message ?: "Could not save the password."
         }
-        replace(currentOpen, currentOpen.items.filter { it.name != item.name } + item, "Saved.")
     }
 
     private fun replace(currentOpen: OpenVault, next: List<SavedPassword>, done: String) {

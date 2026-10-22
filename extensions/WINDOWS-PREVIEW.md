@@ -1,5 +1,7 @@
 # Local Password browser preview for Windows
 
+Python is bundled with the Windows helper; users do not need to install Python. Keep the complete LocalPasswordBrowser folder together. The browser extension also needs the helper registered using the steps below.
+
 This is a development preview for Chrome, Brave and Firefox, not a public release.
 Version 0.1.1 adds **Cancel pending request**, a two-minute request timeout, and
 protection against late replies from cancelled requests. After replacing extension
