@@ -93,7 +93,7 @@ AUTO_LOCK_OPTIONS = (
     (300, "5 minutes"),
     (900, "15 minutes"),
 )
-APP_VERSION = "1.31.9"
+APP_VERSION = "1.31.10"
 THEME_LIGHT = "light"
 THEME_DARK = "dark"
 THEME_SYSTEM = "system"
@@ -1711,6 +1711,7 @@ def remember_named(
     existing: list[SavedPassword],
     name: str,
     passwords: list[str],
+    *, replace_existing: bool = False,
 ) -> list[SavedPassword]:
     """Create entries without replacing any saved password."""
     label = clean_name(name)
@@ -1720,10 +1721,16 @@ def remember_named(
     for entry_name in names:
         clean_name(entry_name)
     taken = {entry.name.casefold() for entry in existing}
-    if any(entry_name.casefold() in taken for entry_name in names):
+    if not replace_existing and any(entry_name.casefold() in taken for entry_name in names):
         raise ValueError("A saved password already uses that name. Choose a different name, or use Edit in Vault to update it. Nothing was replaced.")
     now = utc_now()
     fresh = [SavedPassword(n, _password_line(p), created=now, modified=now) for n, p in zip(names, passwords)]
+    if replace_existing:
+        by_name = {entry.name.casefold(): entry for entry in existing}
+        fresh = [with_changed_password(by_name[item.name.casefold()], item.password)
+                 if item.name.casefold() in by_name else item for item in fresh]
+        changed = {item.name for item in fresh}
+        return fresh + [item for item in existing if item.name not in changed]
     return fresh + list(existing)
 
 
@@ -4378,7 +4385,9 @@ class PasswordWindow:
         if not self._ensure_vault_key():
             return
         try:
-            updated = remember_named(self.saved, label, [password])
+            updated = self._prepare_new_save(label, [password])
+            if updated is None:
+                return
             write_vault(self.vault_key, updated)
         except ValueError as exc:
             self._show_save_error(str(exc))
@@ -6310,6 +6319,27 @@ class PasswordWindow:
         elif self.section == "dashboard":
             self._refresh_dashboard()
 
+    def _prepare_new_save(self, label, passwords):
+        names = [label] if len(passwords) == 1 else [f"{label} {i}" for i in range(1, len(passwords) + 1)]
+        targets = {name.casefold() for name in names}
+        conflicts = [item.name for item in self.saved if item.name.casefold() in targets]
+        confirmed = False
+        if conflicts:
+            dialog = self.gtk.MessageDialog(transient_for=self.window, modal=True,
+                message_type=self.gtk.MessageType.WARNING, buttons=self.gtk.ButtonsType.NONE,
+                text="Replace existing password?")
+            dialog.format_secondary_text("Already saved: " + ", ".join(conflicts) +
+                "\n\nReplace only the password with the generated value? Account details stay unchanged. The old password stays under Previous. Update the website separately.")
+            dialog.add_button("Cancel", self.gtk.ResponseType.CANCEL)
+            dialog.add_button("Replace password", self.gtk.ResponseType.OK)
+            dialog.set_default_response(self.gtk.ResponseType.CANCEL)
+            self._match_dialog(dialog)
+            confirmed = dialog.run() == self.gtk.ResponseType.OK
+            dialog.destroy()
+            if not confirmed:
+                return None
+        return remember_named(self.saved, label, passwords, replace_existing=confirmed)
+
     def _show_save_error(self, message: str) -> None:
         dialog = self.gtk.MessageDialog(transient_for=self.window, modal=True,
             message_type=self.gtk.MessageType.WARNING, buttons=self.gtk.ButtonsType.CLOSE,
@@ -6359,7 +6389,9 @@ class PasswordWindow:
         if not self._ensure_vault_key():
             return
         try:
-            updated = remember_named(self.saved, label, fresh)
+            updated = self._prepare_new_save(label, fresh)
+            if updated is None:
+                return
             write_vault(self.vault_key, updated)
         except ValueError as exc:
             self._show_save_error(str(exc))
@@ -6556,7 +6588,13 @@ class PasswordWindow:
         save = dialog.add_button("Save", gtk.ResponseType.OK)
         save.get_style_context().add_class("primary")
         dialog.set_default_response(gtk.ResponseType.OK)
-        content = dialog.get_content_area()
+        dialog.set_default_size(620, 680)
+        dialog.set_resizable(True)
+        scroll = gtk.ScrolledWindow()
+        scroll.set_policy(gtk.PolicyType.NEVER, gtk.PolicyType.AUTOMATIC)
+        content = gtk.Box(orientation=gtk.Orientation.VERTICAL, spacing=8)
+        scroll.add(content)
+        dialog.get_content_area().pack_start(scroll, True, True, 0)
         content.set_spacing(8)
         for setter in (
             content.set_margin_top,
@@ -6591,6 +6629,9 @@ class PasswordWindow:
         username_entry = field("Username", item.username)
         url_entry = field("URL", item.url)
         password_entry = field("Password", item.password, password=True)
+        reveal = gtk.CheckButton(label="Show password")
+        reveal.connect("toggled", lambda button: password_entry.set_visibility(button.get_active()))
+        content.pack_start(reveal, False, False, 0)
         category_entry = field("Category", item.category)
         presets = gtk.Box(orientation=gtk.Orientation.HORIZONTAL, spacing=6)
         for label in DEFAULT_CATEGORIES:
@@ -6648,7 +6689,7 @@ class PasswordWindow:
                 problem.set_text(str(exc))
                 continue
             if any(
-                entry.name == edited.name and entry.name != item.name for entry in self.saved
+                entry.name.casefold() == edited.name.casefold() and entry.name != item.name for entry in self.saved
             ):
                 problem.set_text("Another saved password already uses that name.")
                 continue

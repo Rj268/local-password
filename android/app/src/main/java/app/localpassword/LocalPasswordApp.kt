@@ -790,6 +790,15 @@ fun SavedPaneDialogs(model: PasswordModel, muted: Color, ink: Color) {
             },
         )
     }
+    model.pendingSaveReplacement?.let { pending ->
+        AlertDialog(
+            onDismissRequest = { model.cancelSaveReplacement() },
+            title = { Text("Replace existing password?") },
+            text = { Text("Already saved: ${pending.first.name}\n\nReplace only the password with the generated value? Account details stay unchanged. The old password stays under Previous. Update the website separately.") },
+            confirmButton = { TextButton(onClick = { model.confirmSaveReplacement() }, enabled = !model.busy) { Text("Replace password") } },
+            dismissButton = { TextButton(onClick = { model.cancelSaveReplacement() }) { Text("Cancel") } },
+        )
+    }
     model.pendingReplace?.let { item ->
         val strength = model.strengthWarning(item)
         val reuse = model.reuseWarning(item)
@@ -1053,6 +1062,7 @@ private fun EditEntryDialog(
     var notes by remember(item) { mutableStateOf(item.notes) }
     var favorite by remember(item) { mutableStateOf(item.favorite) }
     var archived by remember(item) { mutableStateOf(item.archived) }
+    var showPassword by remember(item) { mutableStateOf(false) }
     val history = item.history
     AlertDialog(
         onDismissRequest = onCancel,
@@ -1067,9 +1077,10 @@ private fun EditEntryDialog(
                     onValueChange = { password = it },
                     label = { Text("Password") },
                     singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
+                    visualTransformation = if (showPassword) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
                 )
+                TextButton(onClick = { showPassword = !showPassword }) { Text(if (showPassword) "Hide password" else "Show password") }
                 OutlinedTextField(value = category, onValueChange = { category = it }, label = { Text("Category") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = notes, onValueChange = { notes = it }, label = { Text("Notes") }, modifier = Modifier.fillMaxWidth())
                 TextButton(onClick = { favorite = !favorite }) {

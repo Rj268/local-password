@@ -135,6 +135,26 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     var lastRemoved by mutableStateOf<SavedPassword?>(null)
     var pendingReplace by mutableStateOf<SavedPassword?>(null)
     var historyFor by mutableStateOf<SavedPassword?>(null)
+    var pendingSaveReplacement by mutableStateOf<Pair<SavedPassword, String>?>(null)
+        private set
+
+    fun cancelSaveReplacement() { pendingSaveReplacement = null }
+
+    fun confirmSaveReplacement() {
+        if (busy) return
+        val pending = pendingSaveReplacement ?: return
+        val vault = opened ?: return
+        pendingSaveReplacement = null
+        if (vault.items.none { it == pending.first }) {
+            error = "This entry changed. Try saving again."
+            return
+        }
+        try {
+            val next = Vault.replaceEntryPassword(vault.items, pending.first, pending.second)
+            replace(vault, next, "Password replaced. Update the website separately.")
+        } catch (exc: VaultException) { error = exc.message ?: "Password not replaced." }
+    }
+
     var editing by mutableStateOf<SavedPassword?>(null)
     var renaming by mutableStateOf<SavedPassword?>(null)
     var categorizing by mutableStateOf<SavedPassword?>(null)
@@ -395,6 +415,7 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
         pendingRemove = null
         pendingReplace = null
         historyFor = null
+        pendingSaveReplacement = null
         editing = null
         renaming = null
         categorizing = null
@@ -1595,6 +1616,11 @@ class PasswordModel(app: Application) : AndroidViewModel(app) {
     private fun persist(currentOpen: OpenVault) {
         val now = Vault.utcNow()
         val label = Vault.cleanName(name)
+        val existing = currentOpen.items.firstOrNull { it.name.equals(label, ignoreCase = true) }
+        if (existing != null) {
+            pendingSaveReplacement = existing to current
+            return
+        }
         try {
             val item = SavedPassword(name = label, password = current, created = now, modified = now)
             val next = Vault.addEntry(currentOpen.items, item)

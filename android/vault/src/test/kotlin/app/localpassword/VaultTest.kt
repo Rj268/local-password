@@ -6,6 +6,18 @@ import org.junit.jupiter.api.assertThrows
 
 class VaultTest {
     @Test
+    fun intentionalReplacementPreservesDetailsAndHistory() {
+        val old = SavedPassword(name = "Email", password = "old", username = "user", notes = "notes", archived = true)
+        val updated = Vault.replaceEntryPassword(listOf(old), old, "new").first()
+        assertEquals("new", updated.password)
+        assertEquals("user", updated.username)
+        assertEquals("notes", updated.notes)
+        assertEquals(true, updated.archived)
+        assertEquals("old", updated.history.first().password)
+        assertEquals("old", old.password)
+    }
+
+    @Test
     fun duplicateAddPreservesOriginal() {
         val original = SavedPassword(name = "Email", password = "old", archived = true)
         for (name in listOf("Email", " email ")) {
@@ -619,7 +631,7 @@ class VaultTest {
         )
         assertEquals("", Vault.entryDatesLabel(bare))
         assertEquals("Created 2024-01-15", Vault.entryDatesLabel(createdOnly))
-        assertEquals("Created 2024-01-15 Ã‚Â· Changed 2024-03-20", Vault.entryDatesLabel(both))
+        assertEquals("Created 2024-01-15 Ãƒâ€šÃ‚Â· Changed 2024-03-20", Vault.entryDatesLabel(both))
     }
 
     @Test

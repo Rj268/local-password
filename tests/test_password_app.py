@@ -192,6 +192,14 @@ class SavedPasswordTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             password_app.upsert_entry(entries, password_app.SavedPassword("Bank", "new"), previous_name="Email")
 
+    def test_confirmed_save_preserves_details_and_history(self):
+        old = password_app.SavedPassword("Email", "old", username="user", url="https://example.com", notes="notes", archived=True)
+        new = password_app.remember_named([old], "email", ["new"], replace_existing=True)[0]
+        self.assertEqual((new.name, new.password, new.username, new.url, new.notes, new.archived),
+                         ("Email", "new", "user", "https://example.com", "notes", True))
+        self.assertEqual(new.history[0].password, "old")
+        self.assertEqual(old.password, "old")
+
     def test_several_passwords_share_a_numbered_name(self) -> None:
         saved = password_app.remember_named([], "Router", ["one", "two"])
         self.assertEqual([(item.name, item.password) for item in saved], [("Router 1", "one"), ("Router 2", "two")])
@@ -1397,6 +1405,27 @@ class DesktopMirrorTests(unittest.TestCase):
             self.gtk.main_iteration_do(False)
         self.environment.stop()
         self.directory.cleanup()
+
+    def test_duplicate_confirmation_cancel_never_writes(self):
+        w = self.window
+        w.saved = [password_app.SavedPassword("Email", "old")]
+        with patch.object(self.gtk.Dialog, "run", return_value=self.gtk.ResponseType.CANCEL):
+            self.assertIsNone(w._prepare_new_save("Email", ["new"]))
+        self.assertEqual(w.saved[0].password, "old")
+        with patch.object(self.gtk.Dialog, "run", return_value=self.gtk.ResponseType.OK):
+            next_items = w._prepare_new_save("Email", ["new"])
+        self.assertEqual(next_items[0].password, "new")
+        self.assertEqual(next_items[0].history[0].password, "old")
+
+    def test_editor_has_readable_width_scroll_and_masked_password(self):
+        def inspect(dialog):
+            self.assertGreaterEqual(dialog.get_default_size()[0], 600)
+            descendants = _gtk_descendants(dialog.get_content_area())
+            self.assertTrue(any(isinstance(x, self.gtk.ScrolledWindow) and x.get_policy()[1] == self.gtk.PolicyType.AUTOMATIC for x in descendants))
+            self.assertTrue(any(isinstance(x, self.gtk.Entry) and not x.get_visibility() for x in descendants))
+            return self.gtk.ResponseType.CANCEL
+        with patch.object(self.gtk.Dialog, "run", inspect):
+            self.assertIsNone(self.window._edit_entry_dialog(password_app.SavedPassword("Example", "test")))
 
     def test_slider_and_switches_control_generated_passwords(self):
         w = self.window
