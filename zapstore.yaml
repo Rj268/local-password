@@ -1,0 +1,8 @@
+# Public repository ownership verification for Zapstore.
+# Signing credentials belong only in the local publishing environment.
+repository: https://github.com/Rj268/local-password
+pubkey: npub1g7033uda5k2pfqepgt4aaxssl823g45dy3s7jq6865durqfnx38qhhrz5n
+name: Local Password
+summary: Generate passwords and manage logins in a local encrypted vault
+description: Generate strong passwords and passphrases, save logins in an encrypted local vault, and fill them using Android autofill.
+metadata_sources: [github]
