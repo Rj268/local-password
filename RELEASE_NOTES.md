@@ -1,5 +1,14 @@
 # Release notes
 
+## 1.31.10
+
+Android is available on Zapstore. Desktop source and build artifacts are updated; publishing a GitHub desktop release is a separate step.
+
+- Prevent accidental replacement when saving under an existing name, including case-only differences and archived entries.
+- Require explicit confirmation to replace a password while preserving account details and password history.
+- Improve desktop editing with a larger dialog, scrolling, and password visibility controls.
+- Apply duplicate protection and explicit replacement to Android and the shared Windows, macOS, and Linux code.
+
 ## 1.31.8 (Windows desktop)
 
 - Android-style Create, Vault, and Settings flow adapted for desktop, with light and dark emerald themes.

@@ -1,175 +1,54 @@
 # Local Password
 
-Generate a cryptographically secure password on this computer and copy it. The password stays in the window until you close it. Save keeps it under a name. A passphrase you choose locks it, and a recovery key shown once can open it too. Neither is stored. Saved passwords stay hidden until you unlock them. Send vault opens a port only while another device on the same Wi-Fi pulls the encrypted file. The passphrase is not sent.
+Generate passwords and passphrases, manage logins in an encrypted local vault, and fill logins using Android Autofill. Desktop apps share a Create, Vault, and Settings flow across Windows, macOS, and Linux.
 
-A strong password here has about 75 bits of entropy or more. The strength bar fills toward 256 bits. That is the size of the search space for the length and alphabet you chose. An 8-character mix is about 50 bits, so it is reported as weak. Sixteen characters, or six random words, clears the strong line. Forty characters from digits, letters, and punctuation reach 256 bits, as do twenty words from the EFF list. When the length is long enough, the generator places at least one character from each selected group, then fills the rest at random. Each distinct character is equally likely.
+## Downloads
 
-## Install
+- **Desktop:** [GitHub Releases](https://github.com/Rj268/local-password/releases). Choose your operating system and read that release's notes.
+- **Android:** [Local Password on Zapstore](https://zapstore.dev/apps/app.localpassword).
 
-The Debian package installs the local window:
+Source version: **1.31.10** (Android version code **13111**). The last verified GitHub desktop release is **1.31.8**; source updates and workflow artifacts do not automatically update published downloads. Zapstore lists Android **1.31.10**.
 
-```bash
-sudo apt install ./local-password_1.31.8_all.deb
-local-password
-```
-
-For Ubuntu 22.04 or newer, Debian 12 or newer, and compatible Linux Mint releases. Run the command from the folder containing the downloaded package. APT installs its system dependencies: `python3`, `python3-gi`, `python3-gi-cairo`, `gir1.2-gtk-3.0`, `python3-cryptography`, and `xclip`. After install, "Local Password" is also in the application menu. This is a Python package marked `all`; it uses your distribution's native libraries. Other package formats are not included.
-
-The **Build Linux Debian package** workflow tests the desktop code and the installed package under a virtual X11 display on Ubuntu 22.04 and 24.04. It saves the `.deb`, checksums, and verification reports as build artifacts; it does not publish automatically. Native Wayland clipboard behavior and other distributions need separate testing.
-
-Rebuild the package with:
-
-```bash
-sh packaging/build-deb.sh
-```
-
-## Run from a checkout
-
-```bash
-sudo apt install python3-gi gir1.2-gtk-3.0 python3-cryptography xclip
-python3 password_app.py
-```
-
-The desktop app is version **1.31.8**, with **Create**, **Vault**, and **Settings** pages. The layout follows Android's flow while using two columns for the desktop generator. Light, Dark, and System themes are available in Settings.
-
-- **Create:** choose Characters or Words, adjust length and options, and generate a masked password. Show and Copy work on the result. Save to Vault asks for a name. Batch generation lets you name and save individual results.
-- **Vault:** search names, usernames, URLs, notes, and categories. Filter favorites, archived entries, or entries needing attention, and sort by Name, Recent, or Changed. View details expands an account's masked password, notes, dates, and actions. Show, Copy, Edit, Replace, and Manage are available there; the star marks a favorite.
-- **Password health:** local estimates flag weak passwords, identical-password reuse, and entries unchanged for 180 days. Age alone does not mean a password is unsafe. Optional Check breaches uses Have I Been Pwned with a short hash prefix; it does not send your password or vault.
-- **Settings:** choose appearance, clipboard clearing, auto-lock, confirmation before reveal, and lock on open. Change passphrase, encrypted backup/import, CSV import/export, and Send/Receive vault are also available. CSV exports contain plaintext and must be kept private.
-
-The first save asks for a passphrase of at least 8 characters and shows a recovery key once. Write that key down. Either secret opens the encrypted vault; neither is stored as plaintext. If you lose both, the app cannot unlock the vault. A password that you generate but do not save is lost when the app closes.
-
-Vault writes use an atomic replacement so an interrupted save preserves the previous complete file. Windows stores its vault in `%LOCALAPPDATA%\local-password\saved.vault`; Linux uses `~/.local/share/local-password/saved.vault`. The desktop update retains existing vault formats. Windows Hello and browser Autofill are not part of the desktop layout update. See [USER_GUIDE.md](USER_GUIDE.md) for everyday use.
-
-## Command line
-
-The same generator can print a password in a terminal. It still does not write a file.
-
-```bash
-python3 random_password_generator.py
-python3 random_password_generator.py --length 16 --digits --letters --special
-python3 random_password_generator.py --length 20 --quiet
-python3 random_password_generator.py --passphrase
-python3 random_password_generator.py --words 5
-python3 random_password_generator.py --length 20 --count 5 --no-ambiguous
-python3 random_password_generator.py --length 20 --all-special
-python3 random_password_generator.py --length 20 --copy
-```
-
-With no options, the prompts ask whether you want a word passphrase, then a length and which of digits, letters, and special characters to include. The default symbols are safe to paste into a shell. `--all-special` mixes in quotes, backticks, and backslashes. You can leave out characters that are easy to mix up (`0`, `O`, `o`, `1`, `l`, `I`). The last prompt copies to the clipboard.
-
-Pass `--length` on its own to use digits, letters, and special characters. The password is printed on its own line so you can pipe it. Strength and entropy notes go to standard error.
-
-`--passphrase` prints six words from the [EFF large wordlist](https://www.eff.org/files/2016/07/18/eff_large_wordlist.txt), separated by spaces. That list has 7,776 words, so six words are about 78 bits. Five words are about 65 bits and show up as weak. The wordlist is included unmodified. Joseph Bonneau and the Electronic Frontier Foundation created it, and it is used here under [CC BY 3.0 US](https://creativecommons.org/licenses/by/3.0/us/). The EFF does not endorse this project.
-
-Clipboard copy uses `xclip`, or [pyperclip](https://pypi.org/project/pyperclip/) when that package is installed:
-
-```bash
-pip install -r requirements.txt
-```
-
-Generation itself needs only the Python standard library. The window needs GTK 3.
-
-## Windows
-
-The window is ready to build on Windows. Saved passwords go in `%LOCALAPPDATA%\local-password\saved.vault`. Copy uses the Windows clipboard. This Linux machine cannot build or run the `.exe`, because the Windows copies of GTK have to come from a Windows setup.
-
-On a Windows computer:
-
-1. Install [MSYS2](https://www.msys2.org/) and open the **UCRT64** shell.
-2. Install the libraries and the packager:
-
-```bash
-pacman -S --needed \
-  mingw-w64-ucrt-x86_64-gtk3 \
-  mingw-w64-ucrt-x86_64-python \
-  mingw-w64-ucrt-x86_64-python-gobject \
-  mingw-w64-ucrt-x86_64-python-cryptography \
-  mingw-w64-ucrt-x86_64-python-pillow \
-  mingw-w64-ucrt-x86_64-pyinstaller \
-  mingw-w64-ucrt-x86_64-librsvg
-```
-
-Pillow is optional for a normal build when `packaging/windows/local-password.ico` is already in the repo. Install it only if you need to regenerate icons with `python packaging/windows/make_icon.py`.
-
-3. From the project folder, run `bash packaging/windows/build.sh`. The script removes SVG theme icons and leaves a PNG fallback, so the window can open. It also stamps the green key onto `LocalPassword.exe` and writes `dist/windows/LocalPassword-windows.zip`.
-4. Install it into the Start menu and onto the desktop:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File dist/windows/install.ps1 -Source dist/windows/LocalPassword
-```
-
-Open **Local Password** from the Start menu. Dark, on the Settings page, switches the colors and remembers that choice in `%LOCALAPPDATA%\local-password\appearance`. Clipboard clear and auto-lock preferences stay in `%LOCALAPPDATA%\local-password\preferences`. Change passphrase, Export vault, Import vault, Import CSV, Export CSV, Send vault, and Receive vault are on that page too. Those files hold no passwords. Remove the app from Settings, Apps.
-
-The zip is what other people download. Send `dist/windows/LocalPassword-windows.zip`. They unzip it and double-click **Install Local Password**. The program then appears in the Start menu and on the desktop. The libraries stay in the installed folder.
-
-Windows may warn that the program is unrecognized until it is signed with a code-signing certificate. Signing is a separate step after the exe runs. Recipients choose **More info**, then **Run anyway**.
-
-## macOS
-
-The Mac build uses the same desktop interface and vault format as Windows 1.31.8. Separate DMGs target Apple Silicon (`arm64`) and Intel (`x86_64`), on macOS 15 or later. The initial builds are not Developer ID signed or notarized and need testing on a real Mac.
-
-The **Build macOS DMGs** workflow builds both architectures on GitHub-hosted Macs. It can be started from the Actions page and saves the DMGs, checksums, and verification reports as workflow artifacts. The workflow does not publish a release automatically. See [Mac build and installation instructions](packaging/macos/README.md).
-
-## Browser extensions (development preview)
-
-An initial local browser bridge and extension sources for Chrome, Brave and Firefox are in [extensions/README.md](extensions/README.md). They are not part of the published 1.31.8 installers or browser stores. Each request unlocks the local vault in a native window and fills only a user-approved login for the exact HTTPS site. Safari needs a separate macOS containing-app integration and is not implemented in this preview. Real-browser testing is required before public distribution.
-
-## Android
-
-The phone app reads and writes the same `saved.vault` file. Generate a password, name it, and save it. The first save asks for a passphrase and shows a recovery key once. Saved can sort by Name, Recent, or Changed; each entry shows Created and Changed dates; copying a saved password marks it Recent and shows Last used. Favorite stars or clears a row without opening Edit. Duplicate copies a row under a new name. Rename changes only the name without opening Edit. Category sets or clears the category without opening Edit. Username sets or clears the username without opening Edit. Archive hides a row from the main list. Remove can be undone with Undo. Settings holds dark mode, Change passphrase, Send vault, Receive vault, Import vault, Import CSV, Export CSV, and Export vault. Category dialogs offer the same default presets as the desktop app. URL and Notes can be set without opening Edit. Import vault reads a `saved.vault` copied from a computer. Import CSV adds password rows from another manager into the unlocked vault. Export CSV writes those rows as plaintext. Export vault writes that file so it can go back.
-
-Send vault and Receive vault move that encrypted file between a computer and a phone on the same Wi-Fi. One device shows a 6-digit code. The other enters it. The passphrase stays where it already is. If the same name has two different passwords, both are kept and the new one is labeled `(other device)`. The port closes when the send finishes or you cancel it. A lost phone still needs a copy of `saved.vault`; the recovery key opens a file you still have.
-
-Android version **1.31.7** uses version code **13109**, minimum SDK 26, compile SDK 37, and target SDK 36. Install the Android API 37 platform and use JDK 17 or newer compatible with the build tools.
-
-Android includes biometric unlock with passphrase fallback and an Autofill service. Enable Local Password as the Autofill provider in Android settings, save an entry with the matching website URL, then focus a sign-in field. Check the destination shown before selecting a login. These features work with the local encrypted vault.
-
-Build it from `android/` with the Android SDK installed:
-
-```bash
-cd android
-export ANDROID_HOME=/path/to/android-sdk
-./gradlew :vault:test :app:assembleDebug
-```
-
-For Google Play, create an upload keystore with `bash scripts/create-release-keystore.sh` in `android/` (keep `release.keystore` and `keystore.properties` offline — never commit them), then build the App Bundle with `./gradlew :app:bundleRelease`. Upload `app/build/outputs/bundle/release/app-release.aab` in Play Console. Privacy policy URL: this repo’s `PRIVACY.md`.
-
-For sideloading a debug build during development:
-
-```bash
-cd android
-./gradlew :app:assembleDebug
-```
-
-Copy the APK from `app/build/outputs/apk/debug/` to the phone and allow installation from that source. The vault on the phone stays in the app's private storage until you export it.
-
-## Privacy and security
-
-- [`PRIVACY.md`](PRIVACY.md) — what stays on device, optional breach checks
-- [`SECURITY.md`](SECURITY.md) — encryption and honest limits
-- [`PUBLIC_RELEASE.md`](PUBLIC_RELEASE.md) — checklist for shipping publicly
-- [`LICENSE`](LICENSE) — MIT
-
-## Tests
-
-```bash
-python3 -m unittest discover -s tests -t .
-```
-
-## Options
-
-| Flag | Meaning |
+| Platform | Package and status |
 | --- | --- |
-| `-l`, `--length` | Password length from 1 to 1024 |
-| `-d`, `--digits` | Include `0-9` |
-| `-a`, `--letters` | Include `a-z` and `A-Z` |
-| `-s`, `--special` | Include shell-safe symbols such as `@%+=` |
-| `--all-special` | Include every punctuation character, including quotes and backslashes |
-| `--passphrase` | Generate six random words |
-| `-w`, `--words` | Passphrase length in words (1–20) |
-| `--no-ambiguous` | Leave out `0`/`O`, `1`/`l`/`I`, and the vertical bar |
-| `--exclude` | Extra characters to leave out of the alphabet |
-| `-n`, `--count` | How many passwords to generate (1–100) |
-| `-c`, `--copy` | Copy to the clipboard |
-| `-q`, `--quiet` | Print only the password |
+| Windows | Extract the entire ZIP and run **Install Local Password**. Python and supporting libraries are bundled. |
+| macOS | Separate macOS 15+ DMGs for Apple Silicon and Intel. Drag the app into Applications. Builds are not Developer ID signed or notarized. |
+| Intel macOS 12+ | Experimental Monterey workflow; validation on a newer runner does not establish compatibility on a real Monterey Mac. |
+| Linux | Debian package validated on Ubuntu 22.04 and 24.04. APT installs system dependencies. |
+| Android | Android 8.0+ (API 26), with biometric unlock, passphrase fallback, and Autofill. |
+
+On Linux, run `sudo apt install ./local-password_VERSION_all.deb` from the download folder, replacing `VERSION` with the downloaded version. Launch **Local Password** from the application menu or run `local-password`.
+
+## Features
+
+- Character passwords and word passphrases with configurable length and exclusions.
+- Search, categories, favorites, and archived logins.
+- Passphrase or recovery-key unlock, encrypted backups, and vault transfers between devices.
+- Local password-health estimates and optional breach checks.
+- Light, dark, and system appearance, auto-lock, and clipboard-clearing preferences.
+
+Version 1.31.10 adds duplicate-name protection and explicit confirmation for password replacement. Check your installed package's version before relying on these changes.
+
+## Browser integration
+
+Chrome, Brave, and Firefox integration is a [development preview](extensions/README.md) with a separate local native host. It fills only a user-approved login for the exact HTTPS origin. Chrome has had manual fill/cancellation testing; Brave and Firefox still need verification. Safari integration is not implemented.
+
+## Privacy and recovery
+
+Saved passwords stay in a local encrypted vault. Keep an encrypted backup and the recovery key shown during setup. Losing both the passphrase and recovery key prevents unlocking the vault. CSV exports contain plaintext passwords.
+
+Optional breach checks contact Have I Been Pwned using a short hash prefix. Clipboard clearing is best-effort. The project has not published an independent security audit. Read the [privacy policy](PRIVACY.md) and [security notes](SECURITY.md).
+
+## Documentation and development
+
+- [User guide](USER_GUIDE.md)
+- [Release notes](RELEASE_NOTES.md)
+- [Build and test instructions](docs/BUILDING.md)
+- [Command-line generator](docs/COMMAND_LINE.md)
+- [Contributing](CONTRIBUTING.md)
+- [Release checklist](docs/RELEASING.md)
+- [macOS packaging](packaging/macos/README.md)
+
+## License and credits
+
+Local Password uses the [MIT License](LICENSE). The unmodified EFF large wordlist was created by Joseph Bonneau and the Electronic Frontier Foundation and is used under [CC BY 3.0 US](eff_large_wordlist.LICENSE.txt). EFF does not endorse this project.

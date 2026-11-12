@@ -24,7 +24,7 @@ Local Password encrypts saved passwords on this computer. It is not a guarantee 
 
 ## Public distribution status
 
-See `PUBLIC_RELEASE.md` for the full checklist. In short:
+See the [release checklist](docs/RELEASING.md).
 
 1. Privacy policy: shipped as `PRIVACY.md` and summarized in Settings → About.
 2. Independent security review: still needed before claiming an audit.
@@ -33,4 +33,4 @@ See `PUBLIC_RELEASE.md` for the full checklist. In short:
 
 ## Reporting issues
 
-If you find a security problem, describe it privately to the project maintainer before public disclosure when practical. Do not include real vault passphrases, recovery keys, or decrypted password lists in reports.
+Use **Report a vulnerability** on the repository [Security page](https://github.com/Rj268/local-password/security) if available. If private reporting is unavailable, open an issue asking for a private reporting channel without including exploit details or sensitive data. Include the affected version, operating system, and reproduction steps using synthetic data. Never attach real vaults, passphrases, recovery keys, signing keys, or decrypted password lists.

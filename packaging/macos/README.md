@@ -1,12 +1,12 @@
 # Local Password for macOS
 
-This Mac build uses the same desktop code and Create / Vault / Settings layout as Windows 1.31.8.
+This Mac build uses the same desktop code and Create / Vault / Settings layout as Windows and Linux. Source version: 1.31.10; published GitHub DMGs were last verified at 1.31.8.
 
 ## Install
 
 The published `macos15` DMGs require macOS 15 or later. Choose `arm64` for Apple Silicon (M-series), or `x86_64` for Intel. A separate experimental `macos12-x86_64` build targets Intel Macs running macOS 12 Monterey or newer; it must pass the binary audit and still needs testing on an actual Monterey Mac. Open the DMG and drag **Local Password.app** to **Applications**, then eject the disk image and open the app from Applications.
 
-These initial Mac builds have an ad-hoc integrity signature. They are **not Developer ID signed or notarized**, so macOS may block normal opening. They need testing on a real Mac before public distribution. The build does not remove quarantine attributes or disable macOS security settings.
+These initial Mac builds have an ad-hoc integrity signature. They are **not Developer ID signed or notarized**, so macOS may block normal opening. The 1.31.8 Apple Silicon build was manually exercised on an M1 Mac. Intel Monterey still needs testing on a real Monterey Mac; this does not validate every build or feature. The build does not remove quarantine attributes or disable macOS security settings.
 
 ## Vault and settings
 

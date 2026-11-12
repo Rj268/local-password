@@ -28,3 +28,7 @@ local.properties
 *.aab
 *.dmg
 .idea/
+
+# Local publishing credentials and environment configuration
+.env
+.env.*
