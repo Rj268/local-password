@@ -4,16 +4,16 @@ Generate passwords and passphrases, manage logins in an encrypted local vault, a
 
 ## Downloads
 
-- **Desktop:** [GitHub Releases](https://github.com/Rj268/local-password/releases). Choose your operating system and read that release's notes.
+- **Desktop:** [Download v1.31.10](https://github.com/Rj268/local-password/releases/tag/v1.31.10). Choose your operating system and read that release's notes.
 - **Android:** [Local Password on Zapstore](https://zapstore.dev/apps/app.localpassword).
 
-Source version: **1.31.10** (Android version code **13111**). The last verified GitHub desktop release is **1.31.8**; source updates and workflow artifacts do not automatically update published downloads. Zapstore lists Android **1.31.10**.
+Published release: **1.31.10** (Android version code **13111**). GitHub downloads include Windows, macOS, Linux, and the Android APK, plus SHA-256 checksums. Android **1.31.10** is also available on Zapstore.
 
 | Platform | Package and status |
 | --- | --- |
 | Windows | Extract the entire ZIP and run **Install Local Password**. Python and supporting libraries are bundled. |
 | macOS | Separate macOS 15+ DMGs for Apple Silicon and Intel. Drag the app into Applications. Builds are not Developer ID signed or notarized. |
-| Intel macOS 12+ | Experimental Monterey workflow; validation on a newer runner does not establish compatibility on a real Monterey Mac. |
+| Intel macOS 12+ | Experimental Monterey DMG; validation on a newer runner does not establish compatibility on a real Monterey Mac. |
 | Linux | Debian package validated on Ubuntu 22.04 and 24.04. APT installs system dependencies. |
 | Android | Android 8.0+ (API 26), with biometric unlock, passphrase fallback, and Autofill. |
 

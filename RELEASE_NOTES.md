@@ -2,7 +2,7 @@
 
 ## 1.31.10
 
-Android is available on Zapstore. Desktop source and build artifacts are updated; publishing a GitHub desktop release is a separate step.
+Available on [GitHub Releases](https://github.com/Rj268/local-password/releases/tag/v1.31.10) for Windows, macOS, Linux, and Android. Android is also available on [Zapstore](https://zapstore.dev/apps/app.localpassword). The Intel macOS 12 DMG is experimental and still needs testing on an actual Monterey Mac.
 
 - Prevent accidental replacement when saving under an existing name, including case-only differences and archived entries.
 - Require explicit confirmation to replace a password while preserving account details and password history.
